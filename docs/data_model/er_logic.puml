@@ -1,0 +1,74 @@
+@startuml
+
+skinparam nodesep 40
+skinparam ranksep 80
+skinparam class {
+  BackgroundColor transparent
+}
+hide empty members
+hide circle
+
+entity "User" as usr {
+    *id : Integer <<generated>>
+    --
+    *login : String {unique}
+    *name : String
+    *email : String {unique}
+    *password_hash : String
+}
+
+entity "Product" as prod {
+    *id : Integer <<generated>>
+    --
+    *name : String
+    *description : String
+    *price : Integer
+}
+
+entity "Coupon" as cpn {
+    *id : Integer <<generated>>
+    --
+    *code : String {unique}
+    *discount_percent : Integer
+    *expires_at : Timestamp
+    *max_uses : Integer
+    *used_count : Integer
+}
+
+entity "Cart" as cart {
+    *id : Integer <<generated>>
+    --
+    *updated_at : Timestamp
+}
+
+entity "Order" as ord {
+    *id : Integer <<generated>>
+    --
+    *status : String
+    *subtotal : Integer
+    *discount : Integer
+    *total : Integer
+    *created_at : Timestamp
+}
+
+entity "Cart contains" as cart_rel {
+    *quantity : Integer
+}
+
+entity "Order contains" as ord_rel {
+    *quantity : Integer
+}
+
+usr  ||..||  cart  : Owns
+usr  ||..o{  ord   : Places
+
+cart }o..o{  prod  : Contains
+(cart, prod) .. cart_rel
+
+ord  }o..|{  prod  : Contains
+(ord, prod) .. ord_rel
+
+cpn  |o..o{  cart  : Selected in
+cpn  |o..o{  ord   : Applied to
+
+@enduml
