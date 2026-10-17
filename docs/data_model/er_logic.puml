@@ -57,6 +57,7 @@ entity "Cart contains" as cart_rel {
 
 entity "Order contains" as ord_rel {
     *quantity : Integer
+    *unit_price : Integer
 }
 
 usr  ||..||  cart  : Owns
