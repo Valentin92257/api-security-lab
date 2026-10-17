@@ -1,0 +1,82 @@
+Table users {
+  id integer [primary key, increment]
+  login varchar(32) [not null, unique]
+  name varchar(100) [not null]
+  email varchar(256) [not null, unique]
+  password_hash varchar(100) [not null]
+}
+
+Table products {
+  id integer [primary key, increment]
+  name varchar(120) [not null]
+  description text [not null]
+  price integer [not null, note: 'Рубли']
+}
+
+Table coupons {
+  id integer [primary key, increment]
+  code varchar(32) [not null, unique]
+  discount_percent integer [not null, note: '1..100']
+  expires_at timestamptz [not null]
+  max_uses integer [not null, note: '> 0. Общий лимит на всех пользователей']
+  used_count integer [not null, default: 0, note: 'protected: CHECK 0..max_uses. Должен равняться числу заказов с этим купоном']
+}
+
+Table carts {
+  id integer [primary key, increment]
+  user_id integer [not null, unique, note: 'Владелец, одна корзина на пользователя']
+  coupon_id integer [note: 'Выбранный купон, не больше одного']
+  updated_at timestamptz [not null]
+}
+
+Table cart_items {
+  id integer [primary key, increment]
+  cart_id integer [not null]
+  product_id integer [not null]
+  quantity integer [not null, note: 'protected: CHECK 1..99']
+
+  indexes {
+    (cart_id, product_id) [unique]
+  }
+}
+
+Enum order_status {
+  CREATED
+  CANCELLED
+}
+
+Table orders {
+  id integer [primary key, increment]
+  owner_id integer [not null, note: 'Пользователь, оформивший заказ']
+  coupon_id integer [note: 'Применённый купон, не больше одного']
+  status order_status [not null, default: 'CREATED']
+  subtotal integer [not null, note: 'Сумма quantity * unit_price по позициям']
+  discount integer [not null, default: 0, note: 'floor(subtotal * discount_percent / 100)']
+  total integer [not null, note: 'subtotal - discount. protected: CHECK согласованности сумм']
+  created_at timestamptz [not null]
+
+  indexes {
+    (owner_id, created_at)
+  }
+}
+
+Table order_items {
+  id integer [primary key, increment]
+  order_id integer [not null]
+  product_id integer [not null]
+  quantity integer [not null, note: 'protected: CHECK > 0']
+  unit_price integer [not null, note: 'Цена на момент оформления']
+
+  indexes {
+    (order_id, product_id) [unique]
+  }
+}
+
+Ref: carts.user_id - users.id                           // 1:1
+Ref: carts.coupon_id ?>? coupons.id                     // у корзины 0..1 купон, купон в 0..N корзин
+Ref: cart_items.cart_id ?> carts.id [delete: cascade]   // в корзине 0..N позиций
+Ref: cart_items.product_id ?> products.id
+Ref: orders.owner_id ?> users.id                        // у пользователя 0..N заказов
+Ref: orders.coupon_id ?>? coupons.id
+Ref: order_items.order_id > orders.id [delete: cascade] // в заказе 1..N позиций
+Ref: order_items.product_id ?> products.id
