@@ -45,6 +45,7 @@ SELECT 'INV-ORDER-DISCOUNT',
        'order',
        o.id::text,
        'discount=' || o.discount || ' expected=' || COALESCE(o.subtotal::bigint * c.discount_percent / 100, 0)
+           || ' subtotal=' || o.subtotal
 FROM orders o
          LEFT JOIN coupons c ON c.id = o.coupon_id
 WHERE o.discount <> COALESCE(o.subtotal::bigint * c.discount_percent / 100, 0)
