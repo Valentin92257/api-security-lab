@@ -1,0 +1,425 @@
+openapi: 3.1.2
+info:
+  title: API Security Lab – Shop API
+  version: 1.0.0
+  description: |
+    Единый контракт `shop-vulnerable` и `shop-protected`: режимы отличаются только защитой.
+    Контракт описывает ожидаемое поведение, vulnerable намеренно часть его не соблюдает.
+
+    * Деньги: целые рубли, валюта одна (RUB). Скидка = `floor(subtotal * discountPercent / 100)`.
+    * Чужой существующий объект в protected даёт 404, как и несуществующий.
+    * Мутирующие запросы защищены от replay: gateway требует `X-Request-Nonce`.
+servers:
+  - url: http://gateway:8081/api/v1
+    description: vulnerable
+  - url: http://gateway:8082/api/v1
+    description: protected
+
+security:
+  - bearerAuth: [ ]
+
+paths:
+  /auth/register:
+    post:
+      operationId: register
+      summary: Регистрация
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '200':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /auth/login:
+    post:
+      operationId: login
+      summary: Вход, выдача access JWT
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Токен выдан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Token' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /users/{userId}:
+    get:
+      operationId: getUser
+      summary: Профиль по id
+      parameters:
+        - { $ref: '#/components/parameters/UserId' }
+      responses:
+        '200':
+          description: Профиль
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /products:
+    get:
+      operationId: listProducts
+      summary: Каталог товаров
+      responses:
+        '200':
+          description: Все товары
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Product' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /products/{productId}:
+    get:
+      operationId: getProduct
+      summary: Карточка товара
+      parameters:
+        - { $ref: '#/components/parameters/ProductId' }
+      responses:
+        '200':
+          description: Товар
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cart:
+    get:
+      operationId: getCart
+      summary: Моя корзина
+      responses:
+        '200':
+          description: Корзина
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /cart/items:
+    post:
+      operationId: addCartItem
+      summary: Добавить товар (если уже есть, количество увеличивается)
+      parameters:
+        - { $ref: '#/components/parameters/RequestNonce' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddCartItemRequest' }
+      responses:
+        '201':
+          description: Корзина после изменения
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cart/items/{productId}:
+    patch:
+      operationId: updateCartItem
+      summary: Изменить количество
+      parameters:
+        - { $ref: '#/components/parameters/ProductId' }
+        - { $ref: '#/components/parameters/RequestNonce' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCartItemRequest' }
+      responses:
+        '200':
+          description: Корзина после изменения
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteCartItem
+      summary: Удалить позицию
+      parameters:
+        - { $ref: '#/components/parameters/ProductId' }
+        - { $ref: '#/components/parameters/RequestNonce' }
+      responses:
+        '200':
+          description: Корзина после изменения
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cart/coupon:
+    put:
+      operationId: applyCoupon
+      summary: Выбрать купон (не больше одного); списывается при оформлении заказа
+      parameters:
+        - { $ref: '#/components/parameters/RequestNonce' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplyCouponRequest' }
+      responses:
+        '200':
+          description: Корзина с купоном
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: removeCoupon
+      summary: Убрать купон
+      parameters:
+        - { $ref: '#/components/parameters/RequestNonce' }
+      responses:
+        '200':
+          description: Корзина без купона
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Оформить заказ из корзины
+      description: |
+        Атомарно создаёт заказ, списывает купон (+1 к `used_count`) и очищает корзину.
+        Повторный или одновременный запрос получает 409 `CART_EMPTY`.
+        `quotedTotal` – сумма, которую ожидает клиент, а не источник цены: protected при
+        несовпадении с серверным расчётом отвечает 409 `PRICE_CHANGED`, vulnerable ей доверяет.
+      parameters:
+        - { $ref: '#/components/parameters/RequestNonce' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateOrderRequest' }
+      responses:
+        '201':
+          description: Заказ создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      operationId: listOrders
+      summary: Мои заказы
+      responses:
+        '200':
+          description: Заказы
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Order' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Заказ по id (цель BOLA; в protected только свой)
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Заказ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
+    RequestNonce:
+      name: X-Request-Nonce
+      in: header
+      required: true
+      description: Одноразовое значение запроса (защита от replay); повтор отклоняется
+      schema: { type: string, minLength: 16, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+
+  responses:
+    BadRequest:
+      description: Bad Request
+    Unauthorized:
+      description: Unauthorized
+    NotFound:
+      description: Not Found
+    TooManyRequests:
+      description: TooManyRequests
+      headers:
+        Retry-After:
+          description: Секунды до следующей попытки
+          schema: { type: integer, minimum: 0 }
+    Conflict:
+      description: Конфликт состояния или бизнес-правила; причина в `reasonCode`
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Conflict' }
+
+  schemas:
+    Conflict:
+      type: object
+      required: [ reasonCode ]
+      properties:
+        reasonCode:
+          type: string
+          enum: [ LOGIN_TAKEN, PRICE_CHANGED, COUPON_EXPIRED, COUPON_EXHAUSTED, CART_EMPTY ]
+
+    RegisterRequest:
+      type: object
+      required: [ login, password, name, email ]
+      properties:
+        login: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 8, maxLength: 72, format: password }
+        name: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email, maxLength: 256 }
+
+    LoginRequest:
+      type: object
+      required: [ login, password ]
+      properties:
+        login: { type: string, minLength: 3, maxLength: 32 }
+        password: { type: string, minLength: 1, maxLength: 72, format: password }
+
+    Token:
+      type: object
+      required: [ accessToken ]
+      properties:
+        accessToken: { type: string }
+
+    User:
+      type: object
+      required: [ id, login, name, email ]
+      description: Хеш пароля не возвращается
+      properties:
+        id: { type: integer }
+        login: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+
+    Product:
+      type: object
+      required: [ id, name, description, price ]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string }
+        price: { type: integer, minimum: 1, description: Рубли }
+
+    AddCartItemRequest:
+      type: object
+      required: [ productId, quantity ]
+      properties:
+        productId: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+
+    UpdateCartItemRequest:
+      type: object
+      required: [ quantity ]
+      properties:
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+
+    ApplyCouponRequest:
+      type: object
+      required: [ code ]
+      properties:
+        code: { type: string, minLength: 1, maxLength: 32 }
+
+    CartItem:
+      type: object
+      required: [ productId, quantity ]
+      properties:
+        productId: { type: integer }
+        quantity: { type: integer, minimum: 1, maximum: 99 }
+
+    Cart:
+      type: object
+      required: [ items ]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CartItem' }
+        couponId: { type: integer }
+
+    CreateOrderRequest:
+      type: object
+      properties:
+        quotedTotal:
+          type: integer
+          minimum: 0
+          description: Опционально. Сумма, которую клиент ожидает заплатить.
+
+    OrderItem:
+      type: object
+      required: [ productId, quantity, unitPrice ]
+      properties:
+        productId: { type: integer }
+        quantity: { type: integer, minimum: 1 }
+        unitPrice: { type: integer, minimum: 1, description: Цена на момент заказа }
+
+    Order:
+      type: object
+      required: [ id, ownerId, status, items, subtotal, discount, total, createdAt ]
+      properties:
+        id: { type: integer }
+        ownerId: { type: integer }
+        status: { type: string, enum: [ CREATED, CANCELLED ] }
+        couponId: { type: integer }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/OrderItem' }
+        subtotal: { type: integer, minimum: 0 }
+        discount: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
