@@ -30,13 +30,12 @@ Table carts {
 }
 
 Table cart_items {
-  id integer [primary key, increment]
   cart_id integer [not null]
   product_id integer [not null]
   quantity integer [not null, note: 'protected: CHECK 1..99']
 
   indexes {
-    (cart_id, product_id) [unique]
+    (cart_id, product_id) [pk]
   }
 }
 
@@ -61,14 +60,13 @@ Table orders {
 }
 
 Table order_items {
-  id integer [primary key, increment]
   order_id integer [not null]
   product_id integer [not null]
   quantity integer [not null, note: 'protected: CHECK > 0']
   unit_price integer [not null, note: 'Цена на момент оформления']
 
   indexes {
-    (order_id, product_id) [unique]
+    (order_id, product_id) [PK]
   }
 }
 
