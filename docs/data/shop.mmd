@@ -1,0 +1,108 @@
+erDiagram
+    %% Logical event references are documented separately.
+    users {
+        bigint id PK "required"
+        varchar login "required"
+        varchar name "required"
+        varchar email "required"
+        varchar password_hash "required"
+    }
+    products {
+        bigint id PK "required"
+        varchar name "required"
+        text description "required"
+        bigint price "required"
+        boolean published "required"
+        bigint catalog_version "required"
+    }
+    coupons {
+        bigint id PK "required"
+        varchar code "required"
+        integer discount_percent "required"
+        timestamptz expires_at "required"
+        bigint max_uses "required"
+        bigint used_count "required"
+        bigint terms_version "required"
+    }
+    carts {
+        bigint id PK "required"
+        bigint user_id FK "required"
+        bigint coupon_id FK "nullable"
+        bigint revision "required"
+        timestamptz updated_at "required"
+    }
+    cart_items {
+        bigint cart_id PK,FK "required"
+        bigint product_id PK,FK "required"
+        integer quantity "required"
+    }
+    checkout_intents {
+        uuid id PK "required"
+        bigint user_id FK "required"
+        bigint cart_id FK "required"
+        bigint cart_revision "required"
+        integer snapshot_version "required"
+        jsonb snapshot "required"
+        bytea fingerprint "required"
+        timestamptz created_at "required"
+        timestamptz expires_at "required"
+        bigint consumed_order_id FK "nullable"
+    }
+    orders {
+        bigint id PK "required"
+        bigint user_id FK "required"
+        bigint cart_id FK "required"
+        bigint cart_revision "required"
+        uuid intent_id FK "required"
+        varchar status "required"
+        bigint subtotal "required"
+        bigint discount "required"
+        bigint total "required"
+        bigint coupon_id FK "nullable"
+        varchar coupon_code "nullable"
+        integer coupon_percent "nullable"
+        timestamptz coupon_expires_at "nullable"
+        bigint coupon_terms_version "nullable"
+        timestamptz created_at "required"
+        bytea idempotency_key_hash "required"
+        bytea request_fingerprint "required"
+        jsonb response_body "required"
+    }
+    order_items {
+        bigint order_id PK,FK "required"
+        bigint product_id PK,FK "required"
+        integer quantity "required"
+        varchar name_snapshot "required"
+        bigint unit_price "required"
+        bigint catalog_version "required"
+    }
+    security_outbox {
+        uuid event_id PK "required"
+        uuid producer_epoch "required"
+        jsonb payload "required"
+        timestamptz created_at "required"
+        timestamptz delivered_at "nullable"
+        integer retry_count "required"
+        timestamptz next_attempt_at "required"
+    }
+    execution_ledger {
+        uuid request_id PK "required"
+        uuid producer_epoch "required"
+        varchar state "required"
+        uuid terminal_event_id "nullable"
+        timestamptz started_at "required"
+        timestamptz finished_at "nullable"
+    }
+    users ||--o| carts : "user_id"
+    coupons |o--o{ carts : "coupon_id"
+    carts ||--o{ cart_items : "cart_id"
+    products ||--o{ cart_items : "product_id"
+    users ||--o{ checkout_intents : "user_id"
+    carts ||--o{ checkout_intents : "cart_id"
+    orders |o--o{ checkout_intents : "consumed_order_id"
+    users ||--o{ orders : "user_id"
+    carts ||--o{ orders : "cart_id"
+    checkout_intents ||--o{ orders : "intent_id"
+    coupons |o--o{ orders : "coupon_id"
+    orders ||--o{ order_items : "order_id"
+    products ||--o{ order_items : "product_id"

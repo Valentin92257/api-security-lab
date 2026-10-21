@@ -1,0 +1,157 @@
+// Physical model; business-only constraints in shop-protected.sql.
+// Cross-database references are logical and are not rendered as FK.
+Table users {
+  id bigint [pk, not null, increment, note: 'Идентификатор пользователя']
+  login varchar(32) [not null, note: 'Нормализованный login']
+  name varchar(100) [not null, note: 'Отображаемое имя']
+  email varchar(254) [not null, note: 'Нормализованный email']
+  password_hash varchar(255) [not null, note: 'PasswordEncoder hash; недоступен evaluator']
+  indexes {
+    (login) [unique]
+    (email) [unique]
+  }
+  Note: 'Учетная запись; регистрация и создание корзины атомарны.'
+}
+Table products {
+  id bigint [pk, not null, increment, note: 'Идентификатор товара']
+  name varchar(120) [not null, note: 'Название']
+  description text [not null, default: `''`, note: 'Описание']
+  price bigint [not null, note: 'Цена в целых рублях']
+  published boolean [not null, default: `false`, note: 'Видимость в нормативном API']
+  catalog_version bigint [not null, default: `1`, note: 'Версия условий товара']
+  indexes {
+  }
+  Note: 'Текущий каталог; изменения цены увеличивают catalog_version.'
+}
+Table coupons {
+  id bigint [pk, not null, increment, note: 'Идентификатор купона']
+  code varchar(32) [not null, note: 'Нормализованный код']
+  discount_percent integer [not null, note: 'Процент скидки']
+  expires_at timestamptz [not null, note: 'Исключительная граница по бизнес-часам']
+  max_uses bigint [not null, note: 'Лимит погашений']
+  used_count bigint [not null, default: `0`, note: 'Счетчик погашений']
+  terms_version bigint [not null, default: `1`, note: 'Версия условий']
+  indexes {
+    (code) [unique]
+  }
+  Note: 'Текущие условия; счетчик не меняет terms_version.'
+}
+Table carts {
+  id bigint [pk, not null, increment, note: 'Идентификатор корзины']
+  user_id bigint [not null, note: 'Владелец']
+  coupon_id bigint [note: 'Выбранный купон']
+  revision bigint [not null, default: `0`, note: 'Версия после фактического изменения']
+  updated_at timestamptz [not null, note: 'Бизнес-время изменения']
+  indexes {
+    (user_id) [unique]
+    (coupon_id)
+  }
+  Note: 'Не более одной корзины на пользователя; наличие обеспечивает регистрация.'
+}
+Table cart_items {
+  cart_id bigint [not null, note: 'Корзина']
+  product_id bigint [not null, note: 'Товар']
+  quantity integer [not null, note: 'Количество; бизнес-границы только protected']
+  indexes {
+    (cart_id, product_id) [pk]
+    (product_id)
+  }
+  Note: 'Позиции текущей корзины.'
+}
+Table checkout_intents {
+  id uuid [pk, not null, note: 'Случайный UUID, создается приложением']
+  user_id bigint [not null, note: 'Владелец']
+  cart_id bigint [not null, note: 'Корзина']
+  cart_revision bigint [not null, note: 'Версия корзины на момент расчета']
+  snapshot_version integer [not null, default: `1`, note: 'Версия структуры snapshot']
+  snapshot jsonb [not null, note: 'Позиции, цены, версии, купон и суммы']
+  fingerprint bytea [not null, note: 'SHA-256 канонического snapshot']
+  created_at timestamptz [not null, note: 'Бизнес-время создания']
+  expires_at timestamptz [not null, note: 'Бизнес-время истечения']
+  consumed_order_id bigint [note: 'Первый потребивший заказ; NULL до успеха']
+  indexes {
+    (cart_id, cart_revision)
+    (user_id)
+    (consumed_order_id)
+  }
+  Note: 'Снимок расчета; не является независимым эталоном evaluator.'
+}
+Table orders {
+  id bigint [pk, not null, increment, note: 'Идентификатор заказа']
+  user_id bigint [not null, note: 'Владелец']
+  cart_id bigint [not null, note: 'Исходная корзина']
+  cart_revision bigint [not null, note: 'Потребленная версия корзины']
+  intent_id uuid [not null, note: 'Исходный intent']
+  status varchar(16) [not null, default: `'CREATED'`, note: 'Единственный статус версии 1']
+  subtotal bigint [not null, note: 'Стоимость до скидки']
+  discount bigint [not null, note: 'Скидка в рублях']
+  total bigint [not null, note: 'Итог в рублях']
+  coupon_id bigint [note: 'Купон; NULL вместе со всем snapshot']
+  coupon_code varchar(32) [note: 'Код на момент оформления']
+  coupon_percent integer [note: 'Процент на момент оформления']
+  coupon_expires_at timestamptz [note: 'Срок на момент оформления']
+  coupon_terms_version bigint [note: 'Версия условий']
+  created_at timestamptz [not null, note: 'Бизнес-время принятия решения checkout']
+  idempotency_key_hash bytea [not null, note: 'HMAC-SHA256 исходного key; scope POST /orders + user']
+  request_fingerprint bytea [not null, note: 'SHA-256 канонического request с версией и route']
+  response_body jsonb [not null, note: 'Сохраненный Order response; status всегда 201']
+  indexes {
+    (user_id, created_at, id)
+    (intent_id)
+    (cart_id, cart_revision)
+    (coupon_id)
+    (user_id, idempotency_key_hash)
+  }
+  Note: 'Неизменяемый эффект checkout, успешный ответ и погашение купона; один купон на заказ, отмен нет.'
+}
+Table order_items {
+  order_id bigint [not null, note: 'Заказ']
+  product_id bigint [not null, note: 'Исходный товар']
+  quantity integer [not null, note: 'Количество']
+  name_snapshot varchar(120) [not null, note: 'Название при оформлении']
+  unit_price bigint [not null, note: 'Цена при оформлении']
+  catalog_version bigint [not null, note: 'Версия цены']
+  indexes {
+    (order_id, product_id) [pk]
+    (product_id)
+  }
+  Note: 'Неизменяемые позиции; цена и название зафиксированы.'
+}
+Table security_outbox {
+  event_id uuid [pk, not null, note: 'Глобальный UUID события']
+  producer_epoch uuid [not null, note: 'Зарегистрированная эпоха; логическая межбазовая ссылка']
+  payload jsonb [not null, note: 'CloudEvents v1, без секретов']
+  created_at timestamptz [not null, note: 'Реальное время записи']
+  delivered_at timestamptz [note: 'Подтверждение идентичного события в audit']
+  retry_count integer [not null, default: `0`, note: 'Количество повторов']
+  next_attempt_at timestamptz [not null, note: 'Следующая попытка доставки']
+  indexes {
+    (producer_epoch)
+  }
+  Note: 'Неизменяемое содержимое события, изменяемое состояние доставки.'
+}
+Table execution_ledger {
+  request_id uuid [pk, not null, note: 'UUID HTTP-attempt']
+  producer_epoch uuid [not null, note: 'Эпоха принятой работы']
+  state varchar(16) [not null, default: `'ACTIVE'`, note: 'ACTIVE / COMPLETED / ABORTED']
+  terminal_event_id uuid [note: 'Логическая ссылка; не FK на удаляемую outbox']
+  started_at timestamptz [not null, note: 'Реальное время принятия']
+  finished_at timestamptz [note: 'Реальное время terminal transition']
+  indexes {
+    (producer_epoch, state)
+  }
+  Note: 'ACTIVE фиксируется до исполнения; terminal вместе с outbox.'
+}
+Ref: carts.user_id > users.id [delete: restrict]
+Ref: carts.coupon_id > coupons.id [delete: restrict]
+Ref: cart_items.cart_id > carts.id [delete: cascade]
+Ref: cart_items.product_id > products.id [delete: restrict]
+Ref: checkout_intents.user_id > users.id [delete: restrict]
+Ref: checkout_intents.cart_id > carts.id [delete: restrict]
+Ref: checkout_intents.consumed_order_id > orders.id [delete: restrict]
+Ref: orders.user_id > users.id [delete: restrict]
+Ref: orders.cart_id > carts.id [delete: restrict]
+Ref: orders.intent_id > checkout_intents.id [delete: restrict]
+Ref: orders.coupon_id > coupons.id [delete: restrict]
+Ref: order_items.order_id > orders.id [delete: cascade]
+Ref: order_items.product_id > products.id [delete: restrict]

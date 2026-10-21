@@ -76,7 +76,7 @@ Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; од�
 
 Клиент получает Cart, создаёт intent с её revision и отправляет `POST /orders` с intentId, total из intent как quotedTotal и новым key. Intent хранит owner, cart/revision, позиции, версии цен/купона, fingerprint и expiry. TTL по умолчанию 120 секунд по бизнес-часам стенда. Корзина не резервируется; любое её реальное изменение делает intent неактуальным.
 
-Key действует в scope `(authenticated user, method, route, key)`. Fingerprint — SHA-256 версии контракта, маршрута и канонического разобранного тела: одинаковые типизированные значения при разном порядке полей дают один fingerprint. JWT/requestId/trace не включаются. Успешная запись key сохраняет status/body/orderId; неуспешная транзакция откатывается вместе с незавершённой записью key.
+Key действует в scope `(authenticated user, method, route, key)`. Fingerprint — SHA-256 версии контракта, маршрута и канонического разобранного тела: одинаковые типизированные значения при разном порядке полей дают один fingerprint. JWT/requestId/trace не включаются. Успешный заказ сохраняет idempotency_key_hash, request_fingerprint и response_body; статус успешного ответа всегда 201. Неуспешная транзакция не оставляет заказ или отдельную запись key.
 
 | Условие | Результат protected |
 |---|---|
@@ -126,15 +126,13 @@ Problem содержит только type:string URI, title:string, status:inte
 | `coupons` | id PK; code varchar(32) UNIQUE; discount_percent integer; expires_at; max_uses/used_count bigint; terms_version bigint |
 | `carts` | id PK; user_id FK UNIQUE; coupon_id FK?; revision; updated_at |
 | `cart_items` | cart_id FK, product_id FK, quantity integer; PK(cart_id, product_id) |
-| `orders` | id PK; user_id/cart_id FK; cart_revision; intent_id FK; status CREATED; subtotal/discount/total; coupon_id FK?; coupon_code/percent/expires_at/terms_version snapshot?; created_at |
+| `orders` | id PK; user_id/cart_id FK; cart_revision; intent_id FK; status CREATED; subtotal/discount/total; coupon_id FK?; coupon_code/percent/expires_at/terms_version snapshot?; created_at; idempotency_key_hash; request_fingerprint; response_body |
 | `order_items` | order_id/product_id FK; quantity; name_snapshot; unit_price; catalog_version; PK(order_id, product_id) |
 | `checkout_intents` | id UUID PK; user_id/cart_id FK; cart_revision; versioned snapshot JSONB; fingerprint; expires_at; consumed_order_id FK? |
-| `idempotency_records` | user_id FK, method, route, key_hash; fingerprint; order_id FK?, response_status/body?; в protected UNIQUE(user_id, method, route, key_hash) |
-| `coupon_redemptions` | id PK; coupon_id/order_id/intent_id FK; redeemed_at; UNIQUE(order_id) |
 | `security_outbox` | event_id UUID PK; producer_epoch UUID; payload JSONB; created_at; delivered_at?; retry_count; next_attempt_at |
 | `execution_ledger` | request_id UUID PK; producer_epoch; state ACTIVE/COMPLETED/ABORTED; terminal_event_id?; started_at; finished_at? |
 
-Snapshot intent содержит revision, items с ценами/catalog versions, coupon с условиями/версией и все суммы. Coupon snapshot заказа nullable целиком: без купона discount=0. Связь order→intent создаётся до установки consumed_order_id; pending idempotency row никогда не коммитится без успешного response. Индексы: orders(user_id, created_at, id), cart_items по PK, outbox по недоставленным rows, ledger по epoch/state.
+Snapshot intent содержит revision, items с ценами/catalog versions, coupon с условиями/версией и все суммы. Coupon snapshot заказа nullable целиком: без купона discount=0. Связь order→intent создаётся до установки consumed_order_id; успешный response_body хранится в самом заказе. Индексы: orders(user_id, created_at, id), cart_items по PK, outbox по недоставленным rows, ledger по epoch/state.
 
 Protected constraints: quantity 1…99, положительная unit_price, неотрицательные суммы, discount≤subtotal, total=subtotal−discount, used_count от 0 до max_uses; UNIQUE(intent_id) и UNIQUE(cart_id, cart_revision) в orders. Общие PK/FK, уникальность пользователей и допустимые параметры каталога/купона сохраняются в обоих режимах. Защитные constraints устанавливаются только protected migration set. Межтабличная согласованность обеспечивается транзакциями и проверяется отдельно.
 
@@ -142,12 +140,12 @@ Protected constraints: quantity 1…99, положительная unit_price, �
 
 Все mutations корзины берут её row lock. При READ COMMITTED порядок protected checkout фиксирован:
 
-1. Занять/проверить key; для прежнего успеха сравнить fingerprint и вернуть сохранённый ответ.
+1. Взять транзакционный advisory lock scope ключа, затем прочитать orders; для прежнего успеха сравнить fingerprint и вернуть сохранённый ответ.
 2. Заблокировать cart, затем intent. Проверить owner, consumed state, revision и expiry.
 3. Сверить snapshot с текущим составом, catalog/terms versions и quotedTotal. Бизнес-время должно быть строго меньше expiry: равенство уже означает истечение.
 4. Для купона выполнить условное атомарное увеличение used_count при действующем сроке и остатке; ноль обновлённых строк означает конфликт.
-5. Создать order/items/redemption, отметить intent consumed, очистить корзину и увеличить revision.
-6. Сохранить response key и событие операции в outbox; commit всех изменений вместе.
+5. Создать order/items, отметить intent consumed, очистить корзину и увеличить revision.
+6. Проверить сохраненный в order response_body, обновить terminal execution ledger и добавить событие операции в outbox; commit всех изменений вместе.
 
 Порядок locks: key → cart → intent → coupon, внутри одного типа — возрастающий id. Обратный захват не допускается. Ошибка до commit откатывает всё; ошибка ответа после commit разрешается retry того же key. Успешная бизнес-операция и её outbox атомарны; событие отказа после rollback пишется отдельной короткой audit-транзакцией. Redis не участвует в защите однократного эффекта.
 
@@ -161,15 +159,278 @@ Vulnerable использует именованные стратегии: пр�
 | Допустимые количества, непустой order | Readonly cart/order items |
 | Верные цены и скидки | Независимый расчёт по trusted catalog/terms snapshot соответствующей версии |
 | Корректные суммы | Сумма строк и целочисленная формула discount/total |
-| Купон | Время операции < expiry; used_count равен baseline + новым redemptions и не превышает max_uses; один redemption на order |
+| Купон | Время операции < expiry; used_count равен baseline + числу новых заказов с купоном и не превышает max_uses; один купон на order |
 | Один эффект | Не более одного нового order на intent и cart revision |
 | Видимость каталога | Draft canary отсутствует в нормативной выдаче |
 | Доступ после login | Выданный token действительно открывает профиль; один status 200 недостаточен |
 
 Evaluator не вызывает production calculator и не доверяет локальному признаку «проверка пройдена». Исторические цены/купоны сверяются с независимым snapshot, а не с текущим каталогом. Успех атакующего и нарушение гарантии различаются: первая корректная пара credentials может дать доступ при правильно работающем JWT.
 
-Генератор fixture v1 создаёт 24 синтетических пользователя с корзинами, 12 опубликованных товаров и один draft canary. Пять купонных состояний: действующий, expired, exhausted, последнее доступное использование, 100% скидка. Начальная история обеспечивает собственные/чужие orders и согласованные redemptions; каждому order назначены отдельные исторические intent/cart revisions. Хеши паролей формирует PasswordEncoder; пустые hashes запрещены.
+Генератор fixture v1 создаёт 24 синтетических пользователя с корзинами, 12 опубликованных товаров и один draft canary. Пять купонных состояний: действующий, expired, exhausted, последнее доступное использование, 100% скидка. Начальная история обеспечивает собственные/чужие orders и согласованные счетчики купонов; каждому order назначены отдельные исторические intent/cart revisions. Хеши паролей формирует PasswordEncoder; пустые hashes запрещены.
 
 Credential workload — 200 попыток с тремя корректными парами разных аккаунтов. Порядок, synthetic actors и значения воспроизводятся по seed; повторяемость password hash байт-в-байт не нужна. Manifest хранит version/hash, seed, businessTimeBase, ids/owners, начальные counts и snapshots, без паролей в экспорте. Перед RUNNING проверяется исходная согласованность. Catalog/terms не изменяются внутри прогона; бизнес-часы имеют одинаковую UTC-базу paired runs и монотонное продвижение, JWT использует реальные часы.
 
 Подготовка/reset доступны только control через lab-admin, после завершения всех операций. Runtime shop не имеет TRUNCATE. Конечное состояние и evidence сохраняются до сброса.
+
+## Миграции и жизненный цикл данных
+
+Исполняемая исходная схема PostgreSQL 17 находится в `data/shop-schema.sql`; только для `shop_protected` после неё применяется `data/shop-protected.sql`. Обе базы получают `data/shop-invariants.sql`. Это начальные миграции пустых баз, не повторно запускаемые repair scripts. В Flyway их переносят в db/shop/common, db/shop/protected и db/lab с однозначными version numbers; один SQL-файл соответствует одной миграции, повторно примененные версии не редактируются. Их выполняет migration owner; runtime-приложения не получают DDL. SQL не создаёт и не наполняет фикстуры.
+
+Порядок создания: все таблицы → PK/UNIQUE/CHECK → FK после появления обеих сторон → индексы → protected-only constraints → readonly функции oracle. Поэтому цикл `orders.intent_id` ↔ `checkout_intents.consumed_order_id` не требует отключения FK. При оформлении intent уже существует с consumed_order_id=NULL, затем вставляется order, после чего обновляется intent. При reset обе стороны очищаются административно в закрытой эпохе после сохранения доказательств; обычного API удаления истории нет.
+
+Общие ограничения обеспечивают структурную целостность: типы, NOT NULL, идентификаторы, PK/FK, уникальность логинов/email/кодов, параметры каталога. Ограничения количества, итогов, счетчика купона и одноразового эффекта находятся только в protected migration. Общая схема не должна случайно устранять учебную уязвимость. Hash ключа, fingerprint и response_body входят в orders; UNIQUE(user_id,idempotency_key_hash) действует только в protected. Scope method/route не требует колонок: идемпотентность предусмотрена только для POST /api/v1/orders.
+
+FK по умолчанию запрещают удаление родителя. CASCADE применяется только к составным частям `cart_items` и `order_items`; это не разрешение runtime удалять заказы. UNIQUE(carts.user_id) означает «не более одной корзины», а наличие корзины обеспечивает атомарная регистрация. Непустой заказ, максимум 100 разных позиций, совпадение owner и сумма всех строк — межстрочные условия: их проверяет транзакционный код и независимый oracle. Они не выдаются за обычные CHECK одной строки.
+
+Индексы PK/UNIQUE создаёт PostgreSQL. Дополнительные индексы перечислены в словаре ниже; `outbox_pending_idx(next_attempt_at,event_id) WHERE delivered_at IS NULL` обслуживает dispatcher. `execution_ledger(producer_epoch,state)` обслуживает reconciliation. Для reverse lookup всех неуникальных FK предусмотрены индексы, где они нужны runtime-запросам; индексы не заменяют блокировок.
+
+### Snapshot, время и идентификаторы
+
+`snapshot_version=1` задаёт JSONB intent: `cartRevision`, `items:[{productId,name,quantity,unitPrice,catalogVersion}]`, `coupon:null|{id,code,discountPercent,expiresAt,termsVersion}`, `subtotal`, `discount`, `total`, `currency:"RUB"`. Поля обязательны, кроме отсутствующего купона, представленного целиком null. Fingerprint считается над каноническим JSON UTF-8, включающим версию; повторная сериализация не должна менять hash. Это snapshot расчёта shop, а не независимый эталон.
+
+Объект `response_body` содержит полный нормативный Order response. Raw idempotency key не хранится: `orders.idempotency_key_hash` — HMAC-SHA256 ключом стабильным на весь жизненный цикл фикстуры/отчёта. Fingerprint тела и hashes конфигураций — SHA-256 (32 байта SQL bytea, 64 hex в JSON). UUID не имеют смыслового кодирования target/scenario. Все бизнес-Id ограничены безопасным целочисленным диапазоном API; технические UUID не преобразуются в bigint.
+
+Времена корзины, intent, заказа и погашения задаются бизнес-часами. Checkout использует один captured business timestamp для проверки срока, `orders.created_at`, которое одновременно является временем погашения купона. Для купона и intent требуется `now < expires_at`; равенство уже означает истечение. Время событий, ledger, outbox, leases и HTTP — реальное UTC. Разность этих двух шкал не применяется для измерения latency.
+
+### Обязательная транзакционная дисциплина
+
+Порядок блокировок protected: idempotency scope → cart → intent → coupon. На успешный повтор сохранённый ответ возвращается до проверки истёкшего intent. Ключ сериализуется через pg_advisory_xact_lock(lockId) до чтения orders по user_id и полному idempotency_key_hash; чтение выполняется отдельным statement READ COMMITTED после получения lock. Блокировка транзакционная, освобождается при commit/rollback. lockId — первые 8 байт SHA-256 канонического UTF-8 JSON-массива ["checkout-v1", userId как десятичная строка, lowercase hex key hash], интерпретированные как signed big-endian long. Коллизия сокращенного lockId только сериализует разные ключи; решение принимается по полному hash и уникальному индексу, не по lockId. Timeout ожидания дает OPERATION_IN_PROGRESS, а не новую попытку создать заказ.
+
+Условное обновление купона проверяет остаток и срок в том же UPDATE, в котором увеличивает счетчик. Order/items с полями key/response_body, отметка intent, очистка корзины, увеличенная revision, terminal ledger и событие outbox коммитятся вместе. До транзакции durable ACTIVE ledger уже существует. После rollback ошибка фиксируется отдельной короткой транзакцией ledger/outbox. Недоставленное событие нельзя удалить или признать доставленным без подтверждения идентичного payload в audit.
+
+`terminal_event_id` — логическая ссылка, не FK на outbox: доставленная outbox-запись может быть очищена позже, тогда как audit остается доказательством. UUID события сохраняется при retry. Очистка возможна только после закрытия/экспорта и проверки coverage; time-based TTL не должен уничтожать незавершенное evidence.
+
+### Почему магазину достаточно 10 таблиц
+
+users, products, coupons, carts, cart_items, checkout_intents, orders, order_items, security_outbox, execution_ledger. Заказ хранит успешный ответ и ключ, поэтому отдельной таблицы результатов идемпотентности нет. Заказ с coupon_id одновременно фиксирует расход купона; отдельный журнал погашений потребуется только при добавлении отмен, возвратов или нескольких погашений на один заказ.
+
+Перед INSERT order приложение получает id из identity sequence, строит полный Order response по серверному snapshot и вставляет заказ уже с response_body. Строки order_items и остальной эффект фиксируются в той же транзакции. Пропуски sequence после rollback допустимы. Для повторов возвращается сохраненный JSONB body с 201 и Idempotency-Replayed:true. До ответа текущий request получает terminal ledger и событие REPLAYED/stateChanged=false в outbox, после чего транзакция коммитится и освобождает advisory lock. Сохраняются типизированные значения ответа, не HTTP-заголовки/requestId прошлого attempt. В vulnerable тот же набор полей обеспечивает наблюдаемость, но advisory-lock, lookup прежнего результата и business UNIQUE намеренно отключены.
+
+## Независимые SQL-проверки
+
+`check_business_invariants(baseline jsonb)` возвращает только найденные нарушения/отсутствующие ссылки. Контракт результата: `(invariant_id, entity, entity_id, details)`. Функция readonly и использует numeric для промежуточных сумм, чтобы недопустимое уязвимое состояние не приводило к переполнению самого oracle. Проверки выполняются после quiescence в согласованном readonly snapshot; до запуска тот же набор проверяет baseline.
+
+Baseline приходит из приватного `control.runs.fixture_manifest`, не из ответа shop или detector. Его обязательная часть для функции:
+
+```text
+catalogVersions: [{product_id, catalog_version, price, published}]
+couponVersions: [{coupon_id, terms_version, discount_percent, expires_at}]
+couponCounters: [{coupon_id, used_count}]
+orderIds: [id исторических заказов до run]
+```
+
+Manifest содержит все версии, использованные историей и планом. Эти массивы — спецификация структуры, не файл наполнения. Перед SQL evaluator проверяет schema/version/hash, полноту и уникальность пар id/version, наличие счетчика каждого купона и точность baseline orderIds. Отсутствующий/невалидный baseline не подменяется пустым объектом: результат INCONCLUSIVE. В ходе run каталог/условия либо неизменяемы, либо все запланированные изменения и версии заранее присутствуют в независимом эталоне; неизвестная версия не признается корректной автоматически.
+
+| Группа | Проверки |
+|---|---|
+| Корзина/заказ | INV-CART-QTY, INV-CART-SIZE, INV-ORDER-QTY, INV-ORDER-NONEMPTY |
+| Стоимость | INV-ORDER-SUBTOTAL, INV-ORDER-TOTAL, INV-ORDER-PRICE, INV-ORDER-DISCOUNT |
+| Купон | INV-COUPON-EXPIRED, INV-COUPON-LIMIT, INV-COUPON-COUNT |
+| Одноразовый эффект | INV-INTENT-ONCE, INV-CART-REVISION-ONCE, INV-INTENT-CONSUMED |
+| Связи/повторы | INV-ORDER-OWNERSHIP, INV-KEY-COMPLETE, INV-KEY-ONCE |
+| Неполный эталон | ORACLE-REFERENCE-MISSING — причина INCONCLUSIVE, не доказательство успешной атаки |
+
+Цены и скидки сравниваются с версиями из baseline, никогда с текущими products.price/coupons.discount_percent. В MVP один купон на заказ, нет отмен/возвратов: заказ с coupon_id сам является фактом погашения. Счетчик проверяется как baseline used_count + число новых заказов с этим coupon_id (baseline orderIds исключаются). Дополнительно отдельно сверяется история baseline; счетчик не выводится только из числа новых событий. Наличие FK не доказывает совпадение owners и intent/cart/revision — это отдельная проверка.
+
+SQL-проверки не устанавливают факт утечки при BOLA, успешный вход по найденной паре или выдачу draft canary. Эти эффекты evaluator устанавливает по actor/ownership manifest и allowlist полей HTTP-response evidence. HTTP 200 и incident сами по себе не доказывают эффект. Отсутствие строк oracle означает отсутствие найденных нарушений только при полном эталоне и покрытии; оно не заменяет coverage barrier.
+
+<!-- BEGIN DATA DICTIONARY -->
+## Физический словарь данных
+
+Ниже перечислены все столбцы. `—` означает отсутствие DEFAULT: значение передаёт приложение. UUID создаются приложением. Все FK имеют ON UPDATE NO ACTION; ON DELETE RESTRICT, кроме явно указанных CASCADE. JSONB валидируется по зафиксированной версии контракта до записи; сам JSONB не обеспечивает проверку предметных полей.
+
+### `users`
+
+Учетная запись; регистрация и создание корзины атомарны.
+
+PK: `id`.
+UNIQUE: `login`; `email`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `id` | `bigint IDENTITY` | нет | — | Идентификатор пользователя |
+| `login` | `varchar(32)` | нет | — | Нормализованный login |
+| `name` | `varchar(100)` | нет | — | Отображаемое имя |
+| `email` | `varchar(254)` | нет | — | Нормализованный email |
+| `password_hash` | `varchar(255)` | нет | — | PasswordEncoder hash; недоступен evaluator |
+
+### `products`
+
+Текущий каталог; изменения цены увеличивают catalog_version.
+
+PK: `id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `id` | `bigint IDENTITY` | нет | — | Идентификатор товара |
+| `name` | `varchar(120)` | нет | — | Название |
+| `description` | `text` | нет | `''` | Описание |
+| `price` | `bigint` | нет | — | Цена в целых рублях |
+| `published` | `boolean` | нет | `false` | Видимость в нормативном API |
+| `catalog_version` | `bigint` | нет | `1` | Версия условий товара |
+
+Общие CHECK: `price BETWEEN 1 AND 1000000000`; `catalog_version > 0`; `length(description) <= 4000`.
+
+### `coupons`
+
+Текущие условия; счетчик не меняет terms_version.
+
+PK: `id`.
+UNIQUE: `code`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `id` | `bigint IDENTITY` | нет | — | Идентификатор купона |
+| `code` | `varchar(32)` | нет | — | Нормализованный код |
+| `discount_percent` | `integer` | нет | — | Процент скидки |
+| `expires_at` | `timestamptz` | нет | — | Исключительная граница по бизнес-часам |
+| `max_uses` | `bigint` | нет | — | Лимит погашений |
+| `used_count` | `bigint` | нет | `0` | Счетчик погашений |
+| `terms_version` | `bigint` | нет | `1` | Версия условий |
+
+Общие CHECK: `discount_percent BETWEEN 1 AND 100`; `max_uses > 0`; `terms_version > 0`.
+
+### `carts`
+
+Не более одной корзины на пользователя; наличие обеспечивает регистрация.
+
+PK: `id`.
+UNIQUE: `user_id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `id` | `bigint IDENTITY` | нет | — | Идентификатор корзины |
+| `user_id` | `bigint` | нет | — | Владелец; FK → `users.id` |
+| `coupon_id` | `bigint` | да | — | Выбранный купон; FK → `coupons.id` |
+| `revision` | `bigint` | нет | `0` | Версия после фактического изменения |
+| `updated_at` | `timestamptz` | нет | — | Бизнес-время изменения |
+
+Общие CHECK: `revision BETWEEN 0 AND 9007199254740991`.
+
+Дополнительные индексы: `(coupon_id)`.
+
+### `cart_items`
+
+Позиции текущей корзины.
+
+PK: `cart_id, product_id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `cart_id` | `bigint` | нет | — | Корзина; FK → `carts.id CASCADE` |
+| `product_id` | `bigint` | нет | — | Товар; FK → `products.id` |
+| `quantity` | `integer` | нет | — | Количество; бизнес-границы только protected |
+
+Дополнительные индексы: `(product_id)`.
+
+### `checkout_intents`
+
+Снимок расчета; не является независимым эталоном evaluator.
+
+PK: `id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `id` | `uuid` | нет | — | Случайный UUID, создается приложением |
+| `user_id` | `bigint` | нет | — | Владелец; FK → `users.id` |
+| `cart_id` | `bigint` | нет | — | Корзина; FK → `carts.id` |
+| `cart_revision` | `bigint` | нет | — | Версия корзины на момент расчета |
+| `snapshot_version` | `integer` | нет | `1` | Версия структуры snapshot |
+| `snapshot` | `jsonb` | нет | — | Позиции, цены, версии, купон и суммы |
+| `fingerprint` | `bytea` | нет | — | SHA-256 канонического snapshot |
+| `created_at` | `timestamptz` | нет | — | Бизнес-время создания |
+| `expires_at` | `timestamptz` | нет | — | Бизнес-время истечения |
+| `consumed_order_id` | `bigint` | да | — | Первый потребивший заказ; NULL до успеха; FK → `orders.id` |
+
+Общие CHECK: `octet_length(fingerprint) = 32`; `jsonb_typeof(snapshot) = 'object'`; `snapshot_version = 1`; `expires_at > created_at`.
+
+Дополнительные индексы: `(cart_id, cart_revision)`; `(user_id)`; `(consumed_order_id)`.
+
+### `orders`
+
+Неизменяемый эффект checkout, успешный ответ и погашение купона; один купон на заказ, отмен нет.
+
+PK: `id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `id` | `bigint IDENTITY` | нет | — | Идентификатор заказа |
+| `user_id` | `bigint` | нет | — | Владелец; FK → `users.id` |
+| `cart_id` | `bigint` | нет | — | Исходная корзина; FK → `carts.id` |
+| `cart_revision` | `bigint` | нет | — | Потребленная версия корзины |
+| `intent_id` | `uuid` | нет | — | Исходный intent; FK → `checkout_intents.id` |
+| `status` | `varchar(16)` | нет | `'CREATED'` | Единственный статус версии 1 |
+| `subtotal` | `bigint` | нет | — | Стоимость до скидки |
+| `discount` | `bigint` | нет | — | Скидка в рублях |
+| `total` | `bigint` | нет | — | Итог в рублях |
+| `coupon_id` | `bigint` | да | — | Купон; NULL вместе со всем snapshot; FK → `coupons.id` |
+| `coupon_code` | `varchar(32)` | да | — | Код на момент оформления |
+| `coupon_percent` | `integer` | да | — | Процент на момент оформления |
+| `coupon_expires_at` | `timestamptz` | да | — | Срок на момент оформления |
+| `coupon_terms_version` | `bigint` | да | — | Версия условий |
+| `created_at` | `timestamptz` | нет | — | Бизнес-время принятия решения checkout |
+| `idempotency_key_hash` | `bytea` | нет | — | HMAC-SHA256 исходного key; scope POST /orders + user |
+| `request_fingerprint` | `bytea` | нет | — | SHA-256 канонического request с версией и route |
+| `response_body` | `jsonb` | нет | — | Сохраненный Order response; status всегда 201 |
+
+Общие CHECK: `status = 'CREATED'`; `octet_length(idempotency_key_hash) = 32`; `octet_length(request_fingerprint) = 32`; `jsonb_typeof(response_body) = 'object'`.
+
+Дополнительные индексы: `(user_id, created_at DESC, id DESC)`; `(intent_id)`; `(cart_id, cart_revision)`; `(coupon_id)`; `(user_id, idempotency_key_hash)`.
+
+### `order_items`
+
+Неизменяемые позиции; цена и название зафиксированы.
+
+PK: `order_id, product_id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `order_id` | `bigint` | нет | — | Заказ; FK → `orders.id CASCADE` |
+| `product_id` | `bigint` | нет | — | Исходный товар; FK → `products.id` |
+| `quantity` | `integer` | нет | — | Количество |
+| `name_snapshot` | `varchar(120)` | нет | — | Название при оформлении |
+| `unit_price` | `bigint` | нет | — | Цена при оформлении |
+| `catalog_version` | `bigint` | нет | — | Версия цены |
+
+Дополнительные индексы: `(product_id)`.
+
+### `security_outbox`
+
+Неизменяемое содержимое события, изменяемое состояние доставки.
+
+PK: `event_id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `event_id` | `uuid` | нет | — | Глобальный UUID события |
+| `producer_epoch` | `uuid` | нет | — | Зарегистрированная эпоха; логическая межбазовая ссылка |
+| `payload` | `jsonb` | нет | — | CloudEvents v1, без секретов |
+| `created_at` | `timestamptz` | нет | — | Реальное время записи |
+| `delivered_at` | `timestamptz` | да | — | Подтверждение идентичного события в audit |
+| `retry_count` | `integer` | нет | `0` | Количество повторов |
+| `next_attempt_at` | `timestamptz` | нет | — | Следующая попытка доставки |
+
+Общие CHECK: `retry_count >= 0`; `jsonb_typeof(payload) = 'object'`.
+
+Дополнительные индексы: `(producer_epoch)`.
+
+### `execution_ledger`
+
+ACTIVE фиксируется до исполнения; terminal вместе с outbox.
+
+PK: `request_id`.
+
+| Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
+|---|---|---|---|---|
+| `request_id` | `uuid` | нет | — | UUID HTTP-attempt |
+| `producer_epoch` | `uuid` | нет | — | Эпоха принятой работы |
+| `state` | `varchar(16)` | нет | `'ACTIVE'` | ACTIVE / COMPLETED / ABORTED |
+| `terminal_event_id` | `uuid` | да | — | Логическая ссылка; не FK на удаляемую outbox |
+| `started_at` | `timestamptz` | нет | — | Реальное время принятия |
+| `finished_at` | `timestamptz` | да | — | Реальное время terminal transition |
+
+Общие CHECK: `state IN ('ACTIVE','COMPLETED','ABORTED')`; `(state = 'ACTIVE' AND terminal_event_id IS NULL AND finished_at IS NULL) OR (state <> 'ACTIVE' AND terminal_event_id IS NOT NULL AND finished_at IS NOT NULL)`.
+
+Дополнительные индексы: `(producer_epoch, state)`.
+
+<!-- END DATA DICTIONARY -->

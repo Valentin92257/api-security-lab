@@ -53,7 +53,7 @@ TTL, account/source thresholds, максимальная задержка, ра�
 
 Protected использует authenticated subject в owner query; чужой и отсутствующий объект возвращают одинаковый 404. Catalog SQL параметризован, sort выбирается из enum, datasource имеет только SELECT товаров. Schema validation не заменяет ни owner-check, ни SQL-параметризацию.
 
-Checkout фиксирует одноразовый server-issued intent и idempotency record в одной транзакции с заказом, купоном и outbox. Повтор успешного key/body возвращает прежний Order; новый key со spent intent и изменённое тело прежнего key получают conflict. Access JWT многократный: защита одного бизнес-эффекта не запрещает владельцу украденного bearer выполнять новые допустимые операции.
+Checkout фиксирует одноразовый server-issued intent и поля идемпотентности заказа в одной транзакции с заказом, купоном и outbox. Повтор успешного key/body возвращает прежний Order; новый key со spent intent и изменённое тело прежнего key получают conflict. Access JWT многократный: защита одного бизнес-эффекта не запрещает владельцу украденного bearer выполнять новые допустимые операции.
 
 Сервер рассчитывает цены/скидки, проверяет quantity, cart revision, expiry и coupon limit. Locks/conditional update/constraints совместно обеспечивают один допустимый commit. Client timeout и ошибка зависимости сами по себе не означают, что атака предотвращена.
 
