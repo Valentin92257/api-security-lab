@@ -126,7 +126,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/AddCartItemRequest' }
       responses:
-        '201':
+        '200':
           description: Корзина после изменения
           content:
             application/json:
@@ -222,7 +222,7 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateOrderRequest' }
       responses:
-        '201':
+        '200':
           description: Заказ создан
           content:
             application/json:
