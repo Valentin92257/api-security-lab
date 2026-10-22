@@ -7,7 +7,7 @@
 | Приложение | Ответственность | Доступ к данным |
 |---|---|---|
 | `shop-api` × 2 | Auth, каталог, корзина, checkout, предметные проверки, структурированные JSONL-логи | Собственная shop DB; запись собственного security-log файла |
-| `lab-gateway` | Маршрутизация, JWT, политики, допуск запросов, аудит | Redis и запись собственного security-log файла |
+| `lab-gateway` | Маршрутизация, JWT, политики, допуск запросов, аудит | Локальное состояние лимитов и запись собственного security-log файла |
 | `lab-detector` | Правила, окна, evidence и инциденты | Обезличенная проекция событий, собственное состояние и задания |
 | `lab-control` | Эксперименты, scenario-runner, сборщик логов, фикстуры, evaluator, UI и отчёты | Lab DB, readonly shop state, административный API подготовки данных |
 
@@ -28,12 +28,12 @@ Gateway выбирает backend по локальному входному по
 | Язык/сборка | Java 25, Maven Wrapper, multi-module; ограниченный I/O на virtual threads |
 | Приложения | Spring Boot 4.0.x, Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x; единая servlet-модель |
 | Хранение | PostgreSQL 17, Spring JDBC/JdbcClient, Flyway; явные SQL и транзакции |
-| Лимиты | Bucket4j и Redis; готовый механизм распределённых счётчиков |
+| Лимиты | Bucket4j in-memory в одном gateway; локальное потокобезопасное состояние с ограничением ключей и TTL |
 | Контракты | OpenAPI 3.1.0, JSON Schema, общие Java records/enums |
 | UI/наблюдаемость | Thymeleaf; OpenTelemetry и локальный Grafana LGTM |
 | Проверки | JUnit, Testcontainers с PostgreSQL, jqwik для последовательностей операций |
 
-Точные patch-версии, Redis-адаптер, OpenAPI validator и digest образов фиксируются после сборочного spike. Проверяются required/type/bounds/additionalProperties, nullable, local refs, query и повторное чтение body. Контракт использует один относительный server `/api/v1`. Непроверенная поддержка отдельных OpenAPI keywords не принимается за готовую валидацию; `latest` в сборке и Compose не используется.
+Точные patch-версии, локальный limiter, OpenAPI validator и digest образов фиксируются после сборочного spike. Проверяются required/type/bounds/additionalProperties, nullable, local refs, query и повторное чтение body. Контракт использует один относительный server `/api/v1`. Непроверенная поддержка отдельных OpenAPI keywords не принимается за готовую валидацию; `latest` в сборке и Compose не используется.
 
 ```text
 apps/{shop-api,lab-gateway,lab-detector,lab-control}/
@@ -79,7 +79,7 @@ Orchestrator вызывает `prepare(plan)`, затем `start(prepared, cance
 
 Источник события определяется зарегистрированным файлом и process instance ID, а не входным HTTP-заголовком. Gateway/shop не имеют SQL-credentials lab DB. Collector — модуль lab-control с отдельной SQL-ролью lab_log_ingestor. Detector не читает файлы, raw audit, control и shop DB: ему доступна только whitelist-view. Запреты проверяются под runtime SQL-ролями.
 
-Заказ, intent, поля идемпотентности, корзина и купон фиксируются одной SQL-транзакцией. После успешного commit API пишет JSONL-событие результата. Эта запись не атомарна с SQL; надежность при падениях исключена из MVP. Redis хранит только состояние политик. Collector индексирует прочитанные логи в lab DB; broker не нужен.
+Заказ, intent, поля идемпотентности, корзина и купон фиксируются одной SQL-транзакцией. После успешного commit API пишет JSONL-событие результата. Эта запись не атомарна с SQL; надежность при падениях исключена из MVP. Состояние политик хранится в памяти единственного gateway. Collector индексирует прочитанные логи в lab DB; broker не нужен.
 
 ## Сети и служебные интерфейсы
 
@@ -88,7 +88,7 @@ Orchestrator вызывает `prepare(plan)`, затем `start(prepared, cance
 | `lab-traffic` | control, gateway, LGTM collector | Сценарный HTTP и telemetry |
 | `shop-backend` | gateway, оба shop | Бизнес-трафик |
 | `shop-admin` | control, gateway, оба shop | Подготовка, admission, завершение |
-| `lab-data` | control, detector, gateway, shop, PostgreSQL, Redis | SQL и состояние политик |
+| `lab-data` | control, detector, shop, PostgreSQL | SQL; gateway к этой сети не подключается |
 | `lab-observe` | control, detector, gateway, shop, LGTM | Логи, traces, metrics |
 
 Только UI и Grafana публикуются на `127.0.0.1`. Ручной доступ к gateway возможен отдельным opt-in profile также через loopback. Backend, БД и management не публикуются. Соседи в bridge-сети могут обращаться к listener, поэтому нужны одновременно правильный bind address и проверка полномочий endpoint.
@@ -103,7 +103,7 @@ Control не имеет внешнего egress, proxy env, Docker socket или
 
 ## Запуск и конфигурация
 
-Базовый Compose: пять Java-контейнеров (control, gateway, detector и два shop), PostgreSQL, Redis и LGTM — восемь постоянно работающих контейнеров. Init jobs создают локальные ключи, выполняют миграции и seed. Планируемая команда запуска:
+Базовый Compose: пять Java-контейнеров (control, gateway, detector и два shop), PostgreSQL и LGTM — семь постоянно работающих контейнеров. Init jobs создают локальные ключи, выполняют миграции и seed. Планируемая команда запуска:
 
 ```sh
 docker compose -f infra/compose.yaml up --build

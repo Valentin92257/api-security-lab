@@ -4,7 +4,7 @@
 
 | Этап | Работа | Критерий выхода |
 |---|---|---|
-| 0. Контракты | Wire schemas, API/errors, версии зависимостей; spikes validator, Redis adapter, SQL grants | Примеры валидны, зависимости собираются, используемые OpenAPI keywords проверены |
+| 0. Контракты | Wire schemas, API/errors, версии зависимостей; spikes validator, локальный limiter, SQL grants | Примеры валидны, зависимости собираются, используемые OpenAPI keywords проверены |
 | 1. Skeleton | Maven modules, Compose, три DB и роли, keys, health, logs/traces, служебные interfaces | Запрос через gateway; ScenarioHttpClient допускает только gateway, внешний egress control закрыт, detector не читает labels |
 | 2. Вертикальный BOLA | Fixture/users/orders, BO-01 и benign, JSONL writer/collector/audit, одно правило, oracle, UI/report | Доказана утечка vulnerable, protected сохраняет owner; есть обнаружение при 200 и JSON-отчёт |
 | 3. API и защита | Полный API, catalog canary, checkout/idempotency/coupon, schema/rate policies | Общие benign contract tests двух режимов; согласованные фикстуры и атомарный checkout |
@@ -26,6 +26,7 @@
 |---|---|
 | API/schema | Один spec для обоих режимов; positive examples, unknown/duplicate fields, types/bounds/nullability/query, body forwarding |
 | JWT/BOLA | Неверные alg/signature/iss/aud/exp/nbf; valid token многократен; чужие profile/order и отсутствующие дают 404, свои доступны |
+| Login limits | Параллельный consume/backoff; OBSERVE/ENFORCE/run isolation; OFF без изменения state; безопасный TTL; overflow 503 + INCONCLUSIVE; старый callback не меняет новый run; restart не продолжает опыт |
 | Replay | Same key/body, altered body, spent intent/new key, параллельные key, expiry, cart revision, retry после потери ответа/commit |
 | Бизнес-транзакция | Реальные cart/coupon races, rollback на критичных шагах, один эффект, expiry equality, серверная цена и независимый пересчёт |
 | Injection | Реальный canary leakage vulnerable, отсутствие leakage protected, literal punctuation/search и sort allowlist |
