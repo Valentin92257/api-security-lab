@@ -27,7 +27,7 @@
 | API/schema | Один spec для обоих режимов; positive examples, unknown/duplicate fields, types/bounds/nullability/query, body forwarding |
 | JWT/BOLA | Неверные alg/signature/iss/aud/exp/nbf; valid token многократен; чужие profile/order и отсутствующие дают 404, свои доступны |
 | Login limits | Параллельный consume/backoff; OBSERVE/ENFORCE/run isolation; OFF без изменения state; безопасный TTL; overflow 503 + INCONCLUSIVE; старый callback не меняет новый run; restart не продолжает опыт |
-| Replay | Same key/body, altered body, spent intent/new key, параллельные key, expiry, cart revision, retry после потери ответа/commit |
+| Replay | Same key/body, altered body, оформленная cart revision/new key, параллельные key, expiry купона, cart revision, retry после потери ответа/commit |
 | Бизнес-транзакция | Реальные cart/coupon races, rollback на критичных шагах, один эффект, expiry equality, серверная цена и независимый пересчёт |
 | Injection | Реальный canary leakage vulnerable, отсутствие leakage protected, literal punctuation/search и sort allowlist |
 | Security logs | JSONL/schema/redaction; запись после commit/rollback; пары started/completed; seq/END; identical duplicate/conflict; partial line; oversized event; отсутствие sampling/rotation/drop |
@@ -37,7 +37,7 @@
 | Метрики/UI | N/A при нуле, incomplete не FN, wrong class FP, несколько incidents на episode, benign retry, escaping/CSRF и отсутствие секретов |
 | Runtime | Внешний egress control закрыт; ScenarioHttpClient отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
 
-SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для add/change/coupon/intent/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
+SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для add/change/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
 Планируемый pipeline `./mvnw verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия — `./mvnw -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Обе команды выполняются в CI; после появления реализации они должны совпадать с её фактическими Maven profiles.
 
@@ -77,3 +77,5 @@ Regression падает при нарушении обещанного protected
 Поднять стенд и показать health/версии/роли; выполнить BO-01 на двух режимах; показать response, owner oracle, incident и decision; продемонстрировать checkout retry/race по числу эффектов; выполнить пять семейств с benign traffic и открыть сравнение со знаменателями. Затем показать отставание обработки при работающем detector и корректное ожидание DRAINING; для пропущенного terminal/END или перезапуска процесса показать INCONCLUSIVE без возобновления run. Завершить JSON-export и traces с объяснением остаточных рисков.
 
 Результат сдачи: исходный код в публичном репозитории, воспроизводимые команды, актуальные схемы и документация, тестовые отчёты, видео либо сценарий демонстрации и фактический вклад каждого участника. До выполнения проверок проектная спецификация не считается доказательством готового стенда.
+
+Проверки упрощённого checkout: новый key для оформленной revision возвращает CART_ALREADY_CHECKED_OUT; устаревшая неоформленная revision — CART_CHANGED. Успешный retry после очистки корзины и истечения купона возвращает прежний Order. Два разных key одной revision создают один заказ; vulnerable replay той же версии создаёт повторный эффект. Изменение замороженного каталога/условий купона приводит к INCONCLUSIVE, а не к корректному результату ASR.

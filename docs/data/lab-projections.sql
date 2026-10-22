@@ -22,7 +22,6 @@ SELECT e.id AS event_id, e.partition_id, e.request_id, e.trace_id, e.occurred_at
        e.payload#>>'{data,observations,authOutcome}' AS auth_outcome,
        e.payload#>>'{data,observations,couponEligibility}' AS coupon_eligibility,
        e.payload#>>'{data,observations,idempotencyOutcome}' AS idempotency_outcome,
-       e.payload#>>'{data,observations,intentHash}' AS intent_hash,
        e.payload#>>'{data,observations,idempotencyKeyHash}' AS idempotency_key_hash,
        e.payload#>>'{data,observations,cartKey}' AS cart_key,
        (e.payload#>>'{data,observations,cartRevision}')::bigint AS cart_revision,

@@ -37,7 +37,7 @@ API записывает наблюдаемые факты: кто обраща�
 |---|---|---|
 | Credential stuffing | Попытки войти по подготовленному списку синтетических пар логин/пароль | Рабочие сессии, лимиты источника/аккаунта, обнаружение серии и влияние на обычные входы |
 | BOLA/IDOR | Подмена идентификатора, чтобы получить чужой объект | Профили и заказы; факт раскрытия данных, а не только HTTP-код |
-| Replay | Повтор уже выполненной операции | Один бизнес-эффект при retry, конфликт изменённого запроса и запрет повторного intent |
+| Replay | Повтор уже выполненной операции | Один бизнес-эффект при retry, конфликт изменённого запроса и запрет повторного оформления той же версии корзины |
 | Injection | Значение параметра меняет смысл SQL в учебном уязвимом адаптере | Попадание скрытого контрольного товара в выдачу; корректная параметризация protected |
 | Business logic abuse | Нарушение правил магазина корректными по форме или конкурентными запросами | Купон, quantity, гонка checkout, обход серверной цены |
 
@@ -147,7 +147,7 @@ Protected owner query использует id объекта и authenticated us
 
 ### Внешнее поведение
 
-Путь начинается с `/api/v1`; данные передаются JSON. JWT — подписанный токен, которым клиент подтверждает выданную ему сессию; он обязателен везде, кроме register/login. Числовые ids положительные, UUID используются для intent/requests/events. Деньги — целые рубли, Java long/SQL bigint, currency RUB; quantity от 1 до 99, не более 100 разных позиций корзины.
+Путь начинается с `/api/v1`; данные передаются JSON. JWT — подписанный токен, которым клиент подтверждает выданную ему сессию; он обязателен везде, кроме register/login. Числовые ids положительные, UUID используются для requests/events. Деньги — целые рубли, Java long/SQL bigint, currency RUB; quantity от 1 до 99, не более 100 разных позиций корзины.
 
 | Операция | Запрос и назначение |
 |---|---|
@@ -163,50 +163,37 @@ Protected owner query использует id объекта и authenticated us
 | `DELETE /cart/items/{productId}` | Удаляет позицию; отсутствие допустимо |
 | `PUT /cart/coupon` | code; выбирает один купон без расходования лимита |
 | `DELETE /cart/coupon` | Убирает купон |
-| `POST /checkout-intents` | cartRevision; создаёт серверный snapshot будущего checkout |
-| `POST /orders` | intentId/quotedTotal и Idempotency-Key; создаёт или возвращает Order |
+| `POST /orders` | cartRevision/quotedTotal и Idempotency-Key; создаёт или возвращает Order |
 | `GET /orders` | Собственная история с пагинацией |
 | `GET /orders/{orderId}` | Собственный Order |
 
-User содержит id/login/name/email; пароль или hash не возвращаются. Product содержит id/name/description/price/currency. Cart содержит id/userId/revision/items/coupon/subtotal/discount/total/currency/updatedAt; позиция — productId/name/quantity/unitPrice/lineTotal. Order сохраняет владельца, intentId, items и условия цены/купона на момент операции, суммы, createdAt и status CREATED. Отмен, платежей и возвратов в MVP нет.
+User содержит id/login/name/email; пароль или hash не возвращаются. Product содержит id/name/description/price/currency. Cart содержит id/userId/revision/items/coupon/subtotal/discount/total/currency/updatedAt; позиция — productId/name/quantity/unitPrice/lineTotal. Order сохраняет владельца, cartId/cartRevision, items, суммы, полный успешный ответ, createdAt и status CREATED. Отмен, платежей и возвратов в MVP нет.
 
-Создание пользователя, intent и заказа возвращает 201, чтение/изменение корзины и login — 200. Ошибки имеют единый Problem с type/title/status/code/requestId. Основные статусы: 400 для валидации, 401 для auth, 404 для отсутствующего или чужого объекта, 409 для конфликта состояния, 429 для rate policy, 503 для зависимости или закрытого run. Неожиданный 500 не сообщает SQL/stack trace.
+Создание пользователя и заказа возвращает 201, чтение/изменение корзины и login — 200. Ошибки имеют единый Problem с type/title/status/code/requestId. Основные статусы: 400 для валидации, 401 для auth, 404 для отсутствующего или чужого объекта, 409 для конфликта состояния, 429 для rate policy, 503 для зависимости или закрытого run. Неожиданный 500 не сообщает SQL/stack trace.
 
 ### Данные
 
-Бизнес-таблицы: users, products, coupons, carts/cart_items, orders/order_items. В carts есть revision, в products — published/catalog_version, в купоне — срок, max_uses, used_count и terms_version. Скрытый draft-товар служит canary: его появление в обычной выдаче — наблюдаемый эффект injection.
+Бизнес-таблицы: users, products, coupons, carts/cart_items, orders/order_items. В carts есть revision, в products — published, в купоне — срок, max_uses и used_count. Скрытый draft-товар служит canary: его появление в обычной выдаче — наблюдаемый эффект injection.
 
-Дополнительная таблица checkout_intents хранит одноразовое намерение. Orders хранит успешный ответ, hash ключа и факт использования купона. Таблиц доставки событий и учёта исполнения в магазине нет: факты поступают из структурированных логов.
+Orders хранит успешный ответ, hash ключа и факт использования купона. Таблиц доставки событий и учёта исполнения в магазине нет: факты поступают из структурированных логов.
 
-Protected дополняет PK/FK бизнес-ограничениями: допустимое количество, корректные суммы, used_count≤max_uses, уникальный order на intent и на пару cart/revision. Межтабличное равенство суммы заказа сумме его строк нельзя обеспечить одним обычным CHECK; его обеспечивает транзакция и проверяет независимый oracle.
+Protected дополняет PK/FK бизнес-ограничениями: допустимое количество, корректные суммы, used_count≤max_uses, уникальный order на пару cart/revision. Межтабличное равенство суммы заказа сумме его строк нельзя обеспечить одним обычным CHECK; его обеспечивает транзакция и проверяет независимый oracle.
 
-Исторический заказ хранит свои цены и условия. Evaluator сравнивает их с trusted fixture snapshot соответствующей версии, а не с нынешней ценой товара. Иначе обычное изменение каталога ошибочно выглядело бы нарушением старого заказа.
+Исторический заказ хранит цену позиции и успешный ответ. Evaluator сверяет суммы с приватным fixture baseline. История фикстуры соответствует тому же каталогу и условиям купонов; их изменение внутри run запрещено.
 
-## 8. Почему checkout устроен через intent и idempotency key
+## 8. Версия корзины и идемпотентность заказа
 
-Обычная сеть может потерять ответ уже выполненного запроса. Если клиент просто повторит «создай заказ», сервер рискует выполнить покупку второй раз. Одновременно нужно отличить технический retry от попытки изменить уже выполненную команду или заново использовать прежнюю корзину.
+Клиент читает Cart и передаёт cartRevision/quotedTotal в POST /orders с Idempotency-Key. Revision меняется после реального изменения корзины; no-op её не повышает. Заказ хранит исходные cart_id/cart_revision, hash ключа, fingerprint тела и успешный response_body.
 
-Для этого применяются два механизма с разными обязанностями:
+Пример: корзина revision 7 стоит 3000 рублей, купон 10% даёт итог 2700. Запрос с revision=7, quotedTotal=2700 и key K создаёт Order 50. Если ответ потерялся, тот же K/body возвращает Order 50. Новый K2 с revision=7 даёт CART_ALREADY_CHECKED_OUT; прежний K с иным телом — IDEMPOTENCY_CONFLICT.
 
-- **Checkout intent** — серверное разрешение выполнить конкретную операцию над конкретной revision корзины и snapshot цены. У него есть owner, срок и отметка использования.
-- **Idempotency key** — идентификатор попытки клиента получить один результат. Повтор с тем же key и телом возвращает сохранённый результат, не создавая новый эффект.
+Protected берёт locks в порядке key → cart → coupon. Сначала ищет успешный key; затем под row lock корзины проверяет ранее оформленную revision, актуальность revision, состав, серверную цену и купон. Order/items, расход купона, сохранённый ответ, очистка позиций/купона корзины и повышение revision фиксируются одним commit. UNIQUE(user_id,key hash) и UNIQUE(cart_id,cart_revision) страхуют от гонок. JSONL-результат записывается после commit/rollback.
 
-Пример: корзина revision 7 содержит две позиции общей стоимостью 3000 рублей; купон 10% даёт итог 2700. Сервер создаёт intent I. Клиент отправляет I, quotedTotal=2700 и key K. Сервер создаёт Order 50, но ответ теряется. Retry I/K возвращает тот же Order 50. Новый key K2 с уже использованным I даёт INTENT_ALREADY_USED. K с другим quotedTotal даёт IDEMPOTENCY_CONFLICT.
+Fingerprint — SHA-256 канонических типизированных значений тела, маршрута и версии контракта; JWT/requestId/trace не входят. Успешный retry возвращает кеш до проверки изменённой корзины и истёкшего купона. Ошибки не кешируются; ожидание key lock ограничено и может дать OPERATION_IN_PROGRESS.
 
-Транзакция объединяет изменения: они фиксируются вместе при commit или откатываются при rollback. Protected выполняет checkout в одной PostgreSQL-транзакции при явном протоколе locks:
+Vulnerable пропускает lookup/уникальность key и проверку оформленной revision. Для replay он намеренно сохраняет корзину, её купон и revision после checkout; повтор создаёт второй order. Protected очищает её и повышает revision. Обычные mutations повышают revision в обоих режимах.
 
-1. Берет транзакционный advisory lock для scope ключа и читает orders; для прежнего успеха сравнивает fingerprint и возвращает сохранённый ответ.
-2. Блокирует cart, затем intent; проверяет owner, revision, срок и consumed state.
-3. Сверяет состав, цены, условия купона и quotedTotal с серверным расчётом.
-4. Атомарно расходует купон при действующем сроке и остатке.
-5. Создаёт order/items, отмечает intent использованным, очищает корзину и увеличивает revision.
-6. Сохраняет успешный status/body для key и фиксирует бизнес-изменения одним commit. Затем пишет operation/terminal в JSONL и возвращает HTTP-ответ.
-
-Единый порядок блокировок: key → cart → intent → coupon; внутри одного типа — возрастающий id. Все mutations корзины берут её row lock. Два intent одной revision не дают две покупки; constraints выступают дополнительным рубежом. Лишний no-op DELETE/PATCH не меняет revision.
-
-Fingerprint вычисляется по каноническим типизированным значениям запроса, маршруту и версии контракта. Порядок JSON-полей не меняет его, JWT/requestId/trace в него не входят. При повторе успешного key lookup результата предшествует новой проверке expiry intent. Неуспешная транзакция не оставляет заказ или отдельную запись ключа; в MVP сохраняются только успешные результаты.
-
-TTL intent первоначально 120 секунд по бизнес-часам; даты купонов проверяются строго `now < expiresAt`. Бизнес-часы двух прогонов имеют одинаковую стартовую базу. JWT использует реальные часы и остаётся многократным: проверка каждого jti как одноразового сломала бы обычные последовательные запросы пользователя. Эта защита предотвращает повторный бизнес-эффект, но не новые допустимые действия обладателя украденного bearer.
+Каталог и условия купонов заморожены до отчёта. Поэтому достаточно unit_price позиции и полного response_body заказа; отдельных исторических полей и версий каталога нет. Приватный fixture manifest служит независимым эталоном evaluator. Срок купона проверяется по бизнес-часам строго now < expiresAt, JWT — по реальным часам. JWT многократен: защита от повторного эффекта не запрещает новые допустимые операции обладателю украденного bearer.
 
 ## 9. Как реализуется gateway и применение политик
 
@@ -249,7 +236,7 @@ Orchestrator сохраняет control.scenario_jobs: jobId/runId/epoch, plan/h
 
 У runner отдельный executor; HTTP I/O может использовать virtual threads с semaphore. Ограничены concurrency, attempts, body/response, очередь результатов и длительность. UI, log-ingestor и orchestration не используют этот executor или common ForkJoinPool. Общие JVM/heap/CPU всё равно остаются общей областью отказа: resource limits и отмена обязательны, OOM не изолирован от UI.
 
-AttemptId=requestId — UUID, создаваемый до отправки. Gateway принимает корреляцию только с доверенным run credential/context, связанным с активными run/epoch/target. Это право маркировать трафик, не worker lease. Retry получает новый attemptId, но сохраняет intent/key повторяемой бизнес-операции. Пароли/JWT живут только в памяти; AttemptSink сохраняет безопасные результаты ограниченными batches. Завершение подтверждается после их записи и фиксации manifest; потеря результата даёт INCONCLUSIVE.
+AttemptId=requestId — UUID, создаваемый до отправки. Gateway принимает корреляцию только с доверенным run credential/context, связанным с активными run/epoch/target. Это право маркировать трафик, не worker lease. Retry получает новый attemptId, но сохраняет cartRevision/key повторяемой бизнес-операции. Пароли/JWT живут только в памяти; AttemptSink сохраняет безопасные результаты ограниченными batches. Завершение подтверждается после их записи и фиксации manifest; потеря результата даёт INCONCLUSIVE.
 
 Сценарии принимают target enum и версионированные routes, не произвольный baseUrl. ScenarioHttpClient запрещает redirects, proxy, absolute URL override, смену origin и management routes. Query/body могут содержать учебный ввод, но не менять адрес назначения. Fixtures подготавливает orchestration через собственный admin adapter. У процесса control есть права на admin/SQL/log mounts; встроенный runner технически разделяет их. Программные ограничения здесь нельзя описывать как сетевой запрет доступа модуля к ресурсам control. Внешний egress запрещён для всего контейнера.
 
@@ -301,7 +288,7 @@ MVP использует три формы правил: match одного со
 
 YAML допускает eq/in, count/countDistinct, groupBy и bounded window. Нет arbitrary JavaScript/SpEL/SQL. Неизвестное поле/operator останавливает подготовку. Ruleset имеет version/hash/engine version; пределы числа групп, длительности окна и evidence фиксируются вместе с ним.
 
-Для checkout правило считает разные orderId по intent/cart revision только при stateChanged=true. Cached retry не создаёт новый эффект и не должен увеличивать этот счётчик. Отдельный conflict может указывать на попытку replay, но не доказывает её успешность. Правила на gateway refusal дополняют анализ попыток, которые вообще не достигли shop.
+Для checkout правило считает разные orderId по cart revision только при stateChanged=true. Cached retry не создаёт новый эффект и не должен увеличивать этот счётчик. Отдельный conflict может указывать на попытку replay, но не доказывает её успешность. Правила на gateway refusal дополняют анализ попыток, которые вообще не достигли shop.
 
 ### Повторы, поздние события и окна
 
@@ -460,7 +447,7 @@ Fixture generator создаёт 24 синтетических пользова�
 | Runner внутри control; gateway и detector отдельно | Меньше процессов и нет сетевого протокола управления генератором | Общие heap/CPU и права JVM; нужны bounded executor, cancellation и проверки границ кода |
 | Detector отдельно от control | Ground truth закрыт SQL-полномочиями; анализ выполняется независимо | Р4 обслуживает два приложения; часть адаптеров распределена между остальными ролями |
 | JDBC и PostgreSQL | Видны locking, условия UPDATE и транзакционные границы | Дисциплина SQL/индексов/rollback и реальные concurrency tests |
-| Intent + idempotency в бизнес-DB | Различаются повторный результат и новая попытка прежней операции; атомарность едина | Дополнительная таблица intent и двухшаговый checkout |
+| Cart revision + idempotency в orders | Повтор возвращает прежний результат; одна версия корзины создаёт один заказ | Locks и UNIQUE; каталог/условия купонов неизменяемы в run |
 | JSONL и встроенный log-ingestor | Detector использует логи API/gateway, без служебных таблиц в магазине | Commit и лог не атомарны; сбой делает run INCONCLUSIVE, восстановления нет |
 | Rule-based detector | Вывод объясняется конкретным правилом/evidence и воспроизводится | Нет обещания обнаруживать неизвестные паттерны или распознавать намерение по одинаковому HTTP |
 | Immutable snapshots и paired runs | Известно, что именно сравнивается и с какими параметрами | Конфигурацию нельзя незаметно менять посередине опыта |
@@ -493,7 +480,7 @@ API-контракт ревьюят Р1+Р2, события/политики —
 
 ### Проверки
 
-Unit tests проверяют чистые политики/parser/calculator. Contract tests проверяют реальные schemas, нормальные запросы обоих режимов, неизвестные поля/типы и errors. Testcontainers с PostgreSQL проверяет row locks, coupon/cart races, уникальность, rollback и SQL grants. State model с jqwik генерирует последовательности add/change/coupon/intent/checkout/retry и сравнивает их с независимой моделью.
+Unit tests проверяют чистые политики/parser/calculator. Contract tests проверяют реальные schemas, нормальные запросы обоих режимов, неизвестные поля/типы и errors. Testcontainers с PostgreSQL проверяет row locks, coupon/cart races, уникальность, rollback и SQL grants. State model с jqwik генерирует последовательности add/change/coupon/checkout/retry и сравнивает их с независимой моделью.
 
 Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Logging tests проверяют формат/порядок JSONL после commit/rollback, отсутствие секретов, конфликт eventId/seq, пропуск terminal/END и INCONCLUSIVE при нарушении допущения о непрерывной работе. Detector tests проверяют late/out-of-order events, atomic state/marker и CLOSE/retraction. Сетевые проверки подтверждают отсутствие обхода gateway, а secret scans/escaping tests — отсутствие утечки или интерпретации входа в UI.
 
@@ -507,7 +494,7 @@ Integration suite включает JWT claims/signature, BOLA profile/order, в�
 
 ## Физическая реализация модели данных
 
-Shop хранит 8 таблиц: users, products, coupons, carts, cart_items, checkout_intents, orders и order_items. Логическая схема одинакова для двух режимов; отдельные protected constraints добавляют бизнес-границы и уникальность эффекта. Intent фиксирует расчет shop, а приватный fixture manifest фиксирует независимый эталон версий цен, купонов и начальных счетчиков. Эти источники нельзя смешивать.
+Shop хранит 7 таблиц: users, products, coupons, carts, cart_items, orders и order_items. Логическая схема одинакова для двух режимов; отдельные protected constraints добавляют бизнес-границы и уникальность эффекта. Orders хранит цену позиции и успешный ответ; приватный fixture manifest фиксирует независимый эталон каталога, условий купонов и начальных счетчиков. Эти источники нельзя смешивать.
 
 Lab содержит 12 таблиц: 5 control, 2 audit и 5 detection. Ограниченные definitions/manifests/results/history хранятся внутри владельца в JSONB/массивах. Lab хранит контроль эксперимента в control, индекс событий и состояние чтения log streams в audit и безопасное состояние обнаружения в detection. Detector читает индивидуальный whitelist через view и не видит run/target/labels. Отсутствие физических FK для ожидаемых еще не доставленных событий намеренно: полноту доказывает DRAINING, а не возможность вставить manifest. Оценки cases/episodes/incidents относятся к immutable report revision.
 
