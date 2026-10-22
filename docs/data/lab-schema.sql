@@ -46,26 +46,22 @@ CREATE TABLE control.runs (
   CHECK (jsonb_typeof(command_journal) = 'array'),
   CHECK (jsonb_array_length(command_journal) <= 1024)
 );
--- Lease и назначение runner; не SQL-доступ runner.
-CREATE TABLE control.runner_jobs (
+-- Неизменяемый план встроенного runner; один job на run, без распределенного исполнения.
+CREATE TABLE control.scenario_jobs (
   id uuid NOT NULL,
   run_id uuid NOT NULL,
   epoch uuid NOT NULL,
-  attempt integer NOT NULL,
   plan jsonb NOT NULL,
   plan_hash bytea NOT NULL,
-  lease_token_hash bytea NOT NULL,
-  lease_expires_at timestamptz NOT NULL,
+  deadline_at timestamptz NOT NULL,
   state varchar(16) NOT NULL,
   step_manifest jsonb,
   step_manifest_hash bytea,
   sealed_at timestamptz,
   PRIMARY KEY (id),
-  UNIQUE (run_id, attempt),
-  CHECK (attempt > 0),
+  UNIQUE (run_id),
   CHECK (state IN ('PREPARED','RUNNING','STOPPED','FAILED')),
   CHECK (octet_length(plan_hash) = 32),
-  CHECK (octet_length(lease_token_hash) = 32),
   CHECK ((step_manifest IS NULL) = (step_manifest_hash IS NULL)),
   CHECK ((step_manifest IS NULL) = (sealed_at IS NULL)),
   CHECK (step_manifest_hash IS NULL OR octet_length(step_manifest_hash) = 32)
@@ -107,32 +103,38 @@ CREATE TABLE control.reports (
   CHECK (snapshot_hash IS NULL OR octet_length(snapshot_hash) = 32),
   CHECK (completeness <> 'COMPLETE' OR snapshot IS NOT NULL)
 );
--- Доверенная привязка producer/run; после SEAL также immutable manifest и coverage.
-CREATE TABLE audit.producer_epochs (
+-- Один JSONL-файл producer на run; collector отмечает прочтение STREAM_END и всего диапазона seq.
+CREATE TABLE audit.log_streams (
   id uuid NOT NULL,
   run_id uuid NOT NULL,
   partition_id uuid NOT NULL,
   producer_kind text NOT NULL,
   source text NOT NULL,
-  state text NOT NULL DEFAULT 'OPEN',
+  source_instance_id uuid NOT NULL,
+  file_name text NOT NULL,
+  state text NOT NULL DEFAULT 'READING',
+  last_ingested_seq bigint NOT NULL DEFAULT 0,
+  expected_last_seq bigint,
+  end_seen_at timestamptz,
+  error_reason text,
   registered_at timestamptz NOT NULL,
-  expected_event_ids uuid[],
-  event_set_hash bytea,
-  coverage jsonb,
-  sealed_at timestamptz,
   PRIMARY KEY (id),
   UNIQUE (run_id, producer_kind),
   UNIQUE (id, run_id, partition_id),
+  UNIQUE (file_name),
   CHECK (producer_kind IN ('GATEWAY','SHOP')),
-  CHECK (state IN ('OPEN','CLOSED','SEALED')),
-  CHECK ((state = 'SEALED' AND expected_event_ids IS NOT NULL AND event_set_hash IS NOT NULL AND coverage IS NOT NULL AND sealed_at IS NOT NULL) OR (state <> 'SEALED' AND expected_event_ids IS NULL AND event_set_hash IS NULL AND coverage IS NULL AND sealed_at IS NULL)),
-  CHECK (event_set_hash IS NULL OR octet_length(event_set_hash) = 32),
-  CHECK (expected_event_ids IS NULL OR cardinality(expected_event_ids) <= 100000)
+  CHECK (state IN ('READING','DRAINED','ERROR')),
+  CHECK (last_ingested_seq BETWEEN 0 AND 100000),
+  CHECK (expected_last_seq IS NULL OR expected_last_seq BETWEEN 0 AND 100000),
+  CHECK ((expected_last_seq IS NULL) = (end_seen_at IS NULL)),
+  CHECK (state <> 'DRAINED' OR (expected_last_seq IS NOT NULL AND last_ingested_seq=expected_last_seq AND error_reason IS NULL)),
+  CHECK (state <> 'ERROR' OR error_reason IS NOT NULL)
 );
--- Append-only CloudEvents; одинаковый id с другим payload — ошибка.
+-- Валидированное событие из JSONL; append-only; raw payload не доступен detector.
 CREATE TABLE audit.security_events (
   id uuid NOT NULL,
-  producer_epoch uuid NOT NULL,
+  stream_id uuid NOT NULL,
+  seq bigint NOT NULL,
   run_id uuid NOT NULL,
   partition_id uuid NOT NULL,
   request_id uuid NOT NULL,
@@ -142,34 +144,19 @@ CREATE TABLE audit.security_events (
   payload jsonb NOT NULL,
   payload_hash bytea NOT NULL,
   PRIMARY KEY (id),
+  UNIQUE (stream_id, seq),
   CHECK (octet_length(payload_hash) = 32),
-  CHECK (jsonb_typeof(payload) = 'object')
+  CHECK (jsonb_typeof(payload) = 'object'),
+  CHECK (seq BETWEEN 1 AND 100000)
 );
--- Gateway durable admission; terminal slot обязателен независимо от HTTP-ответа.
-CREATE TABLE audit.receipts (
-  request_id uuid NOT NULL,
-  producer_epoch uuid NOT NULL,
-  started_event_id uuid NOT NULL,
-  terminal_event_id uuid,
-  shop_invoked boolean NOT NULL DEFAULT false,
-  accepted_at timestamptz NOT NULL,
-  completed_at timestamptz,
-  PRIMARY KEY (request_id),
-  CHECK ((terminal_event_id IS NULL) = (completed_at IS NULL))
-);
--- Без run/target/labels; lease с fencing token.
+-- Неизменяемый ruleset; один worker на partition внутри единственного процесса detector.
 CREATE TABLE detection.partitions (
   id uuid NOT NULL,
   ruleset_hash bytea NOT NULL,
   ruleset_snapshot jsonb NOT NULL,
-  lease_owner uuid,
-  lease_until timestamptz,
-  fence bigint NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   UNIQUE (id, ruleset_hash),
-  CHECK (octet_length(ruleset_hash) = 32),
-  CHECK (fence >= 0),
-  CHECK ((lease_owner IS NULL) = (lease_until IS NULL))
+  CHECK (octet_length(ruleset_hash) = 32)
 );
 -- Sanitized SQL commands; control вставляет, detector обновляет outcome.
 CREATE TABLE detection.jobs (
@@ -252,34 +239,27 @@ CREATE TABLE detection.incidents (
   CHECK (rule_version > 0)
 );
 ALTER TABLE control.runs ADD FOREIGN KEY (experiment_id) REFERENCES control.experiments (id) ON DELETE RESTRICT;
-ALTER TABLE control.runner_jobs ADD FOREIGN KEY (run_id) REFERENCES control.runs (id) ON DELETE RESTRICT;
-ALTER TABLE control.attempts ADD FOREIGN KEY (job_id) REFERENCES control.runner_jobs (id) ON DELETE RESTRICT;
+ALTER TABLE control.scenario_jobs ADD FOREIGN KEY (run_id) REFERENCES control.runs (id) ON DELETE RESTRICT;
+ALTER TABLE control.attempts ADD FOREIGN KEY (job_id) REFERENCES control.scenario_jobs (id) ON DELETE RESTRICT;
 ALTER TABLE control.reports ADD FOREIGN KEY (run_id) REFERENCES control.runs (id) ON DELETE RESTRICT;
-ALTER TABLE audit.producer_epochs ADD FOREIGN KEY (run_id) REFERENCES control.runs (id) ON DELETE RESTRICT;
-ALTER TABLE audit.security_events ADD FOREIGN KEY (producer_epoch) REFERENCES audit.producer_epochs (id) ON DELETE RESTRICT;
+ALTER TABLE audit.log_streams ADD FOREIGN KEY (run_id) REFERENCES control.runs (id) ON DELETE RESTRICT;
+ALTER TABLE audit.security_events ADD FOREIGN KEY (stream_id) REFERENCES audit.log_streams (id) ON DELETE RESTRICT;
 ALTER TABLE audit.security_events ADD FOREIGN KEY (run_id) REFERENCES control.runs (id) ON DELETE RESTRICT;
 CREATE INDEX audit_security_events_idx_1 ON audit.security_events (partition_id, occurred_at, id);
-CREATE INDEX audit_security_events_idx_2 ON audit.security_events (producer_epoch);
+CREATE INDEX audit_security_events_idx_2 ON audit.security_events (stream_id);
 CREATE INDEX audit_security_events_idx_3 ON audit.security_events (request_id);
 CREATE INDEX audit_security_events_idx_4 ON audit.security_events (run_id);
-ALTER TABLE audit.receipts ADD FOREIGN KEY (producer_epoch) REFERENCES audit.producer_epochs (id) ON DELETE RESTRICT;
-ALTER TABLE audit.receipts ADD FOREIGN KEY (started_event_id) REFERENCES audit.security_events (id) ON DELETE RESTRICT;
-ALTER TABLE audit.receipts ADD FOREIGN KEY (terminal_event_id) REFERENCES audit.security_events (id) ON DELETE RESTRICT;
-CREATE INDEX audit_receipts_idx_1 ON audit.receipts (producer_epoch);
-CREATE INDEX audit_receipts_idx_2 ON audit.receipts (started_event_id);
-CREATE INDEX audit_receipts_idx_3 ON audit.receipts (terminal_event_id);
 ALTER TABLE detection.jobs ADD FOREIGN KEY (partition_id) REFERENCES detection.partitions (id) ON DELETE RESTRICT;
 CREATE INDEX detection_jobs_idx_1 ON detection.jobs (partition_id, state);
 ALTER TABLE detection.processed_events ADD FOREIGN KEY (partition_id) REFERENCES detection.partitions (id) ON DELETE RESTRICT;
 ALTER TABLE detection.rule_state ADD FOREIGN KEY (partition_id) REFERENCES detection.partitions (id) ON DELETE RESTRICT;
 ALTER TABLE detection.incidents ADD FOREIGN KEY (partition_id) REFERENCES detection.partitions (id) ON DELETE RESTRICT;
 CREATE INDEX detection_incidents_idx_1 ON detection.incidents (partition_id, analysis_state, created_at);
-ALTER TABLE audit.producer_epochs ADD FOREIGN KEY (run_id, partition_id) REFERENCES control.runs (id, partition_id);
-ALTER TABLE audit.security_events ADD FOREIGN KEY (producer_epoch, run_id, partition_id) REFERENCES audit.producer_epochs (id, run_id, partition_id);
+ALTER TABLE audit.log_streams ADD FOREIGN KEY (run_id, partition_id) REFERENCES control.runs (id, partition_id);
+ALTER TABLE audit.security_events ADD FOREIGN KEY (stream_id, run_id, partition_id) REFERENCES audit.log_streams (id, run_id, partition_id);
 ALTER TABLE detection.jobs ADD FOREIGN KEY (partition_id, ruleset_hash) REFERENCES detection.partitions (id, ruleset_hash);
 ALTER TABLE detection.processed_events ADD FOREIGN KEY (partition_id, ruleset_hash) REFERENCES detection.partitions (id, ruleset_hash);
 ALTER TABLE detection.rule_state ADD FOREIGN KEY (partition_id, ruleset_hash) REFERENCES detection.partitions (id, ruleset_hash);
 ALTER TABLE detection.incidents ADD FOREIGN KEY (partition_id, ruleset_hash) REFERENCES detection.partitions (id, ruleset_hash);
-CREATE INDEX receipts_pending_idx ON audit.receipts (producer_epoch, request_id) WHERE terminal_event_id IS NULL;
 REVOKE ALL ON SCHEMA control, audit, detection FROM PUBLIC;
 COMMIT;

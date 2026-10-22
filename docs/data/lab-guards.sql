@@ -1,5 +1,5 @@
 -- After lab-schema.sql, before lab-projections.sql / lab-detector-access.sql.
--- JSON/array aggregation must not weaken immutable snapshots or sealed sets.
+-- JSON/array aggregation must not weaken immutable baselines, CLOSE inputs or incident history.
 BEGIN;
 CREATE FUNCTION audit.canonical_event_ids(ids uuid[]) RETURNS uuid[]
 LANGUAGE sql IMMUTABLE STRICT AS $$
@@ -19,31 +19,41 @@ BEGIN
     RAISE EXCEPTION 'Invalid canonical event set or hash';
   END IF;
 END $$;
-CREATE FUNCTION audit.guard_epoch() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION audit.guard_log_stream() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP='INSERT' AND NEW.state<>'OPEN' THEN
-    RAISE EXCEPTION 'A producer epoch must start OPEN';
+  IF TG_OP='INSERT' AND (NEW.state<>'READING' OR NEW.last_ingested_seq<>0 OR NEW.expected_last_seq IS NOT NULL) THEN
+    RAISE EXCEPTION 'A new log stream must start READING at sequence zero';
   END IF;
   IF TG_OP='UPDATE' THEN
-    IF ROW(NEW.id,NEW.run_id,NEW.partition_id,NEW.producer_kind,NEW.source,NEW.registered_at)
-      IS DISTINCT FROM ROW(OLD.id,OLD.run_id,OLD.partition_id,OLD.producer_kind,OLD.source,OLD.registered_at) THEN
-      RAISE EXCEPTION 'Producer binding is immutable';
+    IF ROW(NEW.id,NEW.run_id,NEW.partition_id,NEW.producer_kind,NEW.source,NEW.source_instance_id,NEW.file_name,NEW.registered_at)
+       IS DISTINCT FROM ROW(OLD.id,OLD.run_id,OLD.partition_id,OLD.producer_kind,OLD.source,OLD.source_instance_id,OLD.file_name,OLD.registered_at) THEN
+      RAISE EXCEPTION 'Registered log source is immutable';
     END IF;
-    IF OLD.state='SEALED' AND NEW IS DISTINCT FROM OLD THEN
-      RAISE EXCEPTION 'A sealed epoch is immutable';
+    IF NEW.last_ingested_seq<OLD.last_ingested_seq OR NEW.last_ingested_seq>OLD.last_ingested_seq+1 THEN
+      RAISE EXCEPTION 'Log ingestion must advance one contiguous event at a time';
     END IF;
-    IF NEW.state<>OLD.state AND NOT
-      ((OLD.state='OPEN' AND NEW.state='CLOSED') OR (OLD.state='CLOSED' AND NEW.state='SEALED')) THEN
-      RAISE EXCEPTION 'Invalid producer state transition';
+    IF NEW.last_ingested_seq>OLD.last_ingested_seq AND NOT EXISTS (
+       SELECT 1 FROM audit.security_events WHERE stream_id=NEW.id AND seq=NEW.last_ingested_seq) THEN
+      RAISE EXCEPTION 'Cursor cannot advance before event insertion';
     END IF;
-  END IF;
-  IF NEW.state='SEALED' THEN
-    PERFORM audit.assert_event_set(NEW.expected_event_ids,NEW.event_set_hash);
+    IF OLD.expected_last_seq IS NOT NULL AND
+       ROW(NEW.expected_last_seq,NEW.end_seen_at) IS DISTINCT FROM ROW(OLD.expected_last_seq,OLD.end_seen_at) THEN
+      RAISE EXCEPTION 'STREAM_END is immutable';
+    END IF;
+    IF OLD.state IN ('DRAINED','ERROR') AND NEW.last_ingested_seq<>OLD.last_ingested_seq THEN
+      RAISE EXCEPTION 'No events may follow a finished or invalid stream';
+    END IF;
+    IF OLD.state='DRAINED' AND NEW.state NOT IN ('DRAINED','ERROR') THEN
+      RAISE EXCEPTION 'A drained stream cannot reopen';
+    END IF;
+    IF OLD.state='ERROR' AND NEW.state<>'ERROR' THEN
+      RAISE EXCEPTION 'An invalid stream cannot be reused';
+    END IF;
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER epoch_immutable BEFORE INSERT OR UPDATE ON audit.producer_epochs
-FOR EACH ROW EXECUTE FUNCTION audit.guard_epoch();
+CREATE TRIGGER log_stream_contract BEFORE INSERT OR UPDATE ON audit.log_streams
+FOR EACH ROW EXECUTE FUNCTION audit.guard_log_stream();
 
 CREATE FUNCTION detection.guard_job() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -88,10 +98,10 @@ BEGIN
 END $$;
 CREATE TRIGGER run_baseline_immutable BEFORE UPDATE ON control.runs
 FOR EACH ROW EXECUTE FUNCTION control.guard_run();
-CREATE FUNCTION control.guard_runner_job() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION control.guard_scenario_job() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF ROW(NEW.id,NEW.run_id,NEW.epoch,NEW.attempt,NEW.plan,NEW.plan_hash,NEW.lease_token_hash)
-    IS DISTINCT FROM ROW(OLD.id,OLD.run_id,OLD.epoch,OLD.attempt,OLD.plan,OLD.plan_hash,OLD.lease_token_hash) THEN
+  IF ROW(NEW.id,NEW.run_id,NEW.epoch,NEW.plan,NEW.plan_hash,NEW.deadline_at)
+    IS DISTINCT FROM ROW(OLD.id,OLD.run_id,OLD.epoch,OLD.plan,OLD.plan_hash,OLD.deadline_at) THEN
     RAISE EXCEPTION 'Runner plan is immutable';
   END IF;
   IF OLD.sealed_at IS NOT NULL AND
@@ -101,8 +111,8 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER runner_manifest_immutable BEFORE UPDATE ON control.runner_jobs
-FOR EACH ROW EXECUTE FUNCTION control.guard_runner_job();
+CREATE TRIGGER scenario_manifest_immutable BEFORE UPDATE ON control.scenario_jobs
+FOR EACH ROW EXECUTE FUNCTION control.guard_scenario_job();
 CREATE FUNCTION detection.guard_incident() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF array_position(NEW.evidence_event_ids,NULL) IS NOT NULL

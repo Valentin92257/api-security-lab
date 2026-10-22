@@ -1,4 +1,4 @@
-// Physical model; business-only constraints in shop-protected.sql.
+// Generated physical model; business-only constraints in shop-protected.sql.
 // Cross-database references are logical and are not rendered as FK.
 Table control.experiments {
   id uuid [pk, not null, note: 'Experiment UUID']
@@ -35,32 +35,30 @@ Table control.runs {
   }
   Note: 'Один target и одна фикстура; связь partition с target приватна.'
 }
-Table control.runner_jobs {
+Table control.scenario_jobs {
   id uuid [pk, not null, note: 'Job UUID']
   run_id uuid [not null, note: 'Run']
   epoch uuid [not null, note: 'Управляющая эпоха задания']
-  attempt integer [not null, note: 'Номер назначения']
   plan jsonb [not null, note: 'Исполнимый план без внешних адресов']
   plan_hash bytea [not null, note: 'SHA-256 плана']
-  lease_token_hash bytea [not null, note: 'Hash job credential; без исходного секрета']
-  lease_expires_at timestamptz [not null, note: 'Реальный deadline lease']
+  deadline_at timestamptz [not null, note: 'Предельное реальное UTC-время выполнения плана']
   state varchar(16) [not null, note: 'PREPARED / RUNNING / STOPPED / FAILED']
   step_manifest jsonb [note: 'Финальный manifest выполнения плана']
   step_manifest_hash bytea [note: 'SHA-256 финального manifest']
   sealed_at timestamptz [note: 'Реальное время фиксации manifest']
   indexes {
-    (run_id, attempt) [unique]
+    (run_id) [unique]
   }
-  Note: 'Lease и назначение runner; не SQL-доступ runner.'
+  Note: 'Неизменяемый план встроенного runner; один job на run, без распределенного исполнения.'
 }
 Table control.attempts {
-  request_id uuid [pk, not null, note: 'Gateway UUID; при недостижении gateway назначается harness']
-  step_id uuid [not null, note: 'Step UUID внутри immutable runner_jobs.plan; логическая ссылка']
+  request_id uuid [pk, not null, note: 'UUID attemptId=requestId, созданный harness до отправки и проверенный gateway']
+  step_id uuid [not null, note: 'Step UUID внутри immutable scenario_jobs.plan; логическая ссылка']
   attempt_no integer [not null, note: 'Номер попытки']
   started_at timestamptz [not null, note: 'Реальное время']
   finished_at timestamptz [note: 'Ответ/timeout']
   http_status integer [note: 'NULL при транспортной ошибке']
-  transport_outcome text [not null, note: 'RESPONSE / TIMEOUT / ERROR']
+  transport_outcome text [not null, note: 'RESPONSE / TIMEOUT / CONNECT_ERROR / CANCELLED']
   response_evidence jsonb [not null, note: 'Allowlist полей; без tokens, secrets, raw body']
   job_id uuid [not null, note: 'Назначение runner']
   indexes {
@@ -85,27 +83,31 @@ Table control.reports {
   }
   Note: 'Immutable report revision: snapshot и body с caseResults, episodeResults, incidentAssessments и evidence.'
 }
-Table audit.producer_epochs {
-  id uuid [pk, not null, note: 'Producer epoch UUID']
+Table audit.log_streams {
+  id uuid [pk, not null, note: 'Stream UUID, выдаёт control']
   run_id uuid [not null, note: 'Run']
-  partition_id uuid [not null, note: 'Opaque partition']
+  partition_id uuid [not null, note: 'Непрозрачная partition']
   producer_kind text [not null, note: 'GATEWAY / SHOP']
   source text [not null, note: 'Доверенный CloudEvents source']
-  state text [not null, default: `'OPEN'`, note: 'OPEN / CLOSED / SEALED']
-  registered_at timestamptz [not null, note: 'Реальное время']
-  expected_event_ids "uuid[]" [note: 'Точный отсортированный уникальный набор; NULL до SEAL']
-  event_set_hash bytea [note: 'SHA-256 канонического списка UUID']
-  coverage jsonb [note: 'Accepted/terminal counts, request slots и reconciliation evidence']
-  sealed_at timestamptz [note: 'Реальное время SEAL']
+  source_instance_id uuid [not null, note: 'UUID процесса, неизменяемый во время run']
+  file_name text [not null, note: 'Уникальный относительный путь, сформированный control']
+  state text [not null, default: `'READING'`, note: 'READING / DRAINED / ERROR']
+  last_ingested_seq bigint [not null, default: `0`, note: 'Последний непрерывно принятый seq']
+  expected_last_seq bigint [note: 'Значение lastSeq из STREAM_END']
+  end_seen_at timestamptz [note: 'Реальное время чтения STREAM_END']
+  error_reason text [note: 'Причина неполноты']
+  registered_at timestamptz [not null, note: 'Реальное время регистрации']
   indexes {
     (run_id, producer_kind) [unique]
     (id, run_id, partition_id) [unique]
+    (file_name) [unique]
   }
-  Note: 'Доверенная привязка producer/run; после SEAL также immutable manifest и coverage.'
+  Note: 'Один JSONL-файл producer на run; collector отмечает прочтение STREAM_END и всего диапазона seq.'
 }
 Table audit.security_events {
   id uuid [pk, not null, note: 'Глобальный Event UUID']
-  producer_epoch uuid [not null, note: 'Зарегистрированный producer']
+  stream_id uuid [not null, note: 'Зарегистрированный JSONL stream']
+  seq bigint [not null, note: 'Порядковый номер EVENT в файле, начиная с 1']
   run_id uuid [not null, note: 'Доверенная привязка run']
   partition_id uuid [not null, note: 'Доверенная opaque partition']
   request_id uuid [not null, note: 'HTTP-attempt']
@@ -115,39 +117,22 @@ Table audit.security_events {
   payload jsonb [not null, note: 'Валидированный CloudEvents v1']
   payload_hash bytea [not null, note: 'SHA-256 canonical payload']
   indexes {
+    (stream_id, seq) [unique]
     (partition_id, occurred_at, id)
-    (producer_epoch)
+    (stream_id)
     (request_id)
     (run_id)
   }
-  Note: 'Append-only CloudEvents; одинаковый id с другим payload — ошибка.'
-}
-Table audit.receipts {
-  request_id uuid [pk, not null, note: 'Принятый HTTP-attempt']
-  producer_epoch uuid [not null, note: 'Gateway epoch']
-  started_event_id uuid [not null, note: 'Durable started event']
-  terminal_event_id uuid [note: 'Completed/abort evidence']
-  shop_invoked boolean [not null, default: `false`, note: 'Downstream мог быть вызван; отмечается до вызова']
-  accepted_at timestamptz [not null, note: 'Реальное время приема']
-  completed_at timestamptz [note: 'Время доказанного terminal outcome']
-  indexes {
-    (producer_epoch)
-    (started_event_id)
-    (terminal_event_id)
-  }
-  Note: 'Gateway durable admission; terminal slot обязателен независимо от HTTP-ответа.'
+  Note: 'Валидированное событие из JSONL; append-only; raw payload не доступен detector.'
 }
 Table detection.partitions {
   id uuid [pk, not null, note: 'Opaque partition UUID; без FK на control']
   ruleset_hash bytea [not null, note: 'Hash зафиксированного ruleset']
   ruleset_snapshot jsonb [not null, note: 'Полные разрешенные правила и engine version']
-  lease_owner uuid [note: 'Worker instance']
-  lease_until timestamptz [note: 'Реальное время истечения']
-  fence bigint [not null, default: `0`, note: 'Монотонный fencing token']
   indexes {
     (id, ruleset_hash) [unique]
   }
-  Note: 'Без run/target/labels; lease с fencing token.'
+  Note: 'Неизменяемый ruleset; один worker на partition внутри единственного процесса detector.'
 }
 Table detection.jobs {
   id uuid [pk, not null, note: 'Job UUID']
@@ -222,21 +207,18 @@ Table detection.incidents {
   Note: 'Наблюдаемая угроза; не содержит TP/FP и confirmed impact.'
 }
 Ref: control.runs.experiment_id > control.experiments.id [delete: restrict]
-Ref: control.runner_jobs.run_id > control.runs.id [delete: restrict]
-Ref: control.attempts.job_id > control.runner_jobs.id [delete: restrict]
+Ref: control.scenario_jobs.run_id > control.runs.id [delete: restrict]
+Ref: control.attempts.job_id > control.scenario_jobs.id [delete: restrict]
 Ref: control.reports.run_id > control.runs.id [delete: restrict]
-Ref: audit.producer_epochs.run_id > control.runs.id [delete: restrict]
-Ref: audit.security_events.producer_epoch > audit.producer_epochs.id [delete: restrict]
+Ref: audit.log_streams.run_id > control.runs.id [delete: restrict]
+Ref: audit.security_events.stream_id > audit.log_streams.id [delete: restrict]
 Ref: audit.security_events.run_id > control.runs.id [delete: restrict]
-Ref: audit.receipts.producer_epoch > audit.producer_epochs.id [delete: restrict]
-Ref: audit.receipts.started_event_id > audit.security_events.id [delete: restrict]
-Ref: audit.receipts.terminal_event_id > audit.security_events.id [delete: restrict]
 Ref: detection.jobs.partition_id > detection.partitions.id [delete: restrict]
 Ref: detection.processed_events.partition_id > detection.partitions.id [delete: restrict]
 Ref: detection.rule_state.partition_id > detection.partitions.id [delete: restrict]
 Ref: detection.incidents.partition_id > detection.partitions.id [delete: restrict]
-Ref: audit.producer_epochs.(run_id, partition_id) > control.runs.(id, partition_id)
-Ref: audit.security_events.(producer_epoch, run_id, partition_id) > audit.producer_epochs.(id, run_id, partition_id)
+Ref: audit.log_streams.(run_id, partition_id) > control.runs.(id, partition_id)
+Ref: audit.security_events.(stream_id, run_id, partition_id) > audit.log_streams.(id, run_id, partition_id)
 Ref: detection.jobs.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)
 Ref: detection.processed_events.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)
 Ref: detection.rule_state.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)

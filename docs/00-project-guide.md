@@ -47,15 +47,14 @@ API записывает наблюдаемые факты: кто обраща�
 
 ## 4. Архитектура целиком
 
-Пять Java-приложений образуют шесть работающих Java-процессов: магазин запускается дважды. Ещё три контейнера предоставляют PostgreSQL, Redis и локальную наблюдаемость. В базовом Compose получается девять постоянно работающих контейнеров; одноразовые задания подготовки в это число не входят.
+Четыре Java-приложения образуют пять работающих Java-процессов: магазин запускается дважды. Ещё три контейнера предоставляют PostgreSQL, Redis и локальную наблюдаемость. В базовом Compose получается восемь постоянно работающих контейнеров; одноразовые задания подготовки в это число не входят.
 
 | Компонент | Что делает | Почему выделен |
 |---|---|---|
 | `shop-api` × 2 | Пользователи, каталог, корзина, заказ, предметная защита и события | Два независимых режима одного контракта для сравнения |
 | `lab-gateway` | Принимает сценарный HTTP, проверяет токен/схему/лимиты, выбирает backend | Общая точка входа и место универсальных защит |
-| `scenario-runner` | Исполняет план запросов, создаёт конкурентность, сохраняет результаты attempts | Нагрузка и таймауты сценария не занимают процесс UI |
-| `lab-detector` | Читает безопасную проекцию событий, применяет правила, создаёт incidents | Изоляция от ответов эксперимента и самостоятельное восстановление |
-| `lab-control` | Управляет опытом, готовит данные, оценивает эффект, показывает UI и отчёт | Одна точка управления всем жизненным циклом |
+| `lab-detector` | Читает безопасную проекцию событий, применяет правила, создаёт incidents | Изоляция от ответов эксперимента и независимая логика обнаружения |
+| `lab-control` | Управляет опытом, исполняет сценарии отдельным модулем, собирает JSONL, готовит данные, оценивает эффект, показывает UI и отчёт | Одна точка управления всем жизненным циклом |
 | PostgreSQL | Бизнес-состояние, audit, задания, incidents, reports | Долговечные данные и транзакционные гарантии |
 | Redis | Краткоживущее состояние ограничений входа | Готовые распределённые счётчики без вмешательства в checkout |
 | Grafana LGTM | Логи, метрики и traces | Техническая диагностика компонентов |
@@ -64,19 +63,19 @@ API записывает наблюдаемые факты: кто обраща�
 
 - **Бизнес-запросы:** runner → gateway → выбранный shop → его БД.
 - **Управление:** оператор → control; затем задания runner, подготовка shop, открытие/закрытие gateway и задания detector.
-- **Доказательства:** gateway и shop → audit; detector → incidents; evaluator → результаты и report.
+- **Доказательства:** gateway и shop → JSONL → log-ingestor в control → audit; detector → incidents; evaluator → результаты и report.
 - **Наблюдаемость:** приложения → логи, метрики и traces в LGTM.
 
 ```text
                        +-> gateway:8081 -> shop-vulnerable -> shop_vulnerable DB
-operator -> control -> runner
+operator -> control [scenario-runner]
                        +-> gateway:8082 -> shop-protected  -> shop_protected DB
 
-gateway + shop outbox -> audit -> detector view -> detector -> incidents
+gateway + shop -> JSONL files -> control log-ingestor -> audit -> detector view -> detector -> incidents
 control / evaluator  -> steps + audit + readonly shop state + incidents -> report
 ```
 
-Control не проксирует каждую покупку через себя. Detector не стоит на пути HTTP-запроса. Отчётный audit не заменяется обычными логами: потерянный debug log и потерянное доказательство успешной операции имеют разные последствия.
+Control не проксирует каждую покупку через себя. Detector не стоит на пути HTTP-запроса. Audit — индекс структурированных security-логов. Требования к их полноте и схеме строже, чем к диагностическим сообщениям.
 
 ## 5. Стек и причины выбора
 
@@ -105,9 +104,10 @@ Control не проксирует каждую покупку через себ�
 apps/
   shop-api/          # auth, catalog, cart, checkout, orders, lab-admin, audit
   lab-gateway/       # listeners, routing, policies, admission, audit
-  scenario-runner/   # plan, scenarios, executor, lease, results
   lab-detector/      # ingestion, rules, windows, incidents, jobs
-  lab-control/       # experiments, fixtures, evaluator, ui, reports
+  lab-control/       # orchestration, fixtures, log-ingestor, evaluator, ui, reports
+modules/
+  scenario-runner/   # plan, scenarios, executor, cancellation, result ports; без Boot main
 libs/
   lab-contracts/     # общие wire records/enums
   lab-observability/ # trace propagation, redaction, соглашения метрик
@@ -115,7 +115,6 @@ libs/
 contracts/
   shop-api.yaml
   control-api.yaml
-  runner-api.yaml
   lab-admin-api.yaml
   security-event.schema.json
   incident.schema.json
@@ -178,7 +177,7 @@ User содержит id/login/name/email; пароль или hash не воз�
 
 Бизнес-таблицы: users, products, coupons, carts/cart_items, orders/order_items. В carts есть revision, в products — published/catalog_version, в купоне — срок, max_uses, used_count и terms_version. Скрытый draft-товар служит canary: его появление в обычной выдаче — наблюдаемый эффект injection.
 
-Служебные таблицы решают конкретные задачи: checkout_intents хранит одноразовое намерение; orders — успешный ответ, hash ключа и факт использования купона; security_outbox хранит ещё не доставленные события; execution_ledger — принятые и завершённые запросы.
+Дополнительная таблица checkout_intents хранит одноразовое намерение. Orders хранит успешный ответ, hash ключа и факт использования купона. Таблиц доставки событий и учёта исполнения в магазине нет: факты поступают из структурированных логов.
 
 Protected дополняет PK/FK бизнес-ограничениями: допустимое количество, корректные суммы, used_count≤max_uses, уникальный order на intent и на пару cart/revision. Межтабличное равенство суммы заказа сумме его строк нельзя обеспечить одним обычным CHECK; его обеспечивает транзакция и проверяет независимый oracle.
 
@@ -202,7 +201,7 @@ Protected дополняет PK/FK бизнес-ограничениями: до
 3. Сверяет состав, цены, условия купона и quotedTotal с серверным расчётом.
 4. Атомарно расходует купон при действующем сроке и остатке.
 5. Создаёт order/items, отмечает intent использованным, очищает корзину и увеличивает revision.
-6. Сохраняет успешный status/body для key, terminal record и outbox event; фиксирует всё одним commit.
+6. Сохраняет успешный status/body для key и фиксирует бизнес-изменения одним commit. Затем пишет operation/terminal в JSONL и возвращает HTTP-ответ.
 
 Единый порядок блокировок: key → cart → intent → coupon; внутри одного типа — возрастающий id. Все mutations корзины берут её row lock. Два intent одной revision не дают две покупки; constraints выступают дополнительным рубежом. Лишний no-op DELETE/PATCH не меняет revision.
 
@@ -214,7 +213,7 @@ TTL intent первоначально 120 секунд по бизнес-час�
 
 Gateway имеет два бизнес-входа и отдельный служебный интерфейс. Маршрут определяется доверенным входным listener, а не значением Host/X-Target или иным заголовком клиента. Run/step/epoch-контекст принимается только после проверки harness credential и активного задания. Role/owner headers клиента удаляются; shop самостоятельно проверяет access JWT.
 
-Внутренние обязанности разделены между admission, routing, PolicyChain, audit writer и proxy. Admission отвечает, можно ли принимать новые requests этого run. Routing знает фиксированные backend. Политики вычисляют решение, а chain определяет фактическое продолжение или отказ.
+Внутренние обязанности разделены между admission, routing, PolicyChain, JSONL writer и proxy. Admission отвечает, можно ли принимать новые requests этого run. Routing знает фиксированные backend. Политики вычисляют решение, а chain определяет фактическое продолжение или отказ.
 
 ```java
 interface GatewayPolicy {
@@ -229,7 +228,7 @@ interface GatewayPolicy {
 
 Нужно хранить обе стороны: `wouldDecision=ALLOW/BLOCK/FLAG` и `enforcedAction=CONTINUE/REJECT/INFRA_REJECT`. Для пропуска/ошибки wouldDecision=null. EvaluationStatus различает EVALUATED, SKIPPED, NOT_APPLICABLE, NOT_REACHED, MISSING_CONTEXT, ERROR. Например, wouldDecision=BLOCK при OBSERVE не увеличивает число реальных блокировок.
 
-Порядок обработки: обязательный admission/ресурсные пределы → обязательный JWT для закрытых endpoints → OpenAPI validation → login/rate policy → дополнительные признаки ввода → durable audit и разрешённый proxy. После первого отказа остальные экспериментальные проверки имеют NOT_REACHED. Audit является внешней обязательной обвязкой и выполняется даже при раннем 400/401/413/429.
+Порядок обработки: обязательный admission/ресурсные пределы → обязательный JWT для закрытых endpoints → OpenAPI validation → login/rate policy → дополнительные признаки ввода → запись security-логов и разрешённый proxy. После первого отказа остальные экспериментальные проверки имеют NOT_REACHED. Audit является внешней обязательной обвязкой и выполняется даже при раннем 400/401/413/429.
 
 JWT проверяется по фиксированным alg, подписи, issuer, audience, exp и nbf. Начальный TTL access token — 15 минут, clock skew — 5 секунд. Отдельный target имеет свою ожидаемую конфигурацию ключа/claims. Успешная аутентификация устанавливает личность; право прочитать Order по-прежнему проверяет shop.
 
@@ -239,51 +238,49 @@ State namespace включает opaque partition, policy version и mode, по�
 
 Обычная paired-конфигурация: vulnerable с OBSERVE gateway-политик и учебными shop-стратегиями; protected с ENFORCE и защищёнными стратегиями. Общие границы безопасности и audit включены в обоих режимах. Для отдельного исследования стоимости политики backend фиксируют и меняют только OFF/OBSERVE/ENFORCE.
 
-## 10. Как работает генератор сценариев
+## 10. Как работает встроенный генератор сценариев
 
-Runner получает готовый исполнимый план. В нём описаны actors, шаги, данные, последовательные/конкурентные группы, число повторов, допустимые ветвления и бюджет. Генератор не импровизирует по ответам, если такое поведение не предусмотрено версией сценария.
+Scenario-runner — библиотека внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один активный run выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
 
-Внутри удобно разделить `PlanExecutor`, `StepExecutor`, bounded HTTP client, `LeaseClient` и `ResultPublisher`. PlanExecutor управляет порядком и barriers. StepExecutor превращает типизированный шаг в HTTP-вызов. HTTP client отвечает за allowlist, timeout, отсутствие redirects и предел ответа. ResultPublisher надёжно передаёт результаты control.
+`PlanExecutor` управляет порядком, barriers и конечными циклами; `StepExecutor` превращает типизированный шаг в запрос; `ScenarioHttpClient` выбирает фиксированный gateway origin; `AttemptSink` передаёт результат адаптеру control. Модуль не импортирует JDBC, evaluator, log-reader или admin-клиенты. Отдельный Maven-модуль и ArchUnit проверяют эти зависимости. Это доверенный код, не песочница для произвольных программ.
 
-Для HTTP I/O используются virtual threads, но доступ ограничивается семафорами. Это важно: дешёвый поток не делает бесплатными DB connection, память тела ответа и вычисления backend. У задания есть предел attempts, concurrency, длительности и объёма данных.
+Orchestrator сохраняет control.scenario_jobs: jobId/runId/epoch, plan/hash, deadline и состояние. `prepare(plan)` проверяет бюджет и hash; `start(prepared, cancellationToken, attemptSink)` возвращает completion handle, не блокируя HTTP-поток UI. `cancel()` запрещает новые steps/retries, завершение handle возвращает итоговый step manifest. HTTP-протокола runner↔control, heartbeat и lease нет.
 
-Control выдаёт jobId/runId/epoch, target enum, plan/hash, budget, lease token и expiry. Lease — ограниченное по времени право продолжать работу. Runner подтверждает hash, присылает heartbeat и прекращает новые шаги при утрате lease. Потеря связи с control не должна создавать бесконечный поток запросов.
+У runner отдельный executor; HTTP I/O может использовать virtual threads с semaphore. Ограничены concurrency, attempts, body/response, очередь результатов и длительность. UI, log-ingestor и orchestration не используют этот executor или common ForkJoinPool. Общие JVM/heap/CPU всё равно остаются общей областью отказа: resource limits и отмена обязательны, OOM не изолирован от UI.
 
-Один step может иметь несколько HTTP-attempts. AttemptId создаётся до отправки; requestId выдаёт gateway. Retry получает новый requestId, но для повторяемого checkout сохраняет прежние intent/key. Step result содержит время, method/route, transport outcome, status и безопасные response facts. Пароли/token остаются в памяти; результаты не содержат Authorization и исходного secret body.
+AttemptId=requestId — UUID, создаваемый до отправки. Gateway принимает корреляцию только с доверенным run credential/context, связанным с активными run/epoch/target. Это право маркировать трафик, не worker lease. Retry получает новый attemptId, но сохраняет intent/key повторяемой бизнес-операции. Пароли/JWT живут только в памяти; AttemptSink сохраняет безопасные результаты ограниченными batches. Завершение подтверждается после их записи и фиксации manifest; потеря результата даёт INCONCLUSIVE.
 
-Подготовка данных выполняется через control, а не SQL runner. Runner не имеет доступа к shop-admin, Redis или БД. Его targets — только два gateway origin; redirects и proxy отключены, а контейнерная сеть отдельно ограничивает egress.
+Сценарии принимают target enum и версионированные routes, не произвольный baseUrl. ScenarioHttpClient запрещает redirects, proxy, absolute URL override, смену origin и management routes. Query/body могут содержать учебный ввод, но не менять адрес назначения. Fixtures подготавливает orchestration через собственный admin adapter. У процесса control есть права на admin/SQL/log mounts; встроенный runner технически разделяет их. Программные ограничения здесь нельзя описывать как сетевой запрет доступа модуля к ресурсам control. Внешний egress запрещён для всего контейнера.
 
-CS-01 генерирует 200 попыток, среди которых три корректные пары разных аккаунтов. Для detection это одна кампания/episode, а для ASR — три case доступа к известным аккаунтам. Неверные пары не раздувают знаменатель заведомыми неуспехами. Для race фиксируются barrier, число потоков, repetitions и seed; интерливинг SQL может различаться, поэтому оценивается серия.
+Run deadline и cancellation token проверяются перед каждой отправкой, retry и ожиданием barrier. Ошибка сохранения/переполнение очереди останавливают новые действия. Отмена клиентского Future или timeout не означают rollback в магазине: DRAINING отдельно ждёт его in-flight и логи. После падения control старый run INCONCLUSIVE и не возобновляется.
 
-## 11. События и надёжная доставка
+CS-01 генерирует 200 попыток, включая три корректные пары: один detection episode и три case доступа. Неверные пары не раздувают знаменатель ASR. Race использует barriers и повторения; seed не фиксирует планирование потоков и SQL interleaving.
 
-### Факт, инцидент и вывод — три разных объекта
+## 11. Структурированные логи как источник детектора
 
-SecurityEvent сообщает наблюдаемый факт: вход не удался, owner не совпал, policy заблокировала запрос, order создан. Incident — вывод detector, что один или несколько фактов соответствуют правилу подозрительного поведения. Assessment — независимая оценка control: какое нарушение действительно произошло и был ли incident правильным.
+### Факт, инцидент и независимая оценка
 
-Это разделение принципиально. Если producer пишет в событие «здесь успешная атака BOLA», detector фактически получает готовый ответ. Если detector объявляет подтверждённый ущерб без доступа к независимому эталону, он смешивает гипотезу и доказательство.
+SecurityEvent сообщает наблюдаемый факт: вход не удался, owner не совпал, policy заблокировала запрос, order создан. Incident — вывод detector по одному или нескольким фактам. Assessment — независимая оценка control по результатам запросов и состоянию магазина. Producer не пишет «успешная атака BOLA», а detector не получает ожидаемый ответ сценария.
 
-События имеют CloudEvents envelope: specversion=1.0, id, source, type, time, datacontenttype, dataschema; предметные данные находятся в `data`. Внутри data находятся context, actor, request, action, outcome и observations. Context связывает run/partition/epoch/request/trace; actor содержит authenticated subject либо anonymous; request — method/route/sourceKey; outcome — фактический статус и причина.
+SecurityEvent использует CloudEvents envelope: specversion=1.0, id, source, type, time, datacontenttype, dataschema и data. Предметные поля data — context, actor, request, action, outcome, observations. Context связывает runId/partitionId/streamId/requestId/traceId; actor содержит authenticated subject либо anonymous. Неизвестное значение — null, а не false. Пароли, JWT, исходные ключи идемпотентности и произвольный SQL/query в логи не попадают.
 
-Примеры типов: request.started/completed, policy.evaluated, auth.attempted, object.accessed, operation.completed, input.observed. Полные имена версионированы, например `lab.object.accessed.v1`. EventId создаётся один раз и сохраняется при повторной доставке. Неизвестное наблюдение передаётся как null, а не false; исходные passwords/JWT/query не копируются в event.
+### Как приложение пишет лог
 
-### Зачем нужен outbox
+Gateway и каждый shop пишут отдельный UTF-8 JSONL-файл через общий технический модуль. В PREPARE control назначает runId, streamId, путь `<runId>/<streamId>.jsonl` и регистрирует неизменный sourceInstanceId процесса. Файлы находятся в named volumes: producer имеет запись только в свой volume, control монтирует их readonly. Runner и detector этих mounts не получают; Docker socket не нужен.
 
-Shop изменяет бизнес-состояние в своей БД, а audit живёт в другой логической БД. Простая последовательность «commit заказа, затем отправка события» опасна: процесс может упасть между действиями, и созданный заказ останется без события.
+Каждая строка EVENT содержит logVersion=1, recordKind=EVENT, streamId, sourceInstanceId, seq и event. Seq начинается с 1 и непрерывно возрастает внутри stream. Один синхронизированный writer назначает seq и целиком записывает строку с переводом строки, затем flush. Sampling, отбрасывание, ротация и очистка до отчёта запрещены. Flush не является гарантией сохранности при падении машины.
 
-Вместо этого бизнес-транзакция записывает заказ и строку `security_outbox` в одну БД. После commit отдельный publisher читает outbox и вставляет event в lab DB. Получив подтверждение, он отмечает delivered. Если процесс падает после вставки, но до отметки, publisher отправит то же eventId ещё раз, а unique key исключит повторное сохранение факта.
+Gateway пишет `lab.http.request.started.v1` перед обработкой и `lab.http.request.completed.v1` после решения/ответа downstream; terminal содержит observations.downstreamInvoked. Shop пишет `lab.api.request.started.v1` перед обработкой и `lab.api.request.completed.v1` после результата. Между ними пишутся факты policy/auth/object/input/operation. Успешная mutation логируется после commit, отказ — после rollback. Terminal записывается последним, до уменьшения in-flight и отправки HTTP-ответа. Это действует одинаково в vulnerable и protected.
 
-Таким образом доставка допускает повторы; логическая обработка идемпотентна. Это не обещание магического end-to-end exactly-once. Ошибка одного и того же id с другим payload считается нарушением целостности, а не безобидным retry.
+Бизнес-транзакция и запись в файл не атомарны. В MVP предполагается, что процессы и хранилища не падают во время run. Ошибка логирования после commit не отменяет созданный заказ: admission закрывается, опыт признаётся INCONCLUSIVE. Продолжение прерванного опыта и восстановление потерянных событий не реализуются.
 
-Read-only чтение и отказ тоже имеют audit. Событие успешной mutation входит в её транзакцию; после rollback событие отказа сохраняется отдельно, иначе оно откатилось бы вместе с операцией. Publisher работает с ограниченными batch/backoff и не удаляет недоставленные события.
+### Сбор логов и проверка полноты
 
-### Как увидеть потерянное завершение
+Модуль log-ingestor внутри control читает только зарегистрированные файлы. Он проверяет версию, schema, source/instance/run/stream, seq и ограничения размера; сохраняет событие в audit.security_events и двигает last_ingested_seq в audit.log_streams одной SQL-транзакцией. Повтор той же строки допустим только при полном совпадении id/seq/payload; конфликт — ошибка. Незавершённая строка в конце файла ждёт перевода строки до deadline. API и gateway не имеют credentials для lab DB.
 
-Gateway до downstream сохраняет receipt — долговечную запись, что запрос принят. Shop ведёт execution ledger: начатые и завершённые операции. После crash пустой счётчик JVM ничего не доказывает; незавершённая ledger row остаётся поводом проверить, был ли commit/rollback.
+После CLOSE producer закрывает admission, дожидается in-flight=0 и записывает STREAM_END с lastSeq. Это служебная строка, а не событие detector. Collector подтверждает DRAINED, только если получил маркер и все EVENT с seq от 1 до lastSeq. Дополнительно проверяются started/completed для каждого запроса, shop terminal для downstreamInvoked=true и корреляция с результатами runner. Сам по себе маркер не доказывает правильность логирования: контракт покрывается интеграционными тестами.
 
-На завершении producer фиксирует manifest: точный набор event IDs, count/hash, принятые и завершённые requests. Manifest — опись доказательств. Один hash фактически полученных событий недостаточен: нужно ещё проверить, что для каждого принятого request есть требуемый terminal outcome. Иначе одинаковые списки могут быть одинаково неполными.
-
-Audit хранится независимо от LGTM. Retention/cleanup не удаляет необработанные события; переполнение очереди или размера evidence не превращается в тихое отбрасывание. Неполнота видна в состоянии run.
+В run участвуют два stream: gateway и выбранный shop. После их закрытия control формирует точный список event IDs/hash для detector CLOSE. Детектор читает безопасную SQL-проекцию уже разобранных логов; Loki нужен для просмотра и диагностики, а не для доставки входа detector. Потеря строки, конфликт, отсутствие terminal/END, превышение бюджета или смена instance делают отчёт INCONCLUSIVE. Старый run после перезапуска не возобновляется.
 
 ## 12. Как устроен detector
 
@@ -307,11 +304,11 @@ YAML допускает eq/in, count/countDistinct, groupBy и bounded window. �
 
 ### Повторы, поздние события и окна
 
-Для каждого event есть processed marker `(partition, rulesetHash, eventId)`. Изменение rule state, incident/evidence и marker фиксируется одной транзакцией. Crash до commit приводит к повторной обработке, после commit — к обнаружению существующего marker.
+Для каждого event есть processed marker `(partition, rulesetHash, eventId)`. Изменение rule state, incident/evidence и marker фиксируется одной транзакцией. Marker предотвращает повторный вклад события при очередном polling; восстановление после падения процесса в MVP не используется.
 
 Выборка ищет отсутствие marker, а не только `id > lastSeen`. Пример: транзакция A получила id 101 и задержалась, B получила 102 и завершилась. Consumer увидел 102. Если он навсегда передвинул watermark на 102, поздний commit 101 потеряется. Anti-join по markers сохраняет возможность его обработки.
 
-Окна строятся по времени события; одинаковое время упорядочивается eventId. Позднее событие может изменить вывод, поэтому state хранится в ограниченном буфере и нужное окно пересчитывается. На partition работает один worker с DB lease; масштабирование на множество concurrent consumers не требуется первой версии.
+Окна строятся по времени события; одинаковое время упорядочивается eventId. Позднее событие может изменить вывод, поэтому state хранится в ограниченном буфере и нужное окно пересчитывается. На partition работает один worker единственного процесса detector. DB lease/fencing не нужны; параллельные экземпляры detector в MVP запрещены.
 
 Live incident сначала PROVISIONAL. После команды CLOSE detector получает полный безопасный список event IDs, обрабатывает его, закрывает окна и делает результат FINAL. Если предварительный вывод больше не подтверждается, он становится RETRACTED; история не стирается. Метрики используют только FINAL.
 
@@ -350,7 +347,7 @@ Operator authentication, CSRF, escaping и пагинация входят в м
 
 Оператор задаёт имя, версии сценариев, targets VULNERABLE/PROTECTED, seed, fixtureVersion, policyProfile, rulesetVersion, parallelism и repetitions. Произвольный baseUrl, callback, Java-код и SQL assertion не принимаются. Настройки валидируются и превращаются в immutable definition/manifest.
 
-Основные команды control доступны через `/control/v1/experiments` и `/control/v1/runs/{runId}`: create, start, status, cancel и report. Control передаёт runner PREPARE/START/CANCEL через отдельный internal listener; runner возвращает heartbeat/results через scoped worker listener. Gateway/shop принимают PREPARE/OPEN/CLOSE/SEAL/RESET. Detector получает PREPARE/CLOSE/CANCEL через таблицу jobs.
+Основные команды control доступны через `/control/v1/experiments` и `/control/v1/runs/{runId}`: create, start, status, cancel и report. Control вызывает встроенный RunnerService через Java-интерфейсы prepare/start/cancel и получает completion handle; результаты идут через AttemptSink. Отдельного runner HTTP API нет. Gateway/shop принимают PREPARE/OPEN/CLOSE/RESET. Detector получает PREPARE/CLOSE/CANCEL через таблицу jobs.
 
 Команда содержит schemaVersion, commandId, runId, epoch и ожидаемую state/revision. Повтор commandId с тем же payload безопасен; с другим — conflict. HTTP 202 означает принятие, а окончание подтверждается состоянием/ACK. Epoch обозначает поколение работы: запоздавшая команда прошлого run не может открыть admission или сбросить новые данные.
 
@@ -360,7 +357,7 @@ Operator authentication, CSRF, escaping и пагинация входят в м
 CREATED -> PREPARING -> RUNNING -> DRAINING -> EVALUATING -> COMPLETED
 ```
 
-- В PREPARING закрывается старый доступ, проверяется отсутствие операций, загружаются фикстуры, проверяются baseline invariants и фиксируются snapshots. Detector возвращает READY, runner подтверждает planHash.
+- В PREPARING закрывается старый доступ, проверяется отсутствие операций, загружаются фикстуры, проверяются baseline invariants и фиксируются snapshots. Detector возвращает READY, локальный prepare runner проверяет planHash.
 - В RUNNING открыт admission, runner исполняет план, политики применяются, события доставляются, detector создаёт предварительные выводы.
 - В DRAINING новые действия прекращаются и доказывается завершение всех уже принятых.
 - В EVALUATING независимый oracle и сопоставление incidents формируют окончательный report.
@@ -371,22 +368,22 @@ FAILED означает технически невыполненную подг
 
 ### Почему недостаточно дождаться последнего ответа runner
 
-Пусть клиент получил timeout через пять секунд, а SQL-транзакция ещё выполняется. Если немедленно посчитать заказ отсутствующим и сбросить данные, поздний commit может одновременно исказить отчёт и следующий опыт. Аналогичная проблема возникает, если последний event ещё лежит в outbox или detector не закрыл окно.
+Пусть клиент получил timeout через пять секунд, а SQL-транзакция ещё выполняется. Если немедленно посчитать заказ отсутствующим и сбросить данные, поздний commit может одновременно исказить отчёт и следующий опыт. Аналогичная проблема возникает, если последняя строка JSONL ещё не прочитана collector или detector не закрыл окно.
 
 Поэтому завершение имеет явный барьер:
 
 1. Runner прекращает новые steps и передаёт manifest выполненных attempts.
 2. Gateway/shop закрывают admission текущего epoch, включая задержавшиеся запросы.
-3. Ledger/receipts и runtime state подтверждают отсутствие незавершённых работ — состояние quiescence.
-4. Producers запечатывают набор events; outbox доставляется, проверяются IDs и terminal coverage.
+3. Gateway/shop дожидаются in-flight=0 при неизменном sourceInstanceId и исправном процессе; затем flush STREAM_END.
+4. Collector проверяет непрерывные seq до lastSeq, started/completed и результаты runner; оба stream переходят в DRAINED.
 5. Detector обрабатывает полный безопасный manifest, закрывает окна и подтверждает hashes/counts/errors.
 6. Control снимает итоговое состояние, выполняет oracle и сохраняет report.
 
-Каждая стадия имеет deadline. Неполнота не маскируется дополнительным ожиданием без ограничений: run получает INCONCLUSIVE. После crash сохранённые состояния позволяют продолжить reconciliation. Если завершение доказать нельзя, runtime останавливается и проверяются DB-сессии; только затем допускается reset. Поздние admission rejects старого epoch записываются вне запечатанного набора.
+Каждая стадия имеет deadline. Пропуски или неподтверждённое завершение дают INCONCLUSIVE. При отказе/перезапуске run не продолжается: старые исполнители останавливаются, новый запуск получает свежие фикстуры. Поздние admission rejects старого epoch попадают только в операционный лог, не меняя закрытый stream.
 
 ## 15. Как считаются результаты
 
-Метрики считают заранее определённые случаи и последовательности. Один HTTP-запрос может породить gateway receipt, policy event, shop event и terminal event; это не четыре атаки.
+Метрики считают заранее определённые случаи и последовательности. Один HTTP-запрос может породить gateway started log, policy event, shop event и terminal event; это не четыре атаки.
 
 | Метрика | Что означает и как считается |
 |---|---|
@@ -409,9 +406,9 @@ Incident связывается с episode по evidence event → request → a
 
 ### PostgreSQL и права
 
-Один PostgreSQL обслуживает `shop_vulnerable`, `shop_protected` и `lab`. Первые две БД хранят независимые бизнес-состояния, третья — работу стенда. В lab schema `audit` хранит события/receipts/manifests, `control` — runs/steps/labels/oracle/reports, `detection` — jobs/markers/state/incidents.
+Один PostgreSQL обслуживает `shop_vulnerable`, `shop_protected` и `lab`. Первые две БД хранят независимые бизнес-состояния, третья — работу стенда. В lab schema `audit` хранит индекс событий и состояние чтения log streams, `control` — runs/steps/labels/oracle/reports, `detection` — jobs/markers/state/incidents.
 
-Обычная shop-role имеет DML только собственной БД, без DDL/TRUNCATE. Catalog adapter использует отдельную SELECT-only роль, чтобы учебная SQL-слабость не давала доступ к пользователям или изменению данных. Audit writer может добавлять события только своего producer. Detector читает лишь безопасную view и пишет собственные результаты. Evaluator читает бизнес-состояние без password_hash. Fixture admin и migration owner используются отдельным служебным путём; их полномочия не выдаются runner.
+Обычная shop-role имеет DML только собственной БД, без DDL/TRUNCATE. Catalog adapter использует отдельную SELECT-only роль, чтобы учебная SQL-слабость не давала доступ к пользователям или изменению данных. Log-ingestor в control читает readonly mounts и индексирует проверенные строки в lab DB. У gateway/shop нет lab DB credentials. Detector читает лишь безопасную view и пишет собственные результаты. Evaluator читает бизнес-состояние без password_hash. Fixture admin и migration owner используются отдельным служебным путём. Сценарным классам не передаются admin/evaluator adapters; внутри общей JVM это граница кода, а не изоляция прав процесса.
 
 Роли ограничиваются SQL grants и функциями/политиками записи, а не названием Java-сервиса. Общий PostgreSQL остаётся общей точкой отказа: логические БД не создают физическую отказоустойчивость. Для локального учебного стенда это осознанный компромисс.
 
@@ -419,14 +416,13 @@ Incident связывается с episode по evidence event → request → a
 
 | Internal network | Участники и назначение |
 |---|---|
-| `lab-traffic` | Runner, gateway, LGTM collector: сценарный HTTP и telemetry |
-| `worker-control` | Runner/control: задания, heartbeat, results |
+| `lab-traffic` | Control со встроенным runner, gateway, LGTM collector: сценарный HTTP и telemetry |
 | `shop-backend` | Gateway и оба shop: бизнес-запросы |
 | `shop-admin` | Control/gateway/shop: подготовка, admission, завершение |
 | `lab-data` | Control/detector/gateway/shop и PostgreSQL/Redis: хранилища |
 | `lab-observe` | Control/detector/gateway/shop и LGTM: наблюдаемость |
 
-Runner не получает сети shop-backend, shop-admin и lab-data. Отсутствие опубликованного host-порта само по себе недостаточно: контейнеры одной сети могут обращаться друг к другу. Поэтому listener binding и проверка credential обязательны. Worker listener control не предоставляет operator/reset/proxy endpoints.
+Control имеет доступ к shop-admin и lab-data, а его встроенный runner разделяет сетевые права процесса. Ограничения ScenarioHttpClient и запрет зависимостей от admin/SQL — программные, не контейнерные. Внешний egress запрещён сетевыми средствами; внутренние endpoints дополнительно защищены binding и credentials. Пользовательский Java/shell не исполняется.
 
 На host по умолчанию публикуются только UI и Grafana через loopback. Для ручной демонстрации API допустим отдельный profile с loopback-входами gateway; прямой shop не публикуется. В runtime нет Docker socket, host network, privileged-контейнеров и внешнего proxy. Запрет egress проверяется настоящими запросами, включая внешний IP/hostname, host gateway, DNS/redirect и служебные endpoints.
 
@@ -438,21 +434,21 @@ Fixture generator создаёт 24 синтетических пользова�
 
 Цель готовности на чистой описанной машине — не более 10 минут с учётом загрузок; тёплый запуск измеряется отдельно. CPU/RAM, размер очередей, connection pools, длительность и объём evidence ограничиваются до опыта. Это требования к реализации, а не уже полученные результаты запуска.
 
-### Поведение при сбое
+### Допущение о непрерывной работе
+
+Во время измерения все необходимые процессы и хранилища работают непрерывно. Мы сохраняем данные и задания для отчёта, но не строим восстановление выполняющегося run. При restart control оставшиеся нетерминальные runs помечаются INCONCLUSIVE; старые jobs не возобновляются. Новый опыт начинается после остановки старых исполнителей, перезапуска стенда и подготовки фикстур.
 
 | Ситуация | Что происходит |
 |---|---|
-| Detector остановлен | API работает при доступном audit; события накапливаются, после restart дочитываются; report ждёт CLOSE |
-| Control/UI остановлен | Состояние остаётся в DB, runner прекращает новые шаги по lease; recovery начинает с reconciliation |
-| Redis недоступен | Rate ENFORCE возвращает infrastructure reject; OBSERVE сообщает ошибку измерения политики |
-| Lab DB недоступна | Новый downstream без durable receipt запрещён; финализация невозможна |
-| Shop падает после commit | Order/key/outbox сохранены; прежний key позволяет восстановить ответ |
-| Gateway теряет ответ backend | Исход устанавливается по receipt, shop ledger/outbox и состоянию |
-| LGTM недоступен | Audit продолжает работать; техническая потеря telemetry отмечается отдельно |
-| Закончился бюджет хранения | Новый admission закрывается; необработанные доказательства не удаляются |
-| Quiescence не доказан | INCONCLUSIVE и cleanupSafe=false; reset откладывается до безопасного завершения runtime |
+| Чтение логов или detector отстаёт, процессы живы | Файлы сохраняются; DRAINING ждёт ingest и CLOSE до deadline |
+| Перезапуск shop/gateway/detector/control либо отказ обязательной БД | Run INCONCLUSIVE, без автоматического продолжения; новый запуск после подготовки |
+| Потерян HTTP-ответ, сервер жив | In-flight, парные логи и readonly state устанавливают результат; обычный retry проверяет идемпотентность |
+| Redis недоступен | Infrastructure reject для ENFORCE; опыт непригоден для сравнения политики |
+| Ошибка записи/схемы/полноты security-логов | Закрыть admission, INCONCLUSIVE; бизнес-commit не отменяется задним числом |
+| LGTM недоступен | Отдельная неисправность наблюдаемости; путь JSONL → collector → audit от LGTM не зависит |
+| Quiescence не доказан | cleanupSafe=false; reset запрещён до остановки старого исполнения |
 
-Логи JSON связываются requestId/traceId. OpenTelemetry продолжает причинную связь до async detector через span links. Операционные метрики включают latency/errors, policy time, outbox/detector lag, незавершённые receipts, lease expiry и report coverage. Redaction применяется и к ошибкам/HTTP-debug, чтобы секрет не появился обходным путём.
+Логи связаны requestId/traceId; OpenTelemetry продолжает причинную связь до detector через span links. Измеряются latency/errors, policy time, log-ingest/detector lag, пропуски seq/terminal, run deadline и report coverage. Redaction действует также на ошибки и HTTP-debug. Размер строки ограничен 64 KiB, число EVENT — 100000 на run; достижение лимита останавливает опыт с INCONCLUSIVE, без тихого отбрасывания.
 
 ## 17. Принятые решения и их последствия
 
@@ -460,14 +456,14 @@ Fixture generator создаёт 24 синтетических пользова�
 |---|---|---|
 | Один shop codebase, два процесса/DB | Один контракт и одинаковые нормальные операции облегчают сопоставление | Учебные слабости нужно явно изолировать стратегиями и миграциями |
 | Магазин как модульное приложение | Checkout и купон помещаются в одну транзакцию | Нет исследования распределённой торговой транзакции |
-| Отдельные gateway, runner, detector и control | Разделены HTTP-допуск, нагрузка, анализ и управление | Несколько процессов и явные служебные контракты |
-| Detector отдельно от control | Ground truth закрыт SQL-полномочиями; анализ восстанавливается независимо | Р4 обслуживает два приложения; часть адаптеров распределена между остальными ролями |
+| Runner внутри control; gateway и detector отдельно | Меньше процессов и нет сетевого протокола управления генератором | Общие heap/CPU и права JVM; нужны bounded executor, cancellation и проверки границ кода |
+| Detector отдельно от control | Ground truth закрыт SQL-полномочиями; анализ выполняется независимо | Р4 обслуживает два приложения; часть адаптеров распределена между остальными ролями |
 | JDBC и PostgreSQL | Видны locking, условия UPDATE и транзакционные границы | Дисциплина SQL/индексов/rollback и реальные concurrency tests |
-| Intent + idempotency в бизнес-DB | Различаются повторный результат и новая попытка прежней операции; атомарность едина | Дополнительные таблицы и двухшаговый checkout |
-| SQL outbox и polling | Доказательство не теряется между бизнес-commit и доставкой; меньше инфраструктуры | Нужно обрабатывать duplicate/late events, backlog и recovery |
+| Intent + idempotency в бизнес-DB | Различаются повторный результат и новая попытка прежней операции; атомарность едина | Дополнительная таблица intent и двухшаговый checkout |
+| JSONL и встроенный log-ingestor | Detector использует логи API/gateway, без служебных таблиц в магазине | Commit и лог не атомарны; сбой делает run INCONCLUSIVE, восстановления нет |
 | Rule-based detector | Вывод объясняется конкретным правилом/evidence и воспроизводится | Нет обещания обнаруживать неизвестные паттерны или распознавать намерение по одинаковому HTTP |
 | Immutable snapshots и paired runs | Известно, что именно сравнивается и с какими параметрами | Конфигурацию нельзя незаметно менять посередине опыта |
-| DRAINING/manifests/CLOSE | Конечный отчёт основан на полном исполнении и анализе | Orchestration сложнее, чем запуск HTTP-скрипта |
+| DRAINING/STREAM_END/CLOSE | Конечный отчёт основан на полном исполнении и анализе | Orchestration сложнее, чем запуск HTTP-скрипта |
 | Thymeleaf, JSON-export, локальный LGTM | Достаточный интерфейс и диагностика при небольшом числе технологий | Дизайнерская SPA и PDF pipeline не являются частью MVP |
 | Whole RUB и числовые ids | Простые точные вычисления и понятные сценарии объекта | Дробные цены не поддержаны; id не рассматривается как секрет |
 
@@ -479,10 +475,10 @@ Fixture generator создаёт 24 синтетических пользова�
 
 | Роль | Основной результат | Помощь общей интеграции |
 |---|---|---|
-| Р1: API и данные | Shop в двух режимах, API/DTO, миграции, fixtures, transactions и outbox | Readonly данные и адаптеры независимого oracle |
-| Р2: защита | Gateway, политики, JWT, limiter, audit | Compose/сети, admission/manifests, базовая наблюдаемость |
-| Р3: генератор | Сценарии/benign, seed/планы, concurrency, HTTP execution | Job/lease/cancel и надёжная доставка step results |
-| Р4: detector/dashboard | Rules/windows/incidents, control/evaluator, UI и reports | Общая семантика эксперимента и окончательных метрик |
+| Р1: API и данные | Shop в двух режимах, API/DTO, миграции, fixtures, transactions и JSONL logging | Readonly данные и адаптеры независимого oracle |
+| Р2: защита | Gateway, политики, JWT, limiter, audit | Compose/сети, admission/STREAM_END, базовая наблюдаемость |
+| Р3: генератор | Сценарии/benign, seed/планы, concurrency, HTTP execution | Java prepare/start/cancel, ограниченный HTTP-клиент и AttemptSink |
+| Р4: detector/dashboard | Rules/windows/incidents, control/log-ingestor/evaluator, UI и reports | Общая семантика эксперимента и окончательных метрик |
 
 API-контракт ревьюят Р1+Р2, события/политики — Р2+Р4, jobs/steps — Р3+Р4. Oracle проверяют Р1+Р3+Р4, чтобы ошибка production-логики не попала в независимый эталон. Вклад фиксируется по фактически выполненным модулям, тестам и демонстрациям.
 
@@ -490,7 +486,7 @@ API-контракт ревьюят Р1+Р2, события/политики —
 
 Сначала создаются schemas и сборочный spike: совместимость зависимостей, validator keywords, Redis adapter и SQL grants. Затем поднимаются skeleton/сети/три DB, минимальные listeners и trace. Первый вертикальный результат — BO-01: свой/чужой order, запрос через gateway, audit, одно правило detector, независимый owner oracle и JSON-отчёт в UI.
 
-После этого расширяется API, реализуются checkout/rate/injection и остальные сценарии с benign controls. Следующий этап посвящён достоверности: crash, late commit, duplicate/loss, lease/epoch, закрытие окон и reset. Завершают работу измерения paired series, cold start, нагрузка защитного слоя, документация реализации и демонстрация.
+После этого расширяется API, реализуются checkout/rate/injection и остальные сценарии с benign controls. Следующий этап посвящён достоверности: поздний commit при живом сервере, задержки/дубли/пропуски логов, deadline/epoch, закрытие окон и reset. Завершают работу измерения paired series, cold start, нагрузка защитного слоя, документация реализации и демонстрация.
 
 Такой порядок проверяет самые рискованные границы рано: команда видит всю цепочку доказательства до того, как написан полный магазин или сложный дашборд.
 
@@ -498,20 +494,20 @@ API-контракт ревьюят Р1+Р2, события/политики —
 
 Unit tests проверяют чистые политики/parser/calculator. Contract tests проверяют реальные schemas, нормальные запросы обоих режимов, неизвестные поля/типы и errors. Testcontainers с PostgreSQL проверяет row locks, coupon/cart races, уникальность, rollback и SQL grants. State model с jqwik генерирует последовательности add/change/coupon/intent/checkout/retry и сравнивает их с независимой моделью.
 
-Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Audit tests моделируют падение между commit/delivery/ack, конфликт eventId и отсутствие terminal event. Detector tests проверяют late/out-of-order events, atomic state/marker и CLOSE/retraction. Сетевые проверки подтверждают отсутствие обхода gateway, а secret scans/escaping tests — отсутствие утечки или интерпретации входа в UI.
+Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Logging tests проверяют формат/порядок JSONL после commit/rollback, отсутствие секретов, конфликт eventId/seq, пропуск terminal/END и INCONCLUSIVE при нарушении допущения о непрерывной работе. Detector tests проверяют late/out-of-order events, atomic state/marker и CLOSE/retraction. Сетевые проверки подтверждают отсутствие обхода gateway, а secret scans/escaping tests — отсутствие утечки или интерпретации входа в UI.
 
 Планируемые команды: `./mvnw verify` для основной сборки/unit/integration/smoke и `./mvnw -Pacceptance verify` для полной серии с фиксированными seeds/budgets и reports. Эти же команды запускаются в CI. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
 
 ### Результат сдачи
 
-Команда предоставляет воспроизводимый локальный стенд, исходный код, актуальную архитектуру/контракты, автоматические тесты и сохранённые отчёты, сценарий либо видео демонстрации и фактический вклад участников. На демонстрации показываются BOLA, безопасный retry и race, все пять семейств с benign traffic, восстановление detector, INCONCLUSIVE при потере доказательства и экспорт сравнения.
+Команда предоставляет воспроизводимый локальный стенд, исходный код, актуальную архитектуру/контракты, автоматические тесты и сохранённые отчёты, сценарий либо видео демонстрации и фактический вклад участников. На демонстрации показываются BOLA, безопасный retry и race, все пять семейств с benign traffic, завершение отложенной обработки логов, INCONCLUSIVE при потере доказательства и экспорт сравнения.
 
 Граница завершённого MVP — возможность повторить опыт и объяснить его результат по сохранённым фактам, конфигурациям и независимым проверкам. Это проверяемое свойство реализации; наличие выбранного framework, diagram или контейнера само по себе его не подтверждает.
 
 ## Физическая реализация модели данных
 
-Shop хранит 10 таблиц: users, products, coupons, carts, cart_items, checkout_intents, orders, order_items, security_outbox и execution_ledger. Логическая схема одинакова для двух режимов; отдельные protected constraints добавляют бизнес-границы и уникальность эффекта. Intent фиксирует расчет shop, а приватный fixture manifest фиксирует независимый эталон версий цен, купонов и начальных счетчиков. Эти источники нельзя смешивать.
+Shop хранит 8 таблиц: users, products, coupons, carts, cart_items, checkout_intents, orders и order_items. Логическая схема одинакова для двух режимов; отдельные protected constraints добавляют бизнес-границы и уникальность эффекта. Intent фиксирует расчет shop, а приватный fixture manifest фиксирует независимый эталон версий цен, купонов и начальных счетчиков. Эти источники нельзя смешивать.
 
-Lab содержит 13 таблиц: 5 control, 3 audit и 5 detection. Ограниченные definitions/manifests/results/history хранятся внутри владельца в JSONB/массивах. Lab хранит контроль эксперимента в control, долговечные события/receipts/manifests в audit и безопасное состояние обнаружения в detection. Detector читает индивидуальный whitelist через view и не видит run/target/labels. Отсутствие физических FK для ожидаемых еще не доставленных событий намеренно: полноту доказывает DRAINING, а не возможность вставить manifest. Оценки cases/episodes/incidents относятся к immutable report revision.
+Lab содержит 12 таблиц: 5 control, 2 audit и 5 detection. Ограниченные definitions/manifests/results/history хранятся внутри владельца в JSONB/массивах. Lab хранит контроль эксперимента в control, индекс событий и состояние чтения log streams в audit и безопасное состояние обнаружения в detection. Detector читает индивидуальный whitelist через view и не видит run/target/labels. Отсутствие физических FK для ожидаемых еще не доставленных событий намеренно: полноту доказывает DRAINING, а не возможность вставить manifest. Оценки cases/episodes/incidents относятся к immutable report revision.
 
 Полный словарь каждого SQL-поля и решения о транзакциях приведены в документах 02 и 04. Исполняемые начальные DDL, независимые SQL-проверки, DBML и ER-исходники находятся в docs/data. Источником физической модели служит SQL; изменение таблицы должно сопровождаться обновлением DBML/ER и словаря полей. Python-скриптов и отдельного JSON-дубликата модели в комплекте нет. Обзорные 12 схем показывают концепции; подробные ER-фрагменты показывают реальные таблицы и FK. Наборы credentials, заполнение таблиц и OpenAPI в этот комплект не входят.

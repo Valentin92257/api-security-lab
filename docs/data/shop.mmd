@@ -1,5 +1,5 @@
 erDiagram
-    %% Logical event references are documented separately.
+    %% Generated. Logical event references are documented separately.
     users {
         bigint id PK "required"
         varchar login "required"
@@ -75,23 +75,6 @@ erDiagram
         varchar name_snapshot "required"
         bigint unit_price "required"
         bigint catalog_version "required"
-    }
-    security_outbox {
-        uuid event_id PK "required"
-        uuid producer_epoch "required"
-        jsonb payload "required"
-        timestamptz created_at "required"
-        timestamptz delivered_at "nullable"
-        integer retry_count "required"
-        timestamptz next_attempt_at "required"
-    }
-    execution_ledger {
-        uuid request_id PK "required"
-        uuid producer_epoch "required"
-        varchar state "required"
-        uuid terminal_event_id "nullable"
-        timestamptz started_at "required"
-        timestamptz finished_at "nullable"
     }
     users ||--o| carts : "user_id"
     coupons |o--o{ carts : "coupon_id"

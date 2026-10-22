@@ -1,4 +1,4 @@
-// Physical model; business-only constraints in shop-protected.sql.
+// Generated physical model; business-only constraints in shop-protected.sql.
 // Cross-database references are logical and are not rendered as FK.
 Table users {
   id bigint [pk, not null, increment, note: 'Идентификатор пользователя']
@@ -116,31 +116,6 @@ Table order_items {
     (product_id)
   }
   Note: 'Неизменяемые позиции; цена и название зафиксированы.'
-}
-Table security_outbox {
-  event_id uuid [pk, not null, note: 'Глобальный UUID события']
-  producer_epoch uuid [not null, note: 'Зарегистрированная эпоха; логическая межбазовая ссылка']
-  payload jsonb [not null, note: 'CloudEvents v1, без секретов']
-  created_at timestamptz [not null, note: 'Реальное время записи']
-  delivered_at timestamptz [note: 'Подтверждение идентичного события в audit']
-  retry_count integer [not null, default: `0`, note: 'Количество повторов']
-  next_attempt_at timestamptz [not null, note: 'Следующая попытка доставки']
-  indexes {
-    (producer_epoch)
-  }
-  Note: 'Неизменяемое содержимое события, изменяемое состояние доставки.'
-}
-Table execution_ledger {
-  request_id uuid [pk, not null, note: 'UUID HTTP-attempt']
-  producer_epoch uuid [not null, note: 'Эпоха принятой работы']
-  state varchar(16) [not null, default: `'ACTIVE'`, note: 'ACTIVE / COMPLETED / ABORTED']
-  terminal_event_id uuid [note: 'Логическая ссылка; не FK на удаляемую outbox']
-  started_at timestamptz [not null, note: 'Реальное время принятия']
-  finished_at timestamptz [note: 'Реальное время terminal transition']
-  indexes {
-    (producer_epoch, state)
-  }
-  Note: 'ACTIVE фиксируется до исполнения; terminal вместе с outbox.'
 }
 Ref: carts.user_id > users.id [delete: restrict]
 Ref: carts.coupon_id > coupons.id [delete: restrict]

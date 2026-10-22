@@ -116,31 +116,6 @@ CREATE TABLE order_items (
   catalog_version bigint NOT NULL,
   PRIMARY KEY (order_id, product_id)
 );
--- Неизменяемое содержимое события, изменяемое состояние доставки.
-CREATE TABLE security_outbox (
-  event_id uuid NOT NULL,
-  producer_epoch uuid NOT NULL,
-  payload jsonb NOT NULL,
-  created_at timestamptz NOT NULL,
-  delivered_at timestamptz,
-  retry_count integer NOT NULL DEFAULT 0,
-  next_attempt_at timestamptz NOT NULL,
-  PRIMARY KEY (event_id),
-  CHECK (retry_count >= 0),
-  CHECK (jsonb_typeof(payload) = 'object')
-);
--- ACTIVE фиксируется до исполнения; terminal вместе с outbox.
-CREATE TABLE execution_ledger (
-  request_id uuid NOT NULL,
-  producer_epoch uuid NOT NULL,
-  state varchar(16) NOT NULL DEFAULT 'ACTIVE',
-  terminal_event_id uuid,
-  started_at timestamptz NOT NULL,
-  finished_at timestamptz,
-  PRIMARY KEY (request_id),
-  CHECK (state IN ('ACTIVE','COMPLETED','ABORTED')),
-  CHECK ((state = 'ACTIVE' AND terminal_event_id IS NULL AND finished_at IS NULL) OR (state <> 'ACTIVE' AND terminal_event_id IS NOT NULL AND finished_at IS NOT NULL))
-);
 ALTER TABLE carts ADD FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT;
 ALTER TABLE carts ADD FOREIGN KEY (coupon_id) REFERENCES coupons (id) ON DELETE RESTRICT;
 CREATE INDEX carts_idx_1 ON carts (coupon_id);
@@ -165,7 +140,4 @@ CREATE INDEX orders_idx_5 ON orders (user_id, idempotency_key_hash);
 ALTER TABLE order_items ADD FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE;
 ALTER TABLE order_items ADD FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT;
 CREATE INDEX order_items_idx_1 ON order_items (product_id);
-CREATE INDEX security_outbox_idx_1 ON security_outbox (producer_epoch);
-CREATE INDEX execution_ledger_idx_1 ON execution_ledger (producer_epoch, state);
-CREATE INDEX outbox_pending_idx ON security_outbox (next_attempt_at, event_id) WHERE delivered_at IS NULL;
 COMMIT;

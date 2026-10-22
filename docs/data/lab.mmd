@@ -1,5 +1,5 @@
 erDiagram
-    %% Logical event references are documented separately.
+    %% Generated. Logical event references are documented separately.
     control_experiments {
         uuid id PK "required"
         varchar name "required"
@@ -26,15 +26,13 @@ erDiagram
         bytea fixture_hash "nullable"
         jsonb command_journal "required"
     }
-    control_runner_jobs {
+    control_scenario_jobs {
         uuid id PK "required"
         uuid run_id FK "required"
         uuid epoch "required"
-        integer attempt "required"
         jsonb plan "required"
         bytea plan_hash "required"
-        bytea lease_token_hash "required"
-        timestamptz lease_expires_at "required"
+        timestamptz deadline_at "required"
         varchar state "required"
         jsonb step_manifest "nullable"
         bytea step_manifest_hash "nullable"
@@ -64,22 +62,25 @@ erDiagram
         bytea snapshot_hash "nullable"
         timestamptz snapshot_captured_at "nullable"
     }
-    audit_producer_epochs {
+    audit_log_streams {
         uuid id PK "required"
         uuid run_id FK "required"
         uuid partition_id "required"
         text producer_kind "required"
         text source "required"
+        uuid source_instance_id "required"
+        text file_name "required"
         text state "required"
+        bigint last_ingested_seq "required"
+        bigint expected_last_seq "nullable"
+        timestamptz end_seen_at "nullable"
+        text error_reason "nullable"
         timestamptz registered_at "required"
-        uuid_array expected_event_ids "nullable"
-        bytea event_set_hash "nullable"
-        jsonb coverage "nullable"
-        timestamptz sealed_at "nullable"
     }
     audit_security_events {
         uuid id PK "required"
-        uuid producer_epoch FK "required"
+        uuid stream_id FK "required"
+        bigint seq "required"
         uuid run_id FK "required"
         uuid partition_id "required"
         uuid request_id "required"
@@ -89,22 +90,10 @@ erDiagram
         jsonb payload "required"
         bytea payload_hash "required"
     }
-    audit_receipts {
-        uuid request_id PK "required"
-        uuid producer_epoch FK "required"
-        uuid started_event_id FK "required"
-        uuid terminal_event_id FK "nullable"
-        boolean shop_invoked "required"
-        timestamptz accepted_at "required"
-        timestamptz completed_at "nullable"
-    }
     detection_partitions {
         uuid id PK "required"
         bytea ruleset_hash "required"
         jsonb ruleset_snapshot "required"
-        uuid lease_owner "nullable"
-        timestamptz lease_until "nullable"
-        bigint fence "required"
     }
     detection_jobs {
         uuid id PK "required"
@@ -162,15 +151,12 @@ erDiagram
         jsonb history "required"
     }
     control_experiments ||--o{ control_runs : "experiment_id"
-    control_runs ||--o{ control_runner_jobs : "run_id"
-    control_runner_jobs ||--o{ control_attempts : "job_id"
+    control_runs ||--o| control_scenario_jobs : "run_id"
+    control_scenario_jobs ||--o{ control_attempts : "job_id"
     control_runs ||--o{ control_reports : "run_id"
-    control_runs ||--o{ audit_producer_epochs : "run_id"
-    audit_producer_epochs ||--o{ audit_security_events : "producer_epoch"
+    control_runs ||--o{ audit_log_streams : "run_id"
+    audit_log_streams ||--o{ audit_security_events : "stream_id"
     control_runs ||--o{ audit_security_events : "run_id"
-    audit_producer_epochs ||--o{ audit_receipts : "producer_epoch"
-    audit_security_events ||--o{ audit_receipts : "started_event_id"
-    audit_security_events |o--o{ audit_receipts : "terminal_event_id"
     detection_partitions ||--o{ detection_jobs : "partition_id"
     detection_partitions ||--o{ detection_processed_events : "partition_id"
     detection_partitions ||--o{ detection_rule_state : "partition_id"

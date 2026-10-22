@@ -34,7 +34,7 @@ CS-01: 200 сгенерированных попыток образуют оди
 | Case / subcase | Одна цель атакующего и проверяемые инварианты |
 | Episode | Заранее ограниченная последовательность; единица recall и benign FPR |
 | Step | Действие плана, возможно с несколькими retries/HTTP-attempts |
-| Attempt | Одна отправка с собственным attemptId и gateway requestId |
+| Attempt | Одна отправка с уникальным UUID attemptId=requestId доверенного harness |
 
 Scenario definition задаёт id/version/family/subcase, actors, fixture requirements, последовательность и concurrent groups, input generator/seed, budgets, episode boundaries, attack-specific steps, benign/malicious labels и oracle ids. Control хранит полную definition; runner получает исполнимый план/синтетические credentials, detector — только наблюдения. Подготовительные login/cart steps не увеличивают число malicious cases.
 
@@ -57,34 +57,33 @@ Scenario definition задаёт id/version/family/subcase, actors, fixture requ
 
 Targets — только enum. Name 1…120 символов, scenarioRefs непустой список известных версий, repetitions/parallelism положительные в разрешённом бюджете. Неизвестные поля/версии и превышение бюджета — 400. BaseUrl, внешний callback, SQL assertions и executable expressions не принимаются. Objects/actors разрешаются по fixture manifest; labels и ожидаемые эффекты не выводятся из ответа detector.
 
-## Runner и служебный протокол
+## Встроенный runner и контракты управления
 
-Runner использует Java HttpClient, virtual threads и bounded семафоры. Ограничены количество/размер запросов, response, concurrency, timeout и duration. Allowlist включает только gateway origins, redirects/proxy отключены; сетевой egress запрещён. Сценарий не исполняет пользовательский Java/shell.
+Runner — библиотека `modules/scenario-runner`, подключённая к lab-control. PlanExecutor/StepExecutor используют отдельный executor, Java HttpClient с фиксированными gateway targets, semaphore и конечные бюджеты. Один активный run в MVP. Cancellation token/deadline проверяются перед каждой новой попыткой/retry и ожиданием barrier. Сценарии поставляются доверенным кодом; пользовательский Java/shell/SQL не исполняется.
 
-Job содержит jobId/runId, attempt, epoch, target enum, plan/hash, budget, lease token/expiry. Runner подтверждает planHash, отправляет heartbeat и проверяет lease; потеря lease останавливает новые шаги. Бизнес-запросы маркируются проверяемым harness assignment; серверный in-flight не считается завершённым по client timeout.
+Orchestrator сохраняет один control.scenario_jobs на run: id/runId/epoch, plan/hash, deadline_at, state, final step_manifest/hash/sealed_at. `prepare(plan)` валидирует planHash и лимиты; `start(prepared, token, attemptSink)` запускает executor и возвращает completion handle; `cancel()` прекращает новые действия. Потеря UI-вкладки не прекращает серверное управление run. Final manifest записывается после всех результатов; прерванный процесс не возобновляет job.
 
 | Интерфейс | Контракт |
 |---|---|
-| Operator: `POST /control/v1/experiments` | Создание из definition request, 201 `{experimentId, definitionHash, state:"CREATED"}` |
-| Operator: `POST /control/v1/experiments/{id}/start` | 202 `{experimentId, runIds}`; definition фиксируется, конфликт состояния — 409 |
-| Operator: `GET /control/v1/runs/{runId}` | State/revision, target, progress, cleanupSafe, failure reason и nullable reportId |
-| Operator: `POST /control/v1/runs/{runId}/cancel` | 202 с commandId; окончание определяется по state |
-| Operator: `GET /control/v1/runs/{runId}/report` | JSON report; до готовности — 409 REPORT_NOT_READY |
-| Control → runner: `POST /internal/v1/jobs/{jobId}/commands` | PREPARE/START/CANCEL, commandId/runId/epoch/expectedRevision и typed payload |
-| Runner → control: `POST /worker/v1/jobs/{jobId}/heartbeat` | Lease/epoch/progress; ответ lease expiry или запрет продолжения |
-| Runner → control: `POST /worker/v1/jobs/{jobId}/results` | Идемпотентный batch attempts; финальный batch содержит step manifest |
-| Control → gateway/shop: `POST /internal/v1/runs/{runId}/commands` | PREPARE/OPEN/CLOSE/SEAL/RESET с epoch; RESET только для shop после cleanupSafe |
-| Control → detector: SQL jobs | PREPARE(partition, rulesetHash), CLOSE(partition, event manifest/hash), CANCEL; без labels |
+| Operator: `POST /control/v1/experiments` | Создание definition, 201 `{experimentId, definitionHash, state:"CREATED"}` |
+| Operator: `POST /control/v1/experiments/{id}/start` | 202 `{experimentId, runIds}` после принятия; конфликт активного run/state — 409 |
+| Operator: `GET /control/v1/runs/{runId}` | State/revision, target, progress, cleanupSafe, failure reason, nullable reportId |
+| Operator: `POST /control/v1/runs/{runId}/cancel` | 202 с commandId; окончание определяется состоянием run |
+| Operator: `GET /control/v1/runs/{runId}/report` | JSON report; до готовности 409 REPORT_NOT_READY |
+| Orchestrator → runner: Java | prepare/start/cancel; immutable PreparedPlan, cancellation token, completion handle |
+| Runner → AttemptSink: Java | Bounded batches безопасных AttemptResult; подтверждение сохранения перед final manifest |
+| Control → gateway/shop: `POST /internal/v1/runs/{runId}/commands` | PREPARE/OPEN/CLOSE/RESET с epoch; RESET после cleanupSafe |
+| Control → detector: SQL jobs | PREPARE(partition, rulesetHash), CLOSE(partition, event IDs/hash), CANCEL; без labels |
 
-Команды имеют schemaVersion=1, commandId, epoch и expected state/revision. Повтор commandId с тем же payload возвращает прежний результат, с другим — 409; command response содержит commandId, acceptedRevision и state. Задания и ACK долговечны; HTTP 202 означает принятие, не завершение. Status command/job доступен на том же защищённом listener через GET по id. Stale epoch не может открыть admission/сбросить новый run. Worker credential ограничен назначенным job; operator/admin полномочия отдельные.
+Между runner и control нет HTTP endpoints, worker listener, heartbeat или lease. Внешние управляющие команды имеют schemaVersion=1, commandId, epoch, expected state/revision. Повтор commandId с тем же payload возвращает прежний результат, с другим — 409. HTTP 202 означает принятие, не завершение. Старый epoch не открывает admission нового run. Operator/admin credentials разделены; run credential в ScenarioHttpClient ограничен экспериментальным трафиком gateway.
 
-Attempt result v1 содержит jobId/runId/stepId/attemptId, sequence, requestId nullable, traceId, method/route, безопасные requestSummary/responseEvidence, transportOutcome RESPONSE/TIMEOUT/CONNECT_ERROR/CANCELLED, httpStatus nullable, startedAt/finishedAt, durationMs и retryNumber. AttemptId существует до отправки и связывается с receipt даже при потере ответа. Sequence уникален в потоке job; duplicate attemptId с иным payload — ошибка. Decisions присоединяет control из audit, runner не угадывает их по HTTP-коду.
+AttemptResult v1: jobId/runId/stepId/attemptId, sequence, requestId=attemptId, traceId, method/route, безопасные requestSummary/responseEvidence, transportOutcome RESPONSE/TIMEOUT/CONNECT_ERROR/CANCELLED, nullable httpStatus, startedAt/finishedAt, durationMs и retryNumber. UUID существует до отправки; gateway проверяет его доверенный run context и передаёт shop. Retry — новый UUID. Это связывает logs/results при потере ответа; CONNECT_ERROR без gateway start сохраняет тот же UUID. Duplicate attemptId с другим payload — ошибка. Decisions присоединяются из audit, не угадываются по HTTP.
 
-Credentials/token живут только в памяти задания. Results передаются с повторами и bounded spool; при переполнении новые шаги останавливаются. Потерянный result не скрывается. Фикстуры подготавливает control по запросу сценарного job; прямого SQL/admin-доступа у runner нет.
+AttemptSink — порт, реализованный persistence adapter control. Запись ограниченными batches не требует сетевой доставки/ACK; ошибка или переполнение запрещают новые шаги и дают INCONCLUSIVE при неполноте. Сценарные классы не получают datasource/admin/evaluator/log-reader interfaces. Это граница модулей доверенного Java-кода, не sandbox: процесс control имеет соответствующие сети и credentials. Проверки клиента запрещают любой origin кроме gateway и служебные routes; запрет внешнего egress проверяется отдельно на контейнере. Fixtures устанавливает orchestration, не сценарный HTTP-клиент.
 
 ## Жизненный цикл и завершение
 
-Нормальный путь: CREATED → PREPARING → RUNNING → DRAINING → EVALUATING → COMPLETED. Переходы сохраняются с revision/CAS; после restart control продолжает подтверждённый state. Терминальные альтернативы:
+Нормальный путь: CREATED → PREPARING → RUNNING → DRAINING → EVALUATING → COMPLETED. Переходы сохраняются с revision/CAS; после restart control помечает незавершённый run INCONCLUSIVE и не возобновляет jobs. Терминальные альтернативы:
 
 - FAILED — конфигурация/подготовка или исполнение технически не выполнены.
 - CANCELLED — отмена после остановки новых действий и фиксации оставшихся.
@@ -92,20 +91,20 @@ Credentials/token живут только в памяти задания. Result
 
 Отрицательный результат защиты может быть достоверным COMPLETED. Любой выход из RUNNING, включая fatal/cancel, проходит DRAINING; желаемый terminal state хранится отдельно. При cleanupSafe=false даже терминальный run блокирует следующий reset на target.
 
-PREPARING закрывает admission, проверяет отсутствие старых работ, устанавливает фикстуру и проверяет baseline invariants. Control фиксирует snapshots/namespace limiter, получает detector READY и runner planHash ACK; затем открывает admission. Ready означает готовность работать, а не только живой процесс.
+PREPARING закрывает admission, проверяет отсутствие старых работ, устанавливает фикстуру и проверяет baseline invariants. Control регистрирует два JSONL stream (gateway и выбранный shop), проверяет writer/readonly mounts, фиксирует snapshots/namespace limiter, получает detector READY и результат локального prepare(planHash); затем открывает admission. Ready означает готовность работать, а не только живой процесс.
 
 Сравнение состоит из последовательных paired runs с одинаковыми fixture/seed/business-time base, workload, concurrency и ruleset. Target DB и policy state раздельны. Порядок vulnerable/protected чередуется в повторениях; concurrency внутри race сохраняется. Для оценки вклада одной политики меняется только она при фиксированном backend. Seed не фиксирует OS/SQL interleaving: гонки запускаются серией с barrier и публикуемым числом повторов.
 
 Барьер DRAINING:
 
-1. Runner прекращает новые шаги, фиксирует attempts и step manifest.
+1. Orchestrator отменяет новые шаги встроенного runner, ждёт completion handle и сохранения attempts/step manifest.
 2. Gateway/shop закрывают admission epoch, включая задержанные requests.
-3. Durable receipts/ledger и runtime state подтверждают отсутствие незавершённых операций. Client timeout не считается таким подтверждением.
-4. Producers запечатывают event manifests и terminal coverage; outbox доставляется, collector сверяет ожидаемые slots и event IDs.
+3. Живые gateway/shop с неизменным sourceInstanceId дожидаются in-flight=0 и записывают STREAM_END(lastSeq). Client timeout не означает завершения SQL.
+4. Log-ingestor в control дочитывает оба stream до END, проверяет seq, started/completed и связь с attempts. При полноте ставит DRAINED и формирует event IDs/hash для CLOSE.
 5. Detector получает CLOSE, обрабатывает полный набор, закрывает окна и возвращает ACK с hashes/counts/errors.
 6. Control снимает readonly конечное состояние, выполняет oracle и сохраняет отчёт.
 
-Каждый этап имеет deadline из manifest. Недостающий event/result, unresolved receipt, недоступный snapshot или неподтверждённый CLOSE дают INCONCLUSIVE. Установка таймера «подождать несколько секунд» не заменяет барьер. При crash старый epoch остаётся закрытым; неразрешённые операции требуют reconciliation либо остановки runtime с проверкой DB-сессий до reset.
+Каждый этап имеет deadline из manifest. Недостающий event/result/terminal/STREAM_END, пропуск seq, недоступный snapshot или неподтверждённый CLOSE дают INCONCLUSIVE. Установка таймера «подождать несколько секунд» не заменяет барьер. Перезапуск любого участника или отказ обязательной инфраструктуры нарушает допущение опыта: INCONCLUSIVE, без продолжения. Старые исполнители останавливаются; новый run начинается после перезапуска стенда и подготовки фикстур.
 
 ## Независимый эталон
 

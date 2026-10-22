@@ -35,11 +35,17 @@ FLAG продолжает запрос с отметкой; incident созда�
 | 20 | OpenAPI: маршрут, media type, типы, required, bounds, неизвестные поля/query | OFF/OBSERVE/ENFORCE |
 | 30 | Login limits по source/account и backoff | OFF/OBSERVE/ENFORCE |
 | 40 | Дополнительные категории подозрительного ввода | Необязательный сигнал; не замена SQL-параметризации |
-| Завершение | Durable audit decisions, затем разрешённый proxy и запись его результата | Обязательная обвязка chain |
+| Завершение | JSONL policy facts, затем разрешённый proxy и terminal log | Обязательная обвязка chain |
 
-Audit выполняется также для коротких отказов 400/401/413/429: ранний BLOCK не пропускает запись. До downstream gateway сохраняет receipt и решения. Если audit DB недоступна, downstream не вызывается, ответ 503 DEPENDENCY_UNAVAILABLE. Ошибка финальной записи после downstream требует проверки бизнес-эффекта и пометки неполного измерения.
+Gateway пишет request.started до проверок и policy.evaluated для каждой политики, включая ранние 400/401/413/429. До downstream должны быть записаны start/решение; gateway не ждёт collector или lab DB. При ошибке записи логов закрывается admission, возвращается 503 DEPENDENCY_UNAVAILABLE и run получает INCONCLUSIVE. Terminal request.completed пишется после результата, с downstreamInvoked=true/false. Если результат уже изменил данные, ошибка последующей записи не откатывает commit.
 
 Для основного сравнения vulnerable использует OBSERVE экспериментальных gateway-политик и учебные shop-стратегии; protected — ENFORCE и защищённые стратегии. Проверка JWT, ресурсные пределы, audit и изоляция одинаковы. Gateway mode не переключает owner-check/SQL constraints внутри shop.
+
+## Сценарный трафик из control
+
+Генератор исполняется внутри lab-control, но все бизнес-запросы по-прежнему проходят через gateway. ScenarioHttpClient выбирает только встроенный target/route. Короткоживущий run credential связывает harness context с runId/epoch/target и разрешает доверенную корреляцию attemptId/requestId; он не даёт operator/admin прав и не подменяет пользовательский JWT. Gateway проверяет соответствие активному admission и listener; клиентские Host/query/headers не выбирают backend. Срок credential и закрытие admission ограничивают старый трафик после завершения run.
+
+Сценарный модуль не получает admin-клиент или SQL datasource через свои интерфейсы. Однако у общей JVM control такие полномочия есть: изоляция модуля проверяется архитектурными тестами, а не обещается сетевым sandbox. Внешний egress закрыт для всего контейнера control.
 
 ## Credential stuffing
 
@@ -53,7 +59,7 @@ TTL, account/source thresholds, максимальная задержка, ра�
 
 Protected использует authenticated subject в owner query; чужой и отсутствующий объект возвращают одинаковый 404. Catalog SQL параметризован, sort выбирается из enum, datasource имеет только SELECT товаров. Schema validation не заменяет ни owner-check, ни SQL-параметризацию.
 
-Checkout фиксирует одноразовый server-issued intent и поля идемпотентности заказа в одной транзакции с заказом, купоном и outbox. Повтор успешного key/body возвращает прежний Order; новый key со spent intent и изменённое тело прежнего key получают conflict. Access JWT многократный: защита одного бизнес-эффекта не запрещает владельцу украденного bearer выполнять новые допустимые операции.
+Checkout фиксирует одноразовый server-issued intent и поля идемпотентности заказа в одной транзакции с заказом, корзиной и купоном; JSONL-событие результата пишется после commit. Повтор успешного key/body возвращает прежний Order; новый key со spent intent и изменённое тело прежнего key получают conflict. Access JWT многократный: защита одного бизнес-эффекта не запрещает владельцу украденного bearer выполнять новые допустимые операции.
 
 Сервер рассчитывает цены/скидки, проверяет quantity, cart revision, expiry и coupon limit. Locks/conditional update/constraints совместно обеспечивают один допустимый commit. Client timeout и ошибка зависимости сами по себе не означают, что атака предотвращена.
 

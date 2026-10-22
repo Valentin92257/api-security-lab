@@ -20,4 +20,16 @@ BEGIN
     RAISE EXCEPTION 'Detector unexpectedly writes CLOSE set';
   END IF;
 END $$;
+RESET ROLE;
+SET LOCAL ROLE lab_log_ingestor;
+SELECT * FROM audit.log_streams LIMIT 0;
+SELECT * FROM audit.security_events LIMIT 0;
+DO $$
+BEGIN
+  IF has_table_privilege(current_user,'control.runs','SELECT')
+     OR has_table_privilege(current_user,'audit.security_events','UPDATE')
+     OR has_column_privilege(current_user,'audit.log_streams','source_instance_id','UPDATE') THEN
+    RAISE EXCEPTION 'Log ingestor has excessive privileges';
+  END IF;
+END $$;
 ROLLBACK;
