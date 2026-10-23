@@ -1,0 +1,172 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Money: {type: integer, format: int64, minimum: 0, maximum: 9900000000000}
+  Price: {type: integer, minimum: 1, maximum: 1000000000}
+  Quantity: {type: integer, minimum: 1, maximum: 99}
+  Revision: {type: integer, format: int64, minimum: 0, maximum: 9007199254740991}
+  LoginInput: {type: string, minLength: 1, description: 'После trim/lowercase: [a-z0-9_]{3,32}.'}
+  Password: {type: string, maxLength: 72, minLength: 1, description: '8-72 UTF-8 байт, без нормализации.'}
+  CouponCodeInput: {type: string, minLength: 1, description: 'После trim/uppercase: [A-Z0-9_-]{1,32}.'}
+  RegisterRequest:
+    title: RegisterRequest
+    type: object
+    additionalProperties: false
+    required: [login, password, name, email]
+    properties:
+      login: {$ref: '#/$defs/LoginInput'}
+      password: {$ref: '#/$defs/Password'}
+      name: {type: string, minLength: 1}
+      email: {type: string, minLength: 1}
+  LoginRequest:
+    title: LoginRequest
+    type: object
+    additionalProperties: false
+    required: [login, password]
+    properties:
+      login: {$ref: '#/$defs/LoginInput'}
+      password: {$ref: '#/$defs/Password'}
+  LoginResult:
+    title: LoginResult
+    type: object
+    additionalProperties: false
+    required: [accessToken, tokenType, expiresIn]
+    properties:
+      accessToken: {type: string, minLength: 1}
+      tokenType: {type: string, const: Bearer}
+      expiresIn: {type: integer, minimum: 1, maximum: 900}
+  User:
+    title: User
+    type: object
+    additionalProperties: false
+    required: [id, login, name, email]
+    properties:
+      id: {$ref: './common.yaml#/$defs/Id'}
+      login: {type: string, pattern: '^[a-z0-9_]+$', maxLength: 32, minLength: 3}
+      name: {type: string, maxLength: 100, minLength: 1}
+      email: {type: string, format: email, maxLength: 254, minLength: 3}
+  Product:
+    title: Product
+    type: object
+    additionalProperties: false
+    required: [id, name, description, price, currency]
+    properties:
+      id: {$ref: './common.yaml#/$defs/Id'}
+      name: {type: string, maxLength: 120, minLength: 1}
+      description: {type: string, maxLength: 4000}
+      price: {$ref: '#/$defs/Price'}
+      currency: {type: string, const: RUB}
+  ProductPage:
+    title: ProductPage
+    type: object
+    additionalProperties: false
+    required: [items, limit, offset, total]
+    properties:
+      items:
+        type: array
+        items: {$ref: '#/$defs/Product'}
+        minItems: 0
+        maxItems: 100
+      limit: {type: integer, minimum: 1, maximum: 100}
+      offset: {type: integer, minimum: 0, maximum: 10000}
+      total: {type: integer, format: int64, minimum: 0, maximum: 9007199254740991}
+  LineItem:
+    title: LineItem
+    type: object
+    additionalProperties: false
+    required: [productId, name, quantity, unitPrice, lineTotal]
+    properties:
+      productId: {$ref: './common.yaml#/$defs/Id'}
+      name: {type: string, maxLength: 120, minLength: 1}
+      quantity: {$ref: '#/$defs/Quantity'}
+      unitPrice: {$ref: '#/$defs/Price'}
+      lineTotal: {$ref: '#/$defs/Money'}
+  CartCoupon:
+    title: CartCoupon
+    type: object
+    additionalProperties: false
+    required: [code, discountPercent, eligibility]
+    properties:
+      code: {type: string, pattern: '^[A-Z0-9_-]+$', maxLength: 32, minLength: 1}
+      discountPercent: {type: integer, minimum: 1, maximum: 100}
+      eligibility:
+        type: string
+        enum: [VALID, EXPIRED, EXHAUSTED]
+  Cart:
+    title: Cart
+    type: object
+    additionalProperties: false
+    required: [id, userId, revision, items, coupon, subtotal, discount, total, currency, updatedAt]
+    properties:
+      id: {$ref: './common.yaml#/$defs/Id'}
+      userId: {$ref: './common.yaml#/$defs/Id'}
+      revision: {$ref: '#/$defs/Revision'}
+      items:
+        type: array
+        items: {$ref: '#/$defs/LineItem'}
+        minItems: 0
+        maxItems: 100
+      coupon:
+        anyOf:
+        - {$ref: '#/$defs/CartCoupon'}
+        - {type: 'null'}
+      subtotal: {$ref: '#/$defs/Money'}
+      discount: {$ref: '#/$defs/Money'}
+      total: {$ref: '#/$defs/Money'}
+      currency: {type: string, const: RUB}
+      updatedAt: {$ref: './common.yaml#/$defs/Time'}
+  OrderCoupon:
+    title: OrderCoupon
+    type: object
+    additionalProperties: false
+    required: [code, discountPercent]
+    properties:
+      code: {type: string, pattern: '^[A-Z0-9_-]+$', maxLength: 32, minLength: 1}
+      discountPercent: {type: integer, minimum: 1, maximum: 100}
+  Order:
+    title: Order
+    type: object
+    additionalProperties: false
+    required: [id, userId, cartId, cartRevision, status, items, coupon, subtotal, discount, total, currency,
+      createdAt]
+    properties:
+      id: {$ref: './common.yaml#/$defs/Id'}
+      userId: {$ref: './common.yaml#/$defs/Id'}
+      cartId: {$ref: './common.yaml#/$defs/Id'}
+      cartRevision: {$ref: '#/$defs/Revision'}
+      status: {type: string, const: CREATED}
+      items:
+        type: array
+        items: {$ref: '#/$defs/LineItem'}
+        minItems: 1
+        maxItems: 100
+      coupon:
+        anyOf:
+        - {$ref: '#/$defs/OrderCoupon'}
+        - {type: 'null'}
+      subtotal: {$ref: '#/$defs/Money'}
+      discount: {$ref: '#/$defs/Money'}
+      total: {$ref: '#/$defs/Money'}
+      currency: {type: string, const: RUB}
+      createdAt: {$ref: './common.yaml#/$defs/Time'}
+  SetQuantityRequest:
+    title: SetQuantityRequest
+    type: object
+    additionalProperties: false
+    required: [quantity]
+    properties:
+      quantity: {$ref: '#/$defs/Quantity'}
+  SelectCouponRequest:
+    title: SelectCouponRequest
+    type: object
+    additionalProperties: false
+    required: [code]
+    properties:
+      code: {$ref: '#/$defs/CouponCodeInput'}
+  CheckoutRequest:
+    title: CheckoutRequest
+    type: object
+    additionalProperties: false
+    required: [cartRevision, quotedTotal]
+    properties:
+      cartRevision: {$ref: '#/$defs/Revision'}
+      quotedTotal: {$ref: '#/$defs/Money'}
