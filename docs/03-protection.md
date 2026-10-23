@@ -37,7 +37,7 @@ FLAG продолжает запрос с отметкой; incident созда�
 | 40 | Дополнительные категории подозрительного ввода | Необязательный сигнал; не замена SQL-параметризации |
 | Завершение | JSONL policy facts, затем разрешённый proxy и terminal log | Обязательная обвязка chain |
 
-Gateway пишет request.started до проверок и policy.evaluated для каждой политики, включая ранние 400/401/413/429. До downstream должны быть записаны start/решение; gateway не ждёт collector или lab DB. При ошибке записи логов закрывается admission, возвращается 503 DEPENDENCY_UNAVAILABLE и run получает INCONCLUSIVE. Terminal request.completed пишется после результата, с downstreamInvoked=true/false. Если результат уже изменил данные, ошибка последующей записи не откатывает commit.
+Gateway пишет request.started до проверок и policy.evaluated для каждой политики, включая ранние 400/401/413/429. До downstream должны быть записаны start/решение; gateway не ждёт collector или lab DB. При ошибке записи логов закрывается admission, возвращается 503 UNAVAILABLE и run получает INCONCLUSIVE. Terminal request.completed пишется после результата, с downstreamInvoked=true/false. Если результат уже изменил данные, ошибка последующей записи не откатывает commit.
 
 Для основного сравнения vulnerable использует OBSERVE экспериментальных gateway-политик и учебные shop-стратегии; protected — ENFORCE и защищённые стратегии. Проверка JWT, ресурсные пределы, audit и изоляция одинаковы. Gateway mode не переключает owner-check/SQL constraints внутри shop.
 
