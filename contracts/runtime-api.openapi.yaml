@@ -1,0 +1,68 @@
+openapi: 3.1.0
+info: {title: Gateway/Shop runtime, version: 1.0.0, description: 'Служебный API Control: подготовка и закрытие
+    прогона.'}
+servers:
+- {url: /internal/v1}
+security:
+- ServiceBearer: []
+paths:
+  /runs/{runId}:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    put:
+      operationId: prepareRuntime
+      description: Повтор одинакового контекста безопасен; другой активный run - 409. БД не меняет.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/runtime.yaml#/$defs/RunSetup}
+      responses:
+        '201': {$ref: '#/components/responses/RuntimeStatus'}
+        '200': {$ref: '#/components/responses/RuntimeStatus'}
+        default: {$ref: '#/components/responses/Error'}
+    get:
+      operationId: getRuntimeStatus
+      description: 'CLOSED: inFlight=0, поток логов закрыт, lastSequence окончателен.'
+      responses:
+        '200': {$ref: '#/components/responses/RuntimeStatus'}
+        default: {$ref: '#/components/responses/Error'}
+  /runs/{runId}/open:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    post:
+      operationId: openRuntime
+      description: PREPARED→OPEN; повтор OPEN безопасен. CLOSED не переоткрывается.
+      responses:
+        '200': {$ref: '#/components/responses/RuntimeStatus'}
+        default: {$ref: '#/components/responses/Error'}
+  /runs/{runId}/close:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    post:
+      operationId: closeRuntime
+      description: Закрыть приём, дождаться операций и terminal logs. Повтор безопасен.
+      responses:
+        '202': {$ref: '#/components/responses/RuntimeStatus'}
+        '200': {$ref: '#/components/responses/RuntimeStatus'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  responses:
+    RuntimeStatus:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/runtime.yaml#/$defs/RuntimeStatus}
+      description: OK
+    Error:
+      description: Ошибка
+      content:
+        application/problem+json:
+          schema: {$ref: ./schemas/common.yaml#/$defs/Problem}
+  parameters:
+    runId:
+      name: runId
+      in: path
+      schema: {type: string, format: uuid}
+      required: true
+  securitySchemes:
+    ServiceBearer: {type: http, scheme: bearer}
