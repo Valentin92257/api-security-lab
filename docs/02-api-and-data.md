@@ -26,7 +26,6 @@ JSON UTF-8, camelCase, даты UTC RFC 3339. Все поля описанных
 | `Quantity` | Целое 1…99; максимум 100 различных позиций корзины |
 | `Time` | Строка RFC 3339 UTC |
 | `Uuid` | Строка UUID |
-| `Page<T>` | `{items:T[], limit:integer, offset:integer, total:integer}`; total — число доступных объектов до пагинации |
 
 Цена товара — `1…1000000000`. Дробные рубли не поддерживаются. Все денежные вычисления целочисленные с проверкой переполнения: subtotal = сумма quantity × unitPrice; discount = floor(subtotal × percent / 100); total = subtotal − discount. Без купона discount=0.
 
@@ -45,9 +44,9 @@ Gateway создаёт `X-Request-Id` для каждого HTTP-attempt и во
 | Метод и путь | Тело / параметры | Ответ и семантика |
 |---|---|---|
 | `POST /auth/register` | `{login:string, password:string, name:string, email:string}` | 201 User; пользователь и пустая корзина создаются атомарно; токен получают через login |
-| `POST /auth/login` | `{login:string, password:string}` | 200 LoginResult; неверная пара — 401 INVALID_CREDENTIALS |
+| `POST /auth/login` | `{login:string, password:string}` | 200 LoginResult; неверная пара — 401 UNAUTHORIZED |
 | `GET /users/{userId}` | userId: Id | 200 собственный User; иначе 404 |
-| `GET /products` | q, limit, offset — optional | 200 Page<Product>, только опубликованные товары |
+| `GET /products` | q — optional | 200 Product[], только опубликованные товары |
 | `GET /cart` | Нет | 200 Cart текущего пользователя |
 | `PUT /cart/items/{productId}` | productId:Id; `{quantity:Quantity}` | 200 Cart; создаёт позицию или устанавливает абсолютное количество |
 | `PUT /cart/coupon` | `{code:string}` | 200 Cart; выбирает/заменяет единственный купон, использование не расходует |
@@ -56,9 +55,9 @@ Gateway создаёт `X-Request-Id` для каждого HTTP-attempt и во
 
 Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; одинаковая нормализация регистрации, fixture, поиска пользователя и rate key. Пароль: 8…72 UTF-8 bytes, без trim/нормализации, никогда не возвращается. Name: 1…100 символов после trim. Email: синтаксически корректный адрес до 254 символов; trim/lowercase всего адреса. Нормализованные login/email уникальны; в fixture и регистрации используются только синтетические данные. Эти поля доступны в профиле как данные для проверки утечки при BOLA. Coupon code: 1…32 символа `[A-Z0-9_-]` после trim/uppercase; неизвестный код — 404.
 
-Поиск q — строка 0…120 символов, default пустая; регистронезависимое буквальное вхождение в name или description, `%`/`_` не являются пользовательскими wildcard. Сортировка фиксирована: id по возрастанию; параметра sort нет. Limit 1…100, default 20; offset 0…10000, default 0. Invalid id/range — 400; неизвестный маршрут — 404; неподдерживаемый метод известного маршрута — 405 с Allow.
+Поиск q — строка 0…120 символов, default пустая; регистронезависимое буквальное вхождение в name или description, `%`/`_` не являются пользовательскими wildcard. Сортировка фиксирована: id по возрастанию; параметра sort нет. Каталог fixture содержит не более 100 товаров; превышение проверяется до run и запрещает запуск. Ответ — массив всех совпадений, без пагинации. Параметры limit/offset не принимаются. Invalid id/range — 400; неизвестный маршрут — 404; неподдерживаемый метод известного маршрута — 405 с Allow.
 
-Регистрация работает одинаково в обоих режимах: валидирует поля, хеширует пароль через PasswordEncoder, в одной транзакции создаёт User и пустую Cart с revision=0, coupon=null. Ошибка или конфликт уникальности откатывает обе записи; при одновременном конфликте login/email приоритет имеет LOGIN_TAKEN. Пароль и hash не возвращаются и не попадают в логи. Повтор успешной регистрации с теми же данными даёт 409, а не новую учётную запись.
+Регистрация работает одинаково в обоих режимах: валидирует поля, хеширует пароль через PasswordEncoder, в одной транзакции создаёт User и пустую Cart с revision=0, coupon=null. Ошибка или конфликт уникальности откатывает обе записи; занятый login или email возвращает единый 409 CONFLICT. Пароль и hash не возвращаются и не попадают в логи. Повтор успешной регистрации с теми же данными даёт 409, а не новую учётную запись.
 
 ## Объекты ответа
 
@@ -77,7 +76,7 @@ Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; од�
 
 Количество 0 не означает удаление: это отрицательный security-кейс, protected возвращает 400. Для пустой корзины используется отдельный fixture-пользователь либо очистка при успешном protected checkout. Сброс фикстуры разрешён только после завершения run.
 
-Корзина принадлежит JWT subject; ownerId/userId не принимаются в её mutation requests. Draft/отсутствующий товар нельзя добавить. Превышение 99 в существующей позиции или 100 разных товаров — 400 CART_LIMIT_EXCEEDED. Изменение состава/quantity/купона увеличивает revision; повтор PUT с тем же quantity или выбор того же купона её не меняет. Отмен заказов, платежей и возвратов в версии 1 нет. Hash пароля, flags published/canary и внутренние fingerprints в публичные ответы не входят.
+Корзина принадлежит JWT subject; ownerId/userId не принимаются в её mutation requests. Draft/отсутствующий товар нельзя добавить. Превышение 99 в существующей позиции или 100 разных товаров — 400 INVALID_REQUEST. Изменение состава/quantity/купона увеличивает revision; повтор PUT с тем же quantity или выбор того же купона её не меняет. Отмен заказов, платежей и возвратов в версии 1 нет. Hash пароля, flags published/canary и внутренние fingerprints в публичные ответы не входят.
 
 ## Checkout и повторы
 
@@ -88,38 +87,40 @@ Key действует в scope `(authenticated user, method, route, key)`. Fing
 | Условие | Результат protected |
 |---|---|
 | Тот же key и fingerprint после успеха | Прежние 201/Order без нового эффекта, даже после изменения корзины или истечения купона |
-| Тот же key, другое тело | 409 IDEMPOTENCY_CONFLICT |
-| Новый key, уже оформленная cartRevision | 409 CART_ALREADY_CHECKED_OUT |
-| Параллельный тот же key | Ожидание commit; прежний успех либо 409 OPERATION_IN_PROGRESS после ограниченного ожидания |
-| Два разных key одной cartRevision | Один order; второй 409 CART_ALREADY_CHECKED_OUT |
-| Revision не текущая и ранее не оформлялась | 409 CART_CHANGED |
-| Пустая текущая корзина | 409 CART_EMPTY |
-| Неверный quotedTotal | 409 PRICE_CHANGED |
-| Купон истёк / исчерпан | 409 COUPON_EXPIRED / COUPON_EXHAUSTED |
+| Тот же key, другое тело | 409 CONFLICT |
+| Новый key, уже оформленная cartRevision | 409 CONFLICT |
+| Параллельный тот же key | Ожидание commit; прежний успех либо 409 CONFLICT после ограниченного ожидания |
+| Два разных key одной cartRevision | Один order; второй 409 CONFLICT |
+| Revision не текущая и ранее не оформлялась | 409 CONFLICT |
+| Пустая текущая корзина | 409 CONFLICT |
+| Неверный quotedTotal | 409 CONFLICT |
+| Купон истёк / исчерпан | 409 CONFLICT |
 
 Lookup успешного key выполняется после auth/schema validation, до проверки текущей корзины и купона. После timeout повторяются тот же key/body. Заказы и их ключи сохраняются до завершения фикстуры и отчёта. PUT количества задаёт абсолютное значение и при неизменном состоянии не повышает revision. Между чтением корзины и checkout её изменение другим запросом обнаруживается по cartRevision. PUT не гарантирует однократность бизнес-эффекта checkout — для него обязателен Idempotency-Key.
 
 ## Ошибки
 
-Problem содержит только type:string URI, title:string, status:integer, code:string, requestId:Uuid. SQL, stack trace, чужой owner и секреты не возвращаются.
+Один Problem для всех ошибок: `type:"urn:lab:problem:http-error"`, `title:string`, `status:integer`, `code`, `requestId:Uuid`. `title` предназначен человеку, клиент не использует его для ветвления. SQL, stack trace, чужой owner и секреты не возвращаются.
 
 ```json
-{"type":"urn:lab:problem:cart-changed","title":"Корзина изменилась","status":409,"code":"CART_CHANGED","requestId":"e42fb0db-45dc-4b1a-8157-66c3a815e450"}
+{"type":"urn:lab:problem:http-error","title":"Конфликт состояния","status":409,"code":"CONFLICT","requestId":"e42fb0db-45dc-4b1a-8157-66c3a815e450"}
 ```
 
-| Status | Code и условие |
-|---|---|
-| 400 | VALIDATION_FAILED — JSON/types/bounds/обязательные поля/query; CART_LIMIT_EXCEEDED — результирующий размер корзины |
-| 401 | AUTH_REQUIRED — отсутствующий/недействительный JWT; INVALID_CREDENTIALS — login failure; Bearer challenge в WWW-Authenticate |
-| 404 | NOT_FOUND — неизвестный или недоступный ресурс/маршрут |
-| 405 | METHOD_NOT_ALLOWED |
-| 409 | LOGIN_TAKEN, EMAIL_TAKEN — занятый нормализованный login/email; конфликты checkout из таблицы выше |
-| 413 / 415 | PAYLOAD_TOO_LARGE / UNSUPPORTED_MEDIA_TYPE |
-| 429 | RATE_LIMITED; Retry-After в секундах |
-| 503 | DEPENDENCY_UNAVAILABLE — инфраструктура/transaction timeout; RUN_CLOSED — закрытый admission |
-| 500 | INTERNAL_ERROR — неожиданная ошибка, без внутренних деталей |
+| HTTP status | Публичный code | Условие |
+|---|---|---|
+| 400 | INVALID_REQUEST | JSON, поля, типы, query, ограничения ввода/корзины |
+| 401 | UNAUTHORIZED | Неуспешный login или недействительный/отсутствующий JWT; WWW-Authenticate |
+| 403 | FORBIDDEN | Отказ политики gateway; чужие объекты shop всегда 404 |
+| 404 | NOT_FOUND | Неизвестный или недоступный объект/маршрут |
+| 405 / 413 / 415 | INVALID_REQUEST | Метод (с Allow), размер тела или Content-Type |
+| 409 | CONFLICT | Занятый login/email, корзина, купон, сумма, key/body или ожидание key lock |
+| 429 | RATE_LIMITED | Ограничение запросов; Retry-After в секундах |
+| 500 | INTERNAL_ERROR | Неожиданная ошибка |
+| 503 | UNAVAILABLE | Зависимость/технический timeout/закрытый admission |
 
-Общие HTTP-ошибки применимы ко всем операциям. Business conflict не меняет состояние; 500/timeout не доказывает отсутствие commit. В measurement такие случаи проверяются по состоянию и полноте evidence.
+Всего восемь публичных code. Отдельные коды для каждого вида 409 не требуются. Детальный `reasonCode` остаётся во внутренних security-логах: он нужен detector, диагностике и отчёту; в публичный Problem не копируется. Для идемпотентности, cart revision, цены и купона сохраняются все проверки, описанные выше. У ручек OpenAPI перечислены характерные ответы; общие технические ошибки представлены через `default`.
+
+Конфликт не меняет состояние отклонённой транзакции; конкурентная операция могла завершиться успешно. После 409 клиент сверяет корзину и не меняет key автоматически. После потери ответа повторяет исходный key/body. HTTP-ошибка сама по себе не доказывает отсутствие эффекта: evaluator проверяет состояние и полноту evidence. Security-регрессия проверяет статус, внутреннюю причину и инвариант, а не множество публичных подтипов ошибок.
 
 ## Схема данных
 
@@ -144,7 +145,7 @@ Protected constraints: quantity 1…99, положительная unit_price, �
 Все mutations корзины берут её row lock. При READ COMMITTED порядок protected checkout фиксирован:
 
 1. Взять транзакционный advisory lock scope ключа, затем прочитать orders; для прежнего успеха сравнить fingerprint и вернуть сохранённый ответ.
-2. Заблокировать корзину JWT subject. Проверить наличие orders с этой cart_id и запрошенной cartRevision: при наличии вернуть CART_ALREADY_CHECKED_OUT. Затем проверить текущую revision и непустой состав.
+2. Заблокировать корзину JWT subject. Проверить наличие orders с этой cart_id и запрошенной cartRevision: при наличии вернуть 409 CONFLICT. Затем проверить текущую revision и непустой состав.
 3. Проверить quantity и published, рассчитать стоимость по каталогу и сверить quotedTotal. Для купона бизнес-время должно быть строго меньше expires_at; равенство означает истечение.
 4. Для купона выполнить условное атомарное увеличение used_count при действующем сроке и остатке; ноль обновлённых строк означает конфликт.
 5. Создать order/items с исходной cart_revision, очистить позиции и coupon_id корзины, увеличить revision.
@@ -197,7 +198,7 @@ FK по умолчанию запрещают удаление родителя.
 
 ### Обязательная транзакционная дисциплина
 
-Порядок блокировок protected: idempotency scope → cart → coupon. На успешный повтор сохранённый ответ возвращается до проверки текущей корзины и срока купона. Ключ сериализуется через pg_advisory_xact_lock(lockId) до чтения orders по user_id и полному idempotency_key_hash; чтение выполняется отдельным statement READ COMMITTED после получения lock. Блокировка транзакционная, освобождается при commit/rollback. lockId — первые 8 байт SHA-256 канонического UTF-8 JSON-массива ["checkout-v1", userId как десятичная строка, lowercase hex key hash], интерпретированные как signed big-endian long. Коллизия сокращенного lockId только сериализует разные ключи; решение принимается по полному hash и уникальному индексу, не по lockId. Timeout ожидания дает OPERATION_IN_PROGRESS, а не новую попытку создать заказ.
+Порядок блокировок protected: idempotency scope → cart → coupon. На успешный повтор сохранённый ответ возвращается до проверки текущей корзины и срока купона. Ключ сериализуется через pg_advisory_xact_lock(lockId) до чтения orders по user_id и полному idempotency_key_hash; чтение выполняется отдельным statement READ COMMITTED после получения lock. Блокировка транзакционная, освобождается при commit/rollback. lockId — первые 8 байт SHA-256 канонического UTF-8 JSON-массива ["checkout-v1", userId как десятичная строка, lowercase hex key hash], интерпретированные как signed big-endian long. Коллизия сокращенного lockId только сериализует разные ключи; решение принимается по полному hash и уникальному индексу, не по lockId. Timeout ожидания дает 409 CONFLICT, а не новую попытку создать заказ.
 
 Условное обновление купона проверяет остаток и срок в том же UPDATE, в котором увеличивает счетчик. Order/items с key/response_body, очистка корзины и revision коммитятся вместе. Событие CHECKOUT/stateChanged=true создаётся по подтверждённому результату и записывается в JSONL после commit; при rollback пишется отказ/stateChanged=false. Счетчик активных запросов в JVM уменьшается только после terminal log.
 

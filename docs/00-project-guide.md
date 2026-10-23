@@ -80,7 +80,7 @@ Control не проксирует каждую покупку через себ�
 
 | Решение | Зачем оно нужно | Что приходится учитывать |
 |---|---|---|
-| Java 25, Maven Wrapper | Один язык команды, воспроизводимая сборка; virtual threads для HTTP-исполнения | Потоки не заменяют бюджеты, таймауты и ограничения соединений |
+| Java 25, Maven внутри Docker | Один язык команды, воспроизводимая сборка; virtual threads для HTTP-исполнения | Потоки не заменяют бюджеты, таймауты и ограничения соединений |
 | Spring Boot 4.0.x | Конфигурация приложений, HTTP, security, lifecycle и интеграция с БД | Patch-версии фиксируются после проверки сборки |
 | Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x | Gateway в совместимой servlet-линии | Проверяется работа фильтров, двух входов и чтения body |
 | Spring JDBC/JdbcClient, PostgreSQL 17 | SQL, locks и транзакции видны явно | Нужно самостоятельно аккуратно проектировать запросы и границы транзакций |
@@ -97,7 +97,7 @@ Control не проксирует каждую покупку через себ�
 
 ## 6. Как организован Java-проект
 
-Репозиторий — Maven monorepo с отдельным собираемым приложением для каждого процесса. Корневой pom фиксирует общие версии и порядок сборки; Maven Wrapper обеспечивает одинаковый запуск у участников и в CI.
+Репозиторий — Maven monorepo с отдельным собираемым приложением для каждого процесса. Корневой pom фиксирует общие версии и порядок сборки; Maven внутри Docker обеспечивает одинаковый запуск у участников и в CI.
 
 ```text
 apps/
@@ -105,8 +105,7 @@ apps/
   lab-gateway/       # listeners, routing, policies, admission, audit
   lab-detector/      # ingestion, rules, windows, incidents, jobs
   lab-control/       # orchestration, fixtures, log-ingestor, evaluator, ui, reports
-modules/
-  scenario-runner/   # plan, scenarios, executor, cancellation, result ports; без Boot main
+  lab-control/src/main/java/lab/control/runner/ # plan, scenarios, executor; часть control
 libs/
   lab-contracts/     # общие wire records/enums
   lab-observability/ # trace propagation, redaction, соглашения метрик
@@ -121,7 +120,7 @@ contracts/
 config/{policies,rules,scenarios}/
 db/{shop/common,shop/protected,lab}/
 fixtures/
-infra/compose.yaml
+compose.yaml
 tests/acceptance/
 ```
 
@@ -154,7 +153,7 @@ Protected owner query использует id объекта и authenticated us
 | `POST /auth/register` | login/password/name/email; атомарно создаёт User и пустую корзину, возвращает 201; токен через login |
 | `POST /auth/login` | login/password; возвращает accessToken, tokenType, expiresIn |
 | `GET /users/{userId}` | Собственный профиль; отдельная поверхность BOLA |
-| `GET /products` | Поиск q, limit/offset; сортировка по id; только опубликованные товары |
+| `GET /products` | Поиск q; массив до 100 товаров, сортировка по id; только опубликованные товары |
 | `GET /cart` | Корзина, revision, позиции, купон и текущие суммы |
 | `PUT /cart/items/{productId}` | quantity; создаёт позицию или устанавливает абсолютное количество |
 | `PUT /cart/coupon` | code; выбирает один купон без расходования лимита |
@@ -181,11 +180,11 @@ Protected дополняет PK/FK бизнес-ограничениями: до
 
 Клиент читает Cart и передаёт cartRevision/quotedTotal в POST /orders с Idempotency-Key. Revision меняется после реального изменения корзины; no-op её не повышает. Заказ хранит исходные cart_id/cart_revision, hash ключа, fingerprint тела и успешный response_body.
 
-Пример: корзина revision 7 стоит 3000 рублей, купон 10% даёт итог 2700. Запрос с revision=7, quotedTotal=2700 и key K создаёт Order 50. Если ответ потерялся, тот же K/body возвращает Order 50. Новый K2 с revision=7 даёт CART_ALREADY_CHECKED_OUT; прежний K с иным телом — IDEMPOTENCY_CONFLICT.
+Пример: корзина revision 7 стоит 3000 рублей, купон 10% даёт итог 2700. Запрос с revision=7, quotedTotal=2700 и key K создаёт Order 50. Если ответ потерялся, тот же K/body возвращает Order 50. Новый K2 с revision=7 даёт CONFLICT; прежний K с иным телом — CONFLICT.
 
 Protected берёт locks в порядке key → cart → coupon. Сначала ищет успешный key; затем под row lock корзины проверяет ранее оформленную revision, актуальность revision, состав, серверную цену и купон. Order/items, расход купона, сохранённый ответ, очистка позиций/купона корзины и повышение revision фиксируются одним commit. UNIQUE(user_id,key hash) и UNIQUE(cart_id,cart_revision) страхуют от гонок. JSONL-результат записывается после commit/rollback.
 
-Fingerprint — SHA-256 канонических типизированных значений тела, маршрута и версии контракта; JWT/requestId/trace не входят. Успешный retry возвращает кеш до проверки изменённой корзины и истёкшего купона. Ошибки не кешируются; ожидание key lock ограничено и может дать OPERATION_IN_PROGRESS.
+Fingerprint — SHA-256 канонических типизированных значений тела, маршрута и версии контракта; JWT/requestId/trace не входят. Успешный retry возвращает кеш до проверки изменённой корзины и истёкшего купона. Ошибки не кешируются; ожидание key lock ограничено и может дать CONFLICT.
 
 Vulnerable пропускает lookup/уникальность key и проверку оформленной revision. Для replay он намеренно сохраняет корзину, её купон и revision после checkout; повтор создаёт второй order. Protected очищает её и повышает revision. Обычные mutations повышают revision в обоих режимах.
 
@@ -224,7 +223,7 @@ State namespace включает opaque partition, policy version и mode, по�
 
 ## 10. Как работает встроенный генератор сценариев
 
-Scenario-runner — библиотека внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один активный run выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
+Scenario-runner — пакет внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один активный run выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
 
 `PlanExecutor` управляет порядком, barriers и конечными циклами; `StepExecutor` превращает типизированный шаг в запрос; `ScenarioHttpClient` выбирает фиксированный gateway origin; `AttemptSink` передаёт результат адаптеру control. Модуль не импортирует JDBC, evaluator, log-reader или admin-клиенты. Отдельный Maven-модуль и ArchUnit проверяют эти зависимости. Это доверенный код, не песочница для произвольных программ.
 
@@ -412,7 +411,7 @@ Control имеет доступ к shop-admin и lab-data, а его встро�
 
 ### Инициализация и эксплуатация
 
-Планируемая команда `docker compose -f infra/compose.yaml up --build` запускает локальную генерацию keys/credentials, миграции, seed и readiness. Health означает готовность работать с зависимостями, а не только поднятый JVM. В git входят versioned config и `.env.example` с placeholders; рабочие ключи лежат в локальном хранилище.
+Планируемая команда `docker compose up --build` запускает локальную генерацию keys/credentials, миграции, seed и readiness. Health означает готовность работать с зависимостями, а не только поднятый JVM. В git входят versioned config и `.env.example` с placeholders; рабочие ключи лежат в локальном хранилище.
 
 Fixture generator создаёт 24 синтетических пользователя с корзинами, 12 опубликованных товаров и draft canary, пять купонных состояний и согласованную историю заказов. Seed, бизнес-время, owners, counts и snapshots фиксируются. Пустые password hashes запрещены; реальные credentials не используются.
 
@@ -480,7 +479,7 @@ Unit tests проверяют чистые политики/parser/calculator. C
 
 Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Logging tests проверяют формат/порядок JSONL после commit/rollback, отсутствие секретов, конфликт eventId/seq, пропуск terminal/END и INCONCLUSIVE при нарушении допущения о непрерывной работе. Detector tests проверяют late/out-of-order events, atomic state/marker и CLOSE/retraction. Сетевые проверки подтверждают отсутствие обхода gateway, а secret scans/escaping tests — отсутствие утечки или интерпретации входа в UI.
 
-Планируемые команды: `./mvnw verify` для основной сборки/unit/integration/smoke и `./mvnw -Pacceptance verify` для полной серии с фиксированными seeds/budgets и reports. Эти же команды запускаются в CI. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
+Планируемые команды: `mvn verify` внутри Docker build-stage для основной сборки/unit/integration/smoke и `mvn -Pacceptance verify` внутри отдельного Docker test-stage для полной серии с фиксированными seeds/budgets и reports. Эти же команды запускаются в CI. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
 
 ### Результат сдачи
 
@@ -495,3 +494,5 @@ Shop хранит 7 таблиц: users, products, coupons, carts, cart_items, o
 Lab содержит 12 таблиц: 5 control, 2 audit и 5 detection. Ограниченные definitions/manifests/results/history хранятся внутри владельца в JSONB/массивах. Lab хранит контроль эксперимента в control, индекс событий и состояние чтения log streams в audit и безопасное состояние обнаружения в detection. Detector читает индивидуальный whitelist через view и не видит run/target/labels. Отсутствие физических FK для ожидаемых еще не доставленных событий намеренно: полноту доказывает DRAINING, а не возможность вставить manifest. Оценки cases/episodes/incidents относятся к immutable report revision.
 
 Полный словарь каждого SQL-поля и решения о транзакциях приведены в документах 02 и 04. Исполняемые начальные DDL, независимые SQL-проверки, DBML и ER-исходники находятся в docs/data. Источником физической модели служит SQL; изменение таблицы должно сопровождаться обновлением DBML/ER и словаря полей. Python-скриптов и отдельного JSON-дубликата модели в комплекте нет. Обзорные 12 схем показывают концепции; подробные ER-фрагменты показывают реальные таблицы и FK. Наборы credentials, заполнение таблиц и OpenAPI в этот комплект не входят.
+
+Публичные ошибки магазина сведены к восьми категориям Problem.code. Все бизнес-конфликты — 409 CONFLICT; детальные причины остаются в security-логах. Каталог — массив до 100 товаров без пагинации, поиск q сохранён для injection.

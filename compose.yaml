@@ -1,0 +1,70 @@
+name: api-security-lab
+
+x-java-service: &java-service
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+  restart: "no"
+
+services:
+  lab-control:
+    <<: *java-service
+    build:
+      context: .
+      dockerfile: apps/lab-control/Dockerfile
+    ports:
+      - "127.0.0.1:${LAB_CONTROL_PORT:-8080}:8080"
+    networks: [lab-traffic, shop-admin, lab-data, lab-observe]
+
+  lab-gateway:
+    <<: *java-service
+    build:
+      context: .
+      dockerfile: apps/lab-gateway/Dockerfile
+    environment:
+      SERVER_PORT: "8081"
+      GATEWAY_ADDITIONAL_PORT: "8082"
+    expose: ["8081", "8082"]
+    networks: [lab-traffic, shop-backend, shop-admin, lab-observe]
+
+  shop-vulnerable:
+    <<: *java-service
+    image: api-security-lab/shop-api:dev
+    build:
+      context: .
+      dockerfile: apps/shop-api/Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: vulnerable
+    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+
+  shop-protected:
+    <<: *java-service
+    image: api-security-lab/shop-api:dev
+    environment:
+      SPRING_PROFILES_ACTIVE: protected
+    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+
+  lab-detector:
+    <<: *java-service
+    build:
+      context: .
+      dockerfile: apps/lab-detector/Dockerfile
+    networks: [lab-data, lab-observe]
+
+networks:
+  lab-traffic:
+    internal: true
+  shop-backend:
+    internal: true
+  shop-admin:
+    internal: true
+  lab-data:
+    internal: true
+  lab-observe:
+    internal: true

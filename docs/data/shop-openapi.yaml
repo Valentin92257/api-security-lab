@@ -2,11 +2,12 @@
 openapi: 3.1.0
 info:
   title: API Security Lab — магазин
-  version: 1.0.0
+  version: 1.1.0
   description: |-
     Нормативный контракт девяти операций для vulnerable и protected. Origins внутри стенда: http://lab-gateway:8081 и http://lab-gateway:8082; соответствие listener/target задаёт Compose. Protected соблюдает контракт; намеренные отклонения vulnerable служат предметом измерения, а не вторым нормативным API. Gateway schema policy может быть OFF/OBSERVE/ENFORCE; transport/admission/JWT остаются обязательными. Поле target/owner и клиентские заголовки не дают полномочий.
     Все ответы JSON, ошибки Problem. Объекты закрытые, неизвестные/повторяющиеся query и JSON-поля запрещены; строка не преобразуется в число. Для GET тело запрещено. Семантическая нормализация и длины UTF-8 проверяются приложением; x-* описывают дополнительные требования, которые OpenAPI-валидатор сам не исполняет. X-Request-Id выдаёт gateway; доверенный harness context проверяется отдельно и не задаётся обычным клиентом.
     Каталог и условия купонов фиксированы до отчёта. Деньги — целые рубли. Семь таблиц, версия корзины и идемпотентность в orders; checkout intents отсутствуют. Отсутствующие методы/маршруты: 405/404. Пароли/JWT не попадают в логи и отчёты.
+    Публичные code обозначают только восемь категорий HTTP-ошибок. Детальный reasonCode остаётся во внутренних security-логах и не равен Problem.code. Клиент не разбирает title. Каждый бизнес-конфликт возвращает 409 CONFLICT; причина эксперимента определяется по логам и независимому состоянию. Каталог fixture ограничен 100 товарами, отдаётся массивом без пагинации; q сохранён для injection.
 servers:
 - url: "/api/v1"
 security:
@@ -24,10 +25,10 @@ paths:
       tags:
       - Auth
       summary: Зарегистрировать пользователя
-      description: |-
-        В обоих режимах: нормализация и валидация, PasswordEncoder, атомарные User + пустая Cart(revision=0,coupon=null). Токен выдаётся отдельным login. Ошибка откатывает обе записи. Повтор с тем же login/email — конфликт, не новый пользователь.
-
-        409: LOGIN_TAKEN, EMAIL_TAKEN. При одновременном конфликте приоритет LOGIN_TAKEN.
+      description: 'Регистрация одинакова в обоих режимах: нормализация, валидация,
+        PasswordEncoder и атомарные User + пустая Cart(revision=0). Токен — через
+        login. Занятый login или email возвращает 409 CONFLICT; ошибка откатывает
+        обе записи.'
       responses:
         '201':
           description: Успешный результат
@@ -50,26 +51,10 @@ paths:
                 email: alice@example.test
         '400':
           "$ref": "#/components/responses/Error400"
-        '401':
-          "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
-        '404':
-          "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
-        '415':
-          "$ref": "#/components/responses/Error415"
         '409':
           "$ref": "#/components/responses/Error409"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       requestBody:
         required: true
         content:
@@ -88,9 +73,9 @@ paths:
       tags:
       - Auth
       summary: Получить тестовый JWT
-      description: Неверная пара — 401 INVALID_CREDENTIALS; существующий и неизвестный
-        login не различаются по тексту ответа. Gateway login policy может вернуть
-        429. Пароль не логируется.
+      description: Неверная пара — 401 UNAUTHORIZED; существующий и неизвестный login
+        не различаются по тексту ответа. Gateway login policy может вернуть 429. Пароль
+        не логируется.
       responses:
         '200':
           description: Успешный результат
@@ -110,22 +95,10 @@ paths:
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
-        '404':
-          "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
         '429':
           "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
-        '415':
-          "$ref": "#/components/responses/Error415"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       requestBody:
         required: true
         content:
@@ -163,20 +136,10 @@ paths:
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
         '404':
           "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       parameters:
       - name: userId
         in: path
@@ -192,7 +155,9 @@ paths:
       description: 'Буквальное регистронезависимое вхождение q в name/description;
         % и _ не wildcard. Фиксированный ORDER BY id ASC. Protected: параметризованный
         SQL и published=true. Vulnerable: изолированный учебный SQL-case IJ-01; SELECT-only
-        datasource products. Параметра sort нет.'
+        datasource products. Параметра sort нет. Каталог фиксирован и содержит не
+        более 100 товаров (проверяется при подготовке fixture). Возвращается массив
+        всех совпадений; limit/offset/sort отсутствуют.'
       responses:
         '200':
           description: Успешный результат
@@ -207,25 +172,16 @@ paths:
           content:
             application/json:
               schema:
-                "$ref": "#/components/schemas/ProductPage"
+                type: array
+                maxItems: 100
+                items:
+                  "$ref": "#/components/schemas/Product"
         '400':
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
-        '404':
-          "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       parameters:
       - name: q
         in: query
@@ -234,24 +190,6 @@ paths:
           type: string
           default: ''
           maxLength: 120
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-          minimum: 1
-          maximum: 100
-          default: 20
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          format: int64
-          minimum: 0
-          maximum: 10000
-          default: 0
   "/cart":
     get:
       operationId: getCart
@@ -285,24 +223,10 @@ paths:
                 total: 0
                 currency: RUB
                 updatedAt: '2026-10-23T12:00:00Z'
-        '400':
-          "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
-        '404':
-          "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
+        default:
+          "$ref": "#/components/responses/DefaultError"
   "/cart/items/{productId}":
     put:
       operationId: setCartQuantity
@@ -311,7 +235,7 @@ paths:
       summary: Создать позицию или заменить количество
       description: Абсолютное количество, не инкремент. Row lock cart; no-op не повышает
         revision. Quantity=0 — ошибка 400, не удаление. Неизвестный/draft product
-        — 404; более 100 позиций — 400 CART_LIMIT_EXCEEDED. Vulnerable допускает учебные
+        — 404; более 100 позиций — 400 INVALID_REQUEST. Vulnerable допускает учебные
         нарушения quantity при отключённой schema policy.
       responses:
         '200':
@@ -332,22 +256,10 @@ paths:
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
         '404':
           "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
-        '415':
-          "$ref": "#/components/responses/Error415"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       parameters:
       - name: productId
         in: path
@@ -368,10 +280,9 @@ paths:
       tags:
       - Cart
       summary: Выбрать или заменить купон
-      description: |-
-        Один купон, без расходования used_count. Неизвестный код — 404. Повторный выбор не накапливает скидку и не повышает revision. Срок и остаток проверяются сейчас и повторно в checkout.
-
-        409: COUPON_EXPIRED, COUPON_EXHAUSTED.
+      description: Выбирает один купон без расходования used_count; повтор не накапливает
+        скидку и не повышает revision. Неизвестный код — 404; истёкший или исчерпанный
+        купон — 409 CONFLICT. Доступность повторно проверяется при checkout.
       responses:
         '200':
           description: Успешный результат
@@ -391,24 +302,12 @@ paths:
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
         '404':
           "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
-        '415':
-          "$ref": "#/components/responses/Error415"
         '409':
           "$ref": "#/components/responses/Error409"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       requestBody:
         required: true
         content:
@@ -425,8 +324,7 @@ paths:
       summary: Оформить заказ или вернуть прежний успех
       description: |-
         Protected: key lock → lookup orders → cart lock → coupon. Тот же key/body возвращает сохранённые 201/Order до проверки текущей корзины/купона. Новый key для уже оформленной cartRevision отклоняется до проверки текущей revision. Успех атомарно сохраняет order/items/key/response, расходует купон, очищает корзину/купон и повышает revision. Errors не кешируются. Idempotency-Replayed обязателен. После timeout повторяют тот же key/body. Vulnerable пропускает key lookup/защиту revision и сохраняет корзину после checkout для воспроизводимого replay. JSONL пишется после commit/rollback.
-
-        409: IDEMPOTENCY_CONFLICT (тот же key, другое тело); CART_ALREADY_CHECKED_OUT (новый key, оформленная revision); CART_CHANGED; CART_EMPTY; PRICE_CHANGED; COUPON_EXPIRED; COUPON_EXHAUSTED; OPERATION_IN_PROGRESS (ограниченное ожидание key lock).
+        409 CONFLICT: другое тело прежнего key, повторно оформленная/изменённая/пустая корзина, несовпадение quotedTotal, недоступный купон или превышение ожидания key lock. Успешный retry возвращает прежний 201/Order. Клиент не заменяет key автоматически после конфликта; сначала сверяет состояние. После потери ответа повторяет прежний key/body. Причины для эксперимента — в логах, не в публичных подтипах ошибки.
       responses:
         '201':
           description: Успешный результат
@@ -471,24 +369,10 @@ paths:
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
-        '404':
-          "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
-        '415':
-          "$ref": "#/components/responses/Error415"
         '409':
           "$ref": "#/components/responses/Error409"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       parameters:
       - name: Idempotency-Key
         in: header
@@ -537,20 +421,10 @@ paths:
           "$ref": "#/components/responses/Error400"
         '401':
           "$ref": "#/components/responses/Error401"
-        '403':
-          "$ref": "#/components/responses/Error403"
         '404':
           "$ref": "#/components/responses/Error404"
-        '405':
-          "$ref": "#/components/responses/Error405"
-        '413':
-          "$ref": "#/components/responses/Error413"
-        '429':
-          "$ref": "#/components/responses/Error429"
-        '500':
-          "$ref": "#/components/responses/Error500"
-        '503':
-          "$ref": "#/components/responses/Error503"
+        default:
+          "$ref": "#/components/responses/DefaultError"
       parameters:
       - name: orderId
         in: path
@@ -573,8 +447,7 @@ components:
         format: uuid
   responses:
     Error400:
-      description: 'VALIDATION_FAILED: синтаксис, типы, неизвестные или повторяющиеся
-        поля/query, bounds.'
+      description: 'Невалидный ввод: JSON, поля, типы, параметры или бизнес-границы.'
       headers:
         X-Request-Id:
           "$ref": "#/components/headers/RequestId"
@@ -585,15 +458,20 @@ components:
       content:
         application/problem+json:
           schema:
-            "$ref": "#/components/schemas/Problem"
+            allOf:
+            - "$ref": "#/components/schemas/Problem"
+            - properties:
+                status:
+                  const: 400
           example:
-            type: urn:lab:problem:error
-            title: VALIDATION_FAILED
+            type: urn:lab:problem:http-error
+            title: 'Невалидный ввод: JSON, поля, типы, параметры или бизнес-границы.'
             status: 400
-            code: VALIDATION_FAILED
+            code: INVALID_REQUEST
             requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
     Error401:
-      description: 'AUTH_REQUIRED: отсутствующий или недействительный credential.'
+      description: Неверная пара login/password либо отсутствующий/недействительный
+        JWT.
       headers:
         X-Request-Id:
           "$ref": "#/components/headers/RequestId"
@@ -608,34 +486,20 @@ components:
       content:
         application/problem+json:
           schema:
-            "$ref": "#/components/schemas/Problem"
+            allOf:
+            - "$ref": "#/components/schemas/Problem"
+            - properties:
+                status:
+                  const: 401
           example:
-            type: urn:lab:problem:auth-required
-            title: AUTH_REQUIRED
+            type: urn:lab:problem:http-error
+            title: Неверная пара login/password либо отсутствующий/недействительный
+              JWT.
             status: 401
-            code: AUTH_REQUIRED
-            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
-    Error403:
-      description: 'FORBIDDEN: недостаточные полномочия или недопустимый Origin.'
-      headers:
-        X-Request-Id:
-          "$ref": "#/components/headers/RequestId"
-        Cache-Control:
-          schema:
-            type: string
-            const: no-store
-      content:
-        application/problem+json:
-          schema:
-            "$ref": "#/components/schemas/Problem"
-          example:
-            type: urn:lab:problem:error
-            title: FORBIDDEN
-            status: 403
-            code: FORBIDDEN
+            code: UNAUTHORIZED
             requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
     Error404:
-      description: 'NOT_FOUND: объект отсутствует либо недоступен.'
+      description: Неизвестный либо недоступный ресурс.
       headers:
         X-Request-Id:
           "$ref": "#/components/headers/RequestId"
@@ -646,40 +510,20 @@ components:
       content:
         application/problem+json:
           schema:
-            "$ref": "#/components/schemas/Problem"
+            allOf:
+            - "$ref": "#/components/schemas/Problem"
+            - properties:
+                status:
+                  const: 404
           example:
-            type: urn:lab:problem:error
-            title: NOT_FOUND
+            type: urn:lab:problem:http-error
+            title: Неизвестный либо недоступный ресурс.
             status: 404
             code: NOT_FOUND
             requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
-    Error405:
-      description: 'METHOD_NOT_ALLOWED: метод не поддерживается для существующего
-        маршрута.'
-      headers:
-        X-Request-Id:
-          "$ref": "#/components/headers/RequestId"
-        Cache-Control:
-          schema:
-            type: string
-            const: no-store
-        Allow:
-          schema:
-            type: string
-          description: Поддерживаемые методы; обязателен.
-      content:
-        application/problem+json:
-          schema:
-            "$ref": "#/components/schemas/Problem"
-          example:
-            type: urn:lab:problem:error
-            title: METHOD_NOT_ALLOWED
-            status: 405
-            code: METHOD_NOT_ALLOWED
-            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
     Error409:
-      description: Конфликт состояния или уникальности; конкретные code перечислены
-        у операции.
+      description: 'Конфликт: занятая учётная запись, состояние корзины/купона, сумма
+        или идемпотентность. Детали записываются в security-log.reasonCode.'
       headers:
         X-Request-Id:
           "$ref": "#/components/headers/RequestId"
@@ -690,54 +534,20 @@ components:
       content:
         application/problem+json:
           schema:
-            "$ref": "#/components/schemas/Problem"
+            allOf:
+            - "$ref": "#/components/schemas/Problem"
+            - properties:
+                status:
+                  const: 409
           example:
-            type: urn:lab:problem:error
-            title: Конфликт состояния или уникальности; конкретные code перечислены
-              у операции.
+            type: urn:lab:problem:http-error
+            title: 'Конфликт: занятая учётная запись, состояние корзины/купона, сумма
+              или идемпотентность. Детали записываются в security-log.reasonCode.'
             status: 409
-            code: STATE_CONFLICT
-            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
-    Error413:
-      description: 'PAYLOAD_TOO_LARGE: превышен настроенный бюджет тела.'
-      headers:
-        X-Request-Id:
-          "$ref": "#/components/headers/RequestId"
-        Cache-Control:
-          schema:
-            type: string
-            const: no-store
-      content:
-        application/problem+json:
-          schema:
-            "$ref": "#/components/schemas/Problem"
-          example:
-            type: urn:lab:problem:error
-            title: PAYLOAD_TOO_LARGE
-            status: 413
-            code: PAYLOAD_TOO_LARGE
-            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
-    Error415:
-      description: 'UNSUPPORTED_MEDIA_TYPE: требуется application/json.'
-      headers:
-        X-Request-Id:
-          "$ref": "#/components/headers/RequestId"
-        Cache-Control:
-          schema:
-            type: string
-            const: no-store
-      content:
-        application/problem+json:
-          schema:
-            "$ref": "#/components/schemas/Problem"
-          example:
-            type: urn:lab:problem:error
-            title: UNSUPPORTED_MEDIA_TYPE
-            status: 415
-            code: UNSUPPORTED_MEDIA_TYPE
+            code: CONFLICT
             requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
     Error429:
-      description: 'RATE_LIMITED: превышен лимит; Retry-After в секундах.'
+      description: Сработало ограничение запросов; обязателен Retry-After.
       headers:
         X-Request-Id:
           "$ref": "#/components/headers/RequestId"
@@ -753,15 +563,22 @@ components:
       content:
         application/problem+json:
           schema:
-            "$ref": "#/components/schemas/Problem"
+            allOf:
+            - "$ref": "#/components/schemas/Problem"
+            - properties:
+                status:
+                  const: 429
           example:
-            type: urn:lab:problem:error
-            title: RATE_LIMITED
+            type: urn:lab:problem:http-error
+            title: Сработало ограничение запросов
             status: 429
             code: RATE_LIMITED
             requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
-    Error500:
-      description: 'INTERNAL_ERROR: без SQL, stack trace или секретов.'
+    DefaultError:
+      description: 'Общие технические ответы: 403 (policy reject), 405 (Allow), 413,
+        415, 429 (Retry-After), 500, 503. Могут возникнуть до обработчика. Используется
+        единый Problem; его status совпадает с HTTP-статусом. На случай непредвиденной
+        серверной ошибки возвращается 500 INTERNAL_ERROR.'
       headers:
         X-Request-Id:
           "$ref": "#/components/headers/RequestId"
@@ -769,37 +586,19 @@ components:
           schema:
             type: string
             const: no-store
-      content:
-        application/problem+json:
-          schema:
-            "$ref": "#/components/schemas/Problem"
-          example:
-            type: urn:lab:problem:error
-            title: INTERNAL_ERROR
-            status: 500
-            code: INTERNAL_ERROR
-            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
-    Error503:
-      description: DEPENDENCY_UNAVAILABLE либо RUN_CLOSED; инфраструктурный отказ
-        не считается предотвращённой атакой.
-      headers:
-        X-Request-Id:
-          "$ref": "#/components/headers/RequestId"
-        Cache-Control:
+        Retry-After:
           schema:
             type: string
-            const: no-store
+            pattern: "^[0-9]+$"
+          description: Обязателен при 429, секунды.
+        Allow:
+          schema:
+            type: string
+          description: Обязателен при 405.
       content:
         application/problem+json:
           schema:
             "$ref": "#/components/schemas/Problem"
-          example:
-            type: urn:lab:problem:error
-            title: DEPENDENCY_UNAVAILABLE либо RUN_CLOSED; инфраструктурный отказ
-              не считается предотвращённой атакой.
-            status: 503
-            code: DEPENDENCY_UNAVAILABLE
-            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
   schemas:
     Uuid:
       type: string
@@ -831,7 +630,7 @@ components:
       properties:
         type:
           type: string
-          format: uri
+          const: urn:lab:problem:http-error
         title:
           type: string
           maxLength: 240
@@ -841,13 +640,121 @@ components:
           format: int64
           minimum: 400
           maximum: 599
+          enum:
+          - 400
+          - 401
+          - 403
+          - 404
+          - 405
+          - 409
+          - 413
+          - 415
+          - 429
+          - 500
+          - 503
         code:
           type: string
-          pattern: "^[A-Z][A-Z0-9_]*$"
-          maxLength: 80
-          minLength: 1
+          enum:
+          - INVALID_REQUEST
+          - UNAUTHORIZED
+          - FORBIDDEN
+          - NOT_FOUND
+          - CONFLICT
+          - RATE_LIMITED
+          - INTERNAL_ERROR
+          - UNAVAILABLE
+          description: Публичная категория. Детальная причина только в security-log.reasonCode.
         requestId:
           "$ref": "#/components/schemas/Uuid"
+      allOf:
+      - if:
+          properties:
+            status:
+              const: 400
+        then:
+          properties:
+            code:
+              const: INVALID_REQUEST
+      - if:
+          properties:
+            status:
+              const: 401
+        then:
+          properties:
+            code:
+              const: UNAUTHORIZED
+      - if:
+          properties:
+            status:
+              const: 403
+        then:
+          properties:
+            code:
+              const: FORBIDDEN
+      - if:
+          properties:
+            status:
+              const: 404
+        then:
+          properties:
+            code:
+              const: NOT_FOUND
+      - if:
+          properties:
+            status:
+              const: 405
+        then:
+          properties:
+            code:
+              const: INVALID_REQUEST
+      - if:
+          properties:
+            status:
+              const: 409
+        then:
+          properties:
+            code:
+              const: CONFLICT
+      - if:
+          properties:
+            status:
+              const: 413
+        then:
+          properties:
+            code:
+              const: INVALID_REQUEST
+      - if:
+          properties:
+            status:
+              const: 415
+        then:
+          properties:
+            code:
+              const: INVALID_REQUEST
+      - if:
+          properties:
+            status:
+              const: 429
+        then:
+          properties:
+            code:
+              const: RATE_LIMITED
+      - if:
+          properties:
+            status:
+              const: 500
+        then:
+          properties:
+            code:
+              const: INTERNAL_ERROR
+      - if:
+          properties:
+            status:
+              const: 503
+        then:
+          properties:
+            code:
+              const: UNAVAILABLE
     Id:
       type: integer
       format: int64
@@ -992,36 +899,6 @@ components:
         currency:
           type: string
           const: RUB
-    ProductPage:
-      type: object
-      additionalProperties: false
-      required:
-      - items
-      - limit
-      - offset
-      - total
-      properties:
-        items:
-          type: array
-          items:
-            "$ref": "#/components/schemas/Product"
-          minItems: 0
-          maxItems: 100
-        limit:
-          type: integer
-          format: int64
-          minimum: 1
-          maximum: 100
-        offset:
-          type: integer
-          format: int64
-          minimum: 0
-          maximum: 10000
-        total:
-          type: integer
-          format: int64
-          minimum: 0
-          maximum: 9007199254740991
     LineItem:
       type: object
       additionalProperties: false
