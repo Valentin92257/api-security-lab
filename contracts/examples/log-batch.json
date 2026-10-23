@@ -1,0 +1,58 @@
+{
+  "producer": "SHOP",
+  "events": [
+    {
+      "eventId": "00000000-0000-4000-8000-000000000101",
+      "sequence": 1,
+      "time": "2026-10-23T12:00:00Z",
+      "eventType": "lab.api.request.started.v1",
+      "requestId": "00000000-0000-4000-8000-000000000010",
+      "actorId": null,
+      "sourceKey": "source-1",
+      "http": {
+        "method": "GET",
+        "route": "/api/v1/orders/{orderId}",
+        "status": null
+      },
+      "facts": {}
+    },
+    {
+      "eventId": "00000000-0000-4000-8000-000000000102",
+      "sequence": 2,
+      "time": "2026-10-23T12:00:00Z",
+      "eventType": "lab.object.accessed.v1",
+      "requestId": "00000000-0000-4000-8000-000000000010",
+      "actorId": 7,
+      "sourceKey": "source-1",
+      "http": {
+        "method": "GET",
+        "route": "/api/v1/orders/{orderId}",
+        "status": 404
+      },
+      "facts": {
+        "resourceType": "ORDER",
+        "resourceId": 123,
+        "resourceOwnerId": 8,
+        "subjectMatchesOwner": false
+      }
+    },
+    {
+      "eventId": "00000000-0000-4000-8000-000000000103",
+      "sequence": 3,
+      "time": "2026-10-23T12:00:00Z",
+      "eventType": "lab.api.request.completed.v1",
+      "requestId": "00000000-0000-4000-8000-000000000010",
+      "actorId": 7,
+      "sourceKey": "source-1",
+      "http": {
+        "method": "GET",
+        "route": "/api/v1/orders/{orderId}",
+        "status": 404
+      },
+      "facts": {
+        "operationExecuted": false,
+        "stateChanged": false
+      }
+    }
+  ]
+}

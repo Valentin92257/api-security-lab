@@ -1,0 +1,7 @@
+{
+  "expectedLastSequence": {
+    "GATEWAY": 5,
+    "SHOP": 3
+  },
+  "deadlineAt": "2026-10-23T12:01:00Z"
+}

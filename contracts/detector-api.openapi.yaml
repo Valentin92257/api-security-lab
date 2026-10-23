@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info: {title: Detector, version: 1.0.0, description: Control управляет анализом; Shop/Gateway отправляют логи
+    токенами своей роли.}
+servers:
+- {url: /internal/v1}
+security:
+- ServiceBearer: []
+paths:
+  /runs/{runId}:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    put:
+      operationId: prepareAnalysis
+      description: Повтор runId возвращает существующий анализ; правила задаёт Detector.
+      responses:
+        '201': {$ref: '#/components/responses/AnalysisStatus'}
+        '200': {$ref: '#/components/responses/AnalysisStatus'}
+        default: {$ref: '#/components/responses/Error'}
+    get:
+      operationId: getAnalysisStatus
+      description: COMPLETED - все логи обработаны; observedRequestIds доступны только тогда.
+      responses:
+        '200': {$ref: '#/components/responses/AnalysisStatus'}
+        default: {$ref: '#/components/responses/Error'}
+  /runs/{runId}/log-batches:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    post:
+      operationId: ingestLogs
+      description: ACK после хранения пачки. Повтор eventId/sequence/content безопасен; конфликт - 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/logs.yaml#/$defs/LogBatch}
+      responses:
+        '200': {$ref: '#/components/responses/LogBatchAck'}
+        default: {$ref: '#/components/responses/Error'}
+  /runs/{runId}/finish:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    put:
+      operationId: finishAnalysis
+      description: Ждать непрерывные 1..N обоих producers до deadlineAt; изменённый повтор - 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/detector.yaml#/$defs/FinishAnalysisRequest}
+      responses:
+        '202': {$ref: '#/components/responses/AnalysisStatus'}
+        default: {$ref: '#/components/responses/Error'}
+  /runs/{runId}/incidents:
+    parameters:
+    - {$ref: '#/components/parameters/runId'}
+    get:
+      operationId: listFinalIncidents
+      description: 'Только итоговые после COMPLETED; иначе 409. Порядок: detectedAt, incidentId.'
+      parameters:
+      - {$ref: '#/components/parameters/limit'}
+      - {$ref: '#/components/parameters/offset'}
+      responses:
+        '200': {$ref: '#/components/responses/IncidentPage'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  responses:
+    AnalysisStatus:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/detector.yaml#/$defs/AnalysisStatus}
+      description: OK
+    LogBatchAck:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/logs.yaml#/$defs/LogBatchAck}
+      description: OK
+    IncidentPage:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/detector.yaml#/$defs/IncidentPage}
+      description: OK
+    Error:
+      description: Ошибка
+      content:
+        application/problem+json:
+          schema: {$ref: ./schemas/common.yaml#/$defs/Problem}
+  parameters:
+    runId:
+      name: runId
+      in: path
+      schema: {type: string, format: uuid}
+      required: true
+    limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    offset:
+      name: offset
+      in: query
+      schema: {type: integer, minimum: 0, maximum: 100000, default: 0}
+  securitySchemes:
+    ServiceBearer: {type: http, scheme: bearer}
