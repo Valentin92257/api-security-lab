@@ -37,7 +37,7 @@
 | Метрики/UI | N/A при нуле, incomplete не FN, wrong class FP, несколько incidents на episode, benign retry, escaping/CSRF и отсутствие секретов |
 | Runtime | Внешний egress control закрыт; ScenarioHttpClient отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
 
-SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для add/change/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
+SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для setQuantity/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
 Планируемый pipeline `./mvnw verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия — `./mvnw -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Обе команды выполняются в CI; после появления реализации они должны совпадать с её фактическими Maven profiles.
 
@@ -49,8 +49,8 @@ Regression падает при нарушении обещанного protected
 
 | Требования | Проверяемый результат |
 |---|---|
-| FR-1–FR-3 | Атомарная регистрация пользователя/корзины, login/JWT и текущий профиль |
-| FR-4–FR-9 | Каталог/карточка, все операции корзины, checkout, купон со сроком/лимитом/одним применением на order, история; один контракт двух режимов |
+| FR-1–FR-3 (сокращённый scope) | Атомарная регистрация пользователя/корзины, login/JWT и профиль по ID; исходных пользователей готовит fixture |
+| FR-4–FR-9 (сокращённый scope) | Поиск каталога, GET cart, PUT количества/купона, checkout и заказ по ID; карточка товара, история и удаления исключены; один контракт двух режимов |
 | FR-10–FR-16 | Активы/угрозы/меры/остаточные риски; credential stuffing, BOLA profile/order, replay, injection, четыре business subcases; отдельный критерий эффекта и инвариант |
 | FR-17–FR-20 | Создание experiment с scenarios/targets/actors/policies; подготовка/шаги/результаты; seed/manifest; безопасный reset |
 | FR-21–FR-22 | Обязательный gateway; JWT claims/signature и одноразовость бизнес-операции при многократном access JWT |
@@ -79,3 +79,7 @@ Regression падает при нарушении обещанного protected
 Результат сдачи: исходный код в публичном репозитории, воспроизводимые команды, актуальные схемы и документация, тестовые отчёты, видео либо сценарий демонстрации и фактический вклад каждого участника. До выполнения проверок проектная спецификация не считается доказательством готового стенда.
 
 Проверки упрощённого checkout: новый key для оформленной revision возвращает CART_ALREADY_CHECKED_OUT; устаревшая неоформленная revision — CART_CHANGED. Успешный retry после очистки корзины и истечения купона возвращает прежний Order. Два разных key одной revision создают один заказ; vulnerable replay той же версии создаёт повторный эффект. Изменение замороженного каталога/условий купона приводит к INCONCLUSIVE, а не к корректному результату ASR.
+
+Минимальный контракт магазина содержит 9 операций. Проверить создание позиции через PUT, замену количества без инкремента и no-op без повышения revision; quantity=0 отклоняется. Сценарии получают ID своих/чужих ресурсов из приватного manifest, подтверждают login чтением профиля по ID и не требуют регистрации или истории заказов. Исключённые маршруты дают 404, а неподдерживаемый метод существующего маршрута — 405.
+
+Регистрация: проверить 201 User и пустую Cart с revision=0, отсутствие password/hash в ответе и логах, вход созданного пользователя, 400 для невалидных полей и 409 LOGIN_TAKEN/EMAIL_TAKEN после нормализации. Гонка одинаковых регистраций создаёт ровно одного пользователя и одну корзину; ошибка создания корзины откатывает пользователя. Проверки одинаковы для vulnerable и protected.

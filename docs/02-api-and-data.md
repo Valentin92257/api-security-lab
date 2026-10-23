@@ -1,10 +1,22 @@
-# API и данные
+# Минимальное API магазина и данные
+
+## Границы API
+
+Магазин предоставляет девять операций, необходимых для экспериментов ИБ. Отдельная карточка товара, история заказов и удаление позиций/купона исключены из MVP. Пользователей, корзины, каталог, купоны и исторические заказы подготавливает fixture-модуль control до run; регистрация также доступна отдельной публичной операцией; API наполнения каталога и купонов нет. Это осознанное сокращение первоначального функционального объёма магазина.
+
+| Эксперимент | Необходимые операции |
+|---|---|
+| Credential stuffing | Login и чтение собственного профиля для подтверждения доступа |
+| BOLA/IDOR | Чтение профиля и заказа по ID, известным из приватного fixture manifest |
+| Injection | Поиск товаров по q; независимый признак эффекта — выдача draft canary |
+| Replay | Подготовка корзины и повтор POST /orders с тем же или новым ключом |
+| Business abuse | Недопустимое quantity, повторный/истёкший/исчерпанный купон, подмена суммы, гонки checkout |
 
 ## Общие правила
 
 Один нормативный контракт описывает vulnerable и protected. Protected выполняет все правила; vulnerable намеренно отключает перечисленные ниже проверки для учебных сценариев. Базовый путь — `/api/v1`, внутренние origins — `http://lab-gateway:8081` и `http://lab-gateway:8082`. Версия машинного контракта — OpenAPI 3.1.0.
 
-JSON UTF-8, camelCase, даты UTC RFC 3339. Все поля описанных request/response objects обязательны, кроме явно отмеченных optional; null разрешён только явно. Request objects закрыты: неизвестные/повторяющиеся JSON-поля и query parameters, дубли query names, несоответствие типов — 400. Преобразование строки в число не выполняется. Для операций с телом требуется `Content-Type: application/json`; для GET/DELETE тело не предусмотрено. Ответы JSON, ошибки `application/problem+json`.
+JSON UTF-8, camelCase, даты UTC RFC 3339. Все поля описанных request/response objects обязательны, кроме явно отмеченных optional; null разрешён только явно. Request objects закрыты: неизвестные/повторяющиеся JSON-поля и query parameters, дубли query names, несоответствие типов — 400. Преобразование строки в число не выполняется. Для операций с телом требуется `Content-Type: application/json`; для GET тело не предусмотрено. Ответы JSON, ошибки `application/problem+json`.
 
 | Тип | Определение |
 |---|---|
@@ -28,29 +40,25 @@ Gateway создаёт `X-Request-Id` для каждого HTTP-attempt и во
 
 ## Запросы и операции
 
-Поля тел обязательны; пустые тела не подменяются значениями по умолчанию. Во всех строках, кроме двух auth-операций, требуется JWT.
+Поля тел обязательны; пустые тела не подменяются значениями по умолчанию. Во всех строках, кроме register/login, требуется JWT.
 
 | Метод и путь | Тело / параметры | Ответ и семантика |
 |---|---|---|
-| `POST /auth/register` | `{login:string, password:string, name:string, email:string}` | 201 User; пользователь и пустая корзина создаются одной транзакцией |
+| `POST /auth/register` | `{login:string, password:string, name:string, email:string}` | 201 User; пользователь и пустая корзина создаются атомарно; токен получают через login |
 | `POST /auth/login` | `{login:string, password:string}` | 200 LoginResult; неверная пара — 401 INVALID_CREDENTIALS |
-| `GET /users/me` | Нет | 200 User текущего subject |
 | `GET /users/{userId}` | userId: Id | 200 собственный User; иначе 404 |
-| `GET /products` | q, sort, limit, offset — optional | 200 Page<Product>, только опубликованные товары |
-| `GET /products/{productId}` | productId: Id | 200 Product; отсутствующий/draft — 404 |
+| `GET /products` | q, limit, offset — optional | 200 Page<Product>, только опубликованные товары |
 | `GET /cart` | Нет | 200 Cart текущего пользователя |
-| `POST /cart/items` | `{productId:Id, quantity:Quantity}` | 200 Cart; количество прибавляется к имеющемуся, новый товар создаёт позицию |
-| `PATCH /cart/items/{productId}` | `{quantity:Quantity}` | 200 Cart; абсолютное количество; отсутствующая позиция — 404 |
-| `DELETE /cart/items/{productId}` | Нет | 200 Cart; отсутствие позиции допустимо |
+| `PUT /cart/items/{productId}` | productId:Id; `{quantity:Quantity}` | 200 Cart; создаёт позицию или устанавливает абсолютное количество |
 | `PUT /cart/coupon` | `{code:string}` | 200 Cart; выбирает/заменяет единственный купон, использование не расходует |
-| `DELETE /cart/coupon` | Нет | 200 Cart; отсутствие купона допустимо |
 | `POST /orders` | `{cartRevision:Revision, quotedTotal:Money}` + Idempotency-Key | 201 Order; успешный retry возвращает тот же status/body |
-| `GET /orders` | limit, offset — optional | 200 Page<OrderSummary>, собственная история |
 | `GET /orders/{orderId}` | orderId: Id | 200 собственный Order; иначе 404 |
 
-Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; одинаковая нормализация регистрации, поиска и rate key. Пароль: 8…72 UTF-8 bytes, без trim/нормализации, никогда не возвращается. Name: 1…100 символов после trim. Email: синтаксически корректный адрес до 254 символов, для стенда trim/lowercase всего адреса и unique normalized value. Coupon code: 1…32 символа `[A-Z0-9_-]` после trim/uppercase; неизвестный код — 404.
+Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; одинаковая нормализация регистрации, fixture, поиска пользователя и rate key. Пароль: 8…72 UTF-8 bytes, без trim/нормализации, никогда не возвращается. Name: 1…100 символов после trim. Email: синтаксически корректный адрес до 254 символов; trim/lowercase всего адреса. Нормализованные login/email уникальны; в fixture и регистрации используются только синтетические данные. Эти поля доступны в профиле как данные для проверки утечки при BOLA. Coupon code: 1…32 символа `[A-Z0-9_-]` после trim/uppercase; неизвестный код — 404.
 
-Поиск q — строка 0…120 символов, default пустая; регистронезависимое буквальное вхождение в name или description, `%`/`_` не являются пользовательскими wildcard. Sort — `id` (default), `name`, `price`, по возрастанию, затем id; имена SQL-полей выбираются по enum. Limit 1…100, default 20; offset 0…10000, default 0. История заказов сортируется createdAt DESC, id DESC. Invalid id/enum/range — 400; неизвестный маршрут — 404; неподдерживаемый метод известного маршрута — 405 с Allow.
+Поиск q — строка 0…120 символов, default пустая; регистронезависимое буквальное вхождение в name или description, `%`/`_` не являются пользовательскими wildcard. Сортировка фиксирована: id по возрастанию; параметра sort нет. Limit 1…100, default 20; offset 0…10000, default 0. Invalid id/range — 400; неизвестный маршрут — 404; неподдерживаемый метод известного маршрута — 405 с Allow.
+
+Регистрация работает одинаково в обоих режимах: валидирует поля, хеширует пароль через PasswordEncoder, в одной транзакции создаёт User и пустую Cart с revision=0, coupon=null. Ошибка или конфликт уникальности откатывает обе записи; при одновременном конфликте login/email приоритет имеет LOGIN_TAKEN. Пароль и hash не возвращаются и не попадают в логи. Повтор успешной регистрации с теми же данными даёт 409, а не новую учётную запись.
 
 ## Объекты ответа
 
@@ -64,11 +72,12 @@ Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; од�
 | `OrderCoupon` | code:string, discountPercent:integer(1…100); условия купона при оформлении |
 | `Cart` | id:Id, userId:Id, revision:Revision, items:LineItem[], coupon:CartCoupon/null, subtotal:Money, discount:Money, total:Money, currency:"RUB", updatedAt:Time |
 | `Order` | id:Id, userId:Id, cartId:Id, cartRevision:Revision, status:"CREATED", items:LineItem[] непустой, coupon:OrderCoupon/null, subtotal:Money, discount:Money, total:Money, currency:"RUB", createdAt:Time |
-| `OrderSummary` | Все поля Order, кроме items |
 
 В Cart цены из неизменяемого каталога; в Order цена позиции сохранена в unit_price. LineTotal всегда quantity × unitPrice. Пустая корзина имеет items=[], subtotal=discount=total=0. CartCoupon выбирается без резерва: PUT проверяет доступность сейчас, checkout проверяет повторно. Если купон стал недоступен, GET cart сохраняет code и percent, показывает соответствующий eligibility и discount=0. Оформление с недоступным купоном отклоняется.
 
-Корзина принадлежит JWT subject; ownerId/userId не принимаются в её mutation requests. Draft/отсутствующий товар нельзя добавить. Превышение 99 в существующей позиции или 100 разных товаров — 400 CART_LIMIT_EXCEEDED. Изменение состава/quantity/купона увеличивает revision; no-op PATCH/DELETE/повтор выбора того же купона её не меняет. Отмен заказов, платежей и возвратов в версии 1 нет. Hash пароля, flags published/canary и внутренние fingerprints в публичные ответы не входят.
+Количество 0 не означает удаление: это отрицательный security-кейс, protected возвращает 400. Для пустой корзины используется отдельный fixture-пользователь либо очистка при успешном protected checkout. Сброс фикстуры разрешён только после завершения run.
+
+Корзина принадлежит JWT subject; ownerId/userId не принимаются в её mutation requests. Draft/отсутствующий товар нельзя добавить. Превышение 99 в существующей позиции или 100 разных товаров — 400 CART_LIMIT_EXCEEDED. Изменение состава/quantity/купона увеличивает revision; повтор PUT с тем же quantity или выбор того же купона её не меняет. Отмен заказов, платежей и возвратов в версии 1 нет. Hash пароля, flags published/canary и внутренние fingerprints в публичные ответы не входят.
 
 ## Checkout и повторы
 
@@ -88,7 +97,7 @@ Key действует в scope `(authenticated user, method, route, key)`. Fing
 | Неверный quotedTotal | 409 PRICE_CHANGED |
 | Купон истёк / исчерпан | 409 COUPON_EXPIRED / COUPON_EXHAUSTED |
 
-Lookup успешного key выполняется после auth/schema validation, до проверки текущей корзины и купона. После timeout повторяются тот же key/body. Заказы и их ключи сохраняются до завершения фикстуры и отчёта. Автоматический retry инкрементального `POST /cart/items` запрещён; PATCH абсолютного количества и DELETE при неизменном состоянии не создают нового изменения.
+Lookup успешного key выполняется после auth/schema validation, до проверки текущей корзины и купона. После timeout повторяются тот же key/body. Заказы и их ключи сохраняются до завершения фикстуры и отчёта. PUT количества задаёт абсолютное значение и при неизменном состоянии не повышает revision. Между чтением корзины и checkout её изменение другим запросом обнаруживается по cartRevision. PUT не гарантирует однократность бизнес-эффекта checkout — для него обязателен Idempotency-Key.
 
 ## Ошибки
 
@@ -104,7 +113,7 @@ Problem содержит только type:string URI, title:string, status:inte
 | 401 | AUTH_REQUIRED — отсутствующий/недействительный JWT; INVALID_CREDENTIALS — login failure; Bearer challenge в WWW-Authenticate |
 | 404 | NOT_FOUND — неизвестный или недоступный ресурс/маршрут |
 | 405 | METHOD_NOT_ALLOWED |
-| 409 | LOGIN_TAKEN, EMAIL_TAKEN; конфликты checkout из таблицы выше |
+| 409 | LOGIN_TAKEN, EMAIL_TAKEN — занятый нормализованный login/email; конфликты checkout из таблицы выше |
 | 413 / 415 | PAYLOAD_TOO_LARGE / UNSUPPORTED_MEDIA_TYPE |
 | 429 | RATE_LIMITED; Retry-After в секундах |
 | 503 | DEPENDENCY_UNAVAILABLE — инфраструктура/transaction timeout; RUN_CLOSED — закрытый admission |
@@ -174,13 +183,13 @@ Credential workload — 200 попыток с тремя корректными 
 
 Общие ограничения обеспечивают структурную целостность: типы, NOT NULL, идентификаторы, PK/FK, уникальность логинов/email/кодов, параметры каталога. Ограничения количества, итогов, счетчика купона и одноразового эффекта находятся только в protected migration. Общая схема не должна случайно устранять учебную уязвимость. Hash ключа, fingerprint и response_body входят в orders; UNIQUE(user_id,idempotency_key_hash) действует только в protected. Scope method/route не требует колонок: идемпотентность предусмотрена только для POST /api/v1/orders.
 
-FK по умолчанию запрещают удаление родителя. CASCADE применяется только к составным частям `cart_items` и `order_items`; это не разрешение runtime удалять заказы. UNIQUE(carts.user_id) означает «не более одной корзины», а наличие корзины обеспечивает атомарная регистрация. Непустой заказ, максимум 100 разных позиций, совпадение owner и сумма всех строк — межстрочные условия: их проверяет транзакционный код и независимый oracle. Они не выдаются за обычные CHECK одной строки.
+FK по умолчанию запрещают удаление родителя. CASCADE применяется только к составным частям `cart_items` и `order_items`; это не разрешение runtime удалять заказы. UNIQUE(carts.user_id) означает «не более одной корзины», а наличие корзины обеспечивает атомарная регистрация либо подготовка пользователя/корзины fixture-модулем. Непустой заказ, максимум 100 разных позиций, совпадение owner и сумма всех строк — межстрочные условия: их проверяет транзакционный код и независимый oracle. Они не выдаются за обычные CHECK одной строки.
 
 Индексы PK/UNIQUE создаёт PostgreSQL. Дополнительные индексы для истории заказов, key scope и поиска по FK перечислены в словаре ниже. Индексы не заменяют блокировки и не обеспечивают межтабличные бизнес-инварианты.
 
 ### Snapshot, время и идентификаторы
 
-Отдельного серверного объекта подготовки checkout нет. Cart.revision фиксирует состояние корзины, а orders.cart_revision — потреблённую версию. Каталог (включая названия, цены и published) и условия купонов (code, percent, expires_at, max_uses) заморожены до отчёта; used_count изменяем. История возвращает сохранённый Order response. Изменение каталога во время run не поддерживается.
+Отдельного серверного объекта подготовки checkout нет. Cart.revision фиксирует состояние корзины, а orders.cart_revision — потреблённую версию. Каталог (включая названия, цены и published) и условия купонов (code, percent, expires_at, max_uses) заморожены до отчёта; used_count изменяем. GET /orders/{orderId} возвращает сохранённый Order response после owner-check. Изменение каталога во время run не поддерживается.
 
 Объект `response_body` содержит полный нормативный Order response. Raw idempotency key не хранится: `orders.idempotency_key_hash` — HMAC-SHA256 ключом стабильным на весь жизненный цикл фикстуры/отчёта. Fingerprint тела и hashes конфигураций — SHA-256 (32 байта SQL bytea, 64 hex в JSON). UUID не имеют смыслового кодирования target/scenario. Все бизнес-Id ограничены безопасным целочисленным диапазоном API; технические UUID не преобразуются в bigint.
 
@@ -235,7 +244,7 @@ SQL-проверки не устанавливают факт утечки пр�
 
 ### `users`
 
-Учетная запись; регистрация и создание корзины атомарны.
+Учетная запись; пользователя и корзину атомарно создаёт регистрация или fixture-модуль.
 
 PK: `id`.
 UNIQUE: `login`; `email`.
@@ -284,7 +293,7 @@ UNIQUE: `code`.
 
 ### `carts`
 
-Не более одной корзины на пользователя; наличие обеспечивает регистрация.
+Не более одной корзины на пользователя; наличие обеспечивает регистрация или fixture-модуль.
 
 PK: `id`.
 UNIQUE: `user_id`.

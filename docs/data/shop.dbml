@@ -10,7 +10,7 @@ Table users {
     (login) [unique]
     (email) [unique]
   }
-  Note: 'Учетная запись; регистрация и создание корзины атомарны.'
+  Note: 'Учетная запись; пользователя и корзину атомарно создаёт регистрация или fixture-модуль.'
 }
 Table products {
   id bigint [pk, not null, increment, note: 'Идентификатор товара']
@@ -44,7 +44,7 @@ Table carts {
     (user_id) [unique]
     (coupon_id)
   }
-  Note: 'Не более одной корзины на пользователя; наличие обеспечивает регистрация.'
+  Note: 'Не более одной корзины на пользователя; наличие обеспечивает регистрация или fixture-модуль.'
 }
 Table cart_items {
   cart_id bigint [not null, note: 'Корзина']

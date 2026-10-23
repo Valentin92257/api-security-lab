@@ -151,25 +151,19 @@ Protected owner query использует id объекта и authenticated us
 
 | Операция | Запрос и назначение |
 |---|---|
-| `POST /auth/register` | login/password/name/email; создаёт User и пустую корзину |
+| `POST /auth/register` | login/password/name/email; атомарно создаёт User и пустую корзину, возвращает 201; токен через login |
 | `POST /auth/login` | login/password; возвращает accessToken, tokenType, expiresIn |
-| `GET /users/me` | Профиль текущего subject |
 | `GET /users/{userId}` | Собственный профиль; отдельная поверхность BOLA |
-| `GET /products` | Поиск q, sort=id/name/price, limit/offset; только опубликованные товары |
-| `GET /products/{productId}` | Опубликованная карточка |
+| `GET /products` | Поиск q, limit/offset; сортировка по id; только опубликованные товары |
 | `GET /cart` | Корзина, revision, позиции, купон и текущие суммы |
-| `POST /cart/items` | productId/quantity; добавляет количество |
-| `PATCH /cart/items/{productId}` | quantity; устанавливает абсолютное количество |
-| `DELETE /cart/items/{productId}` | Удаляет позицию; отсутствие допустимо |
+| `PUT /cart/items/{productId}` | quantity; создаёт позицию или устанавливает абсолютное количество |
 | `PUT /cart/coupon` | code; выбирает один купон без расходования лимита |
-| `DELETE /cart/coupon` | Убирает купон |
 | `POST /orders` | cartRevision/quotedTotal и Idempotency-Key; создаёт или возвращает Order |
-| `GET /orders` | Собственная история с пагинацией |
 | `GET /orders/{orderId}` | Собственный Order |
 
 User содержит id/login/name/email; пароль или hash не возвращаются. Product содержит id/name/description/price/currency. Cart содержит id/userId/revision/items/coupon/subtotal/discount/total/currency/updatedAt; позиция — productId/name/quantity/unitPrice/lineTotal. Order сохраняет владельца, cartId/cartRevision, items, суммы, полный успешный ответ, createdAt и status CREATED. Отмен, платежей и возвратов в MVP нет.
 
-Создание пользователя и заказа возвращает 201, чтение/изменение корзины и login — 200. Ошибки имеют единый Problem с type/title/status/code/requestId. Основные статусы: 400 для валидации, 401 для auth, 404 для отсутствующего или чужого объекта, 409 для конфликта состояния, 429 для rate policy, 503 для зависимости или закрытого run. Неожиданный 500 не сообщает SQL/stack trace.
+Регистрация и создание заказа возвращают 201, чтение/изменение корзины и login — 200. Ошибки имеют единый Problem с type/title/status/code/requestId. Основные статусы: 400 для валидации, 401 для auth, 404 для отсутствующего или чужого объекта, 409 для конфликта состояния, 429 для rate policy, 503 для зависимости или закрытого run. Неожиданный 500 не сообщает SQL/stack trace.
 
 ### Данные
 
@@ -180,6 +174,8 @@ Orders хранит успешный ответ, hash ключа и факт и�
 Protected дополняет PK/FK бизнес-ограничениями: допустимое количество, корректные суммы, used_count≤max_uses, уникальный order на пару cart/revision. Межтабличное равенство суммы заказа сумме его строк нельзя обеспечить одним обычным CHECK; его обеспечивает транзакция и проверяет независимый oracle.
 
 Исторический заказ хранит цену позиции и успешный ответ. Evaluator сверяет суммы с приватным fixture baseline. История фикстуры соответствует тому же каталогу и условиям купонов; их изменение внутри run запрещено.
+
+Магазин ограничен девятью операциями для ИБ-экспериментов. Fixture-модуль до run создаёт пользователей и корзины; отдельная ручка регистрации позволяет создать нового синтетического пользователя; отдельной карточки товара, истории заказов и удалений в публичном API нет. Повтор PUT количества/купона при неизменном состоянии не повышает revision; quantity=0 — отрицательный тест, а не удаление. Профиль текущего пользователя читается по ID из приватного manifest после login.
 
 ## 8. Версия корзины и идемпотентность заказа
 
@@ -480,7 +476,7 @@ API-контракт ревьюят Р1+Р2, события/политики —
 
 ### Проверки
 
-Unit tests проверяют чистые политики/parser/calculator. Contract tests проверяют реальные schemas, нормальные запросы обоих режимов, неизвестные поля/типы и errors. Testcontainers с PostgreSQL проверяет row locks, coupon/cart races, уникальность, rollback и SQL grants. State model с jqwik генерирует последовательности add/change/coupon/checkout/retry и сравнивает их с независимой моделью.
+Unit tests проверяют чистые политики/parser/calculator. Contract tests проверяют реальные schemas, нормальные запросы обоих режимов, неизвестные поля/типы и errors. Testcontainers с PostgreSQL проверяет row locks, coupon/cart races, уникальность, rollback и SQL grants. State model с jqwik генерирует последовательности setQuantity/coupon/checkout/retry и сравнивает их с независимой моделью.
 
 Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Logging tests проверяют формат/порядок JSONL после commit/rollback, отсутствие секретов, конфликт eventId/seq, пропуск terminal/END и INCONCLUSIVE при нарушении допущения о непрерывной работе. Detector tests проверяют late/out-of-order events, atomic state/marker и CLOSE/retraction. Сетевые проверки подтверждают отсутствие обхода gateway, а secret scans/escaping tests — отсутствие утечки или интерпретации входа в UI.
 
