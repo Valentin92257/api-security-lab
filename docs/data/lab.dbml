@@ -1,0 +1,225 @@
+// Generated physical model; business-only constraints in shop-protected.sql.
+// Cross-database references are logical and are not rendered as FK.
+Table control.experiments {
+  id uuid [pk, not null, note: 'Experiment UUID']
+  name varchar(120) [not null, note: 'Название']
+  definition_version integer [not null, default: `1`, note: 'Версия структуры']
+  definition jsonb [not null, note: 'Полные scenarios, policies, rules, plan и версии компонентов']
+  definition_hash bytea [not null, note: 'SHA-256 канонической definition']
+  seed bigint [not null, note: 'Seed генераторов']
+  business_time_base timestamptz [not null, note: 'База бизнес-часов paired runs']
+  created_at timestamptz [not null, note: 'Реальное время']
+  indexes {
+  }
+  Note: 'Неизменяемая definition с cases/episodes, labels, oracle ids и snapshots конфигураций.'
+}
+Table control.runs {
+  id uuid [pk, not null, note: 'Run UUID']
+  experiment_id uuid [not null, note: 'Эксперимент']
+  target varchar(16) [not null, note: 'VULNERABLE / PROTECTED']
+  repetition integer [not null, note: 'Номер повторения']
+  partition_id uuid [not null, note: 'Непрозрачный идентификатор detector']
+  state varchar(16) [not null, default: `'CREATED'`, note: 'Состояние run']
+  revision bigint [not null, default: `0`, note: 'CAS версия управления']
+  cleanup_safe boolean [not null, default: `false`, note: 'Разрешение подготовки следующей фикстуры']
+  failure_reason text [note: 'Причина остановки или неполноты']
+  created_at timestamptz [not null, note: 'Реальное время']
+  finished_at timestamptz [note: 'Время terminal state']
+  fixture_manifest jsonb [note: 'Независимый baseline; NULL до PREPARING']
+  fixture_hash bytea [note: 'SHA-256 baseline']
+  command_journal jsonb [not null, default: `'[]'::jsonb`, note: 'Команды с commandId, epoch, expectedRevision и результатом']
+  indexes {
+    (partition_id) [unique]
+    (experiment_id, target, repetition) [unique]
+    (id, partition_id) [unique]
+  }
+  Note: 'Один target и одна фикстура; связь partition с target приватна.'
+}
+Table control.scenario_jobs {
+  id uuid [pk, not null, note: 'Job UUID']
+  run_id uuid [not null, note: 'Run']
+  epoch uuid [not null, note: 'Управляющая эпоха задания']
+  plan jsonb [not null, note: 'Исполнимый план без внешних адресов']
+  plan_hash bytea [not null, note: 'SHA-256 плана']
+  deadline_at timestamptz [not null, note: 'Предельное реальное UTC-время выполнения плана']
+  state varchar(16) [not null, note: 'PREPARED / RUNNING / STOPPED / FAILED']
+  step_manifest jsonb [note: 'Финальный manifest выполнения плана']
+  step_manifest_hash bytea [note: 'SHA-256 финального manifest']
+  sealed_at timestamptz [note: 'Реальное время фиксации manifest']
+  indexes {
+    (run_id) [unique]
+  }
+  Note: 'Неизменяемый план встроенного runner; один job на run, без распределенного исполнения.'
+}
+Table control.attempts {
+  request_id uuid [pk, not null, note: 'UUID attemptId=requestId, созданный harness до отправки и проверенный gateway']
+  step_id uuid [not null, note: 'Step UUID внутри immutable scenario_jobs.plan; логическая ссылка']
+  attempt_no integer [not null, note: 'Номер попытки']
+  started_at timestamptz [not null, note: 'Реальное время']
+  finished_at timestamptz [note: 'Ответ/timeout']
+  http_status integer [note: 'NULL при транспортной ошибке']
+  transport_outcome text [not null, note: 'RESPONSE / TIMEOUT / CONNECT_ERROR / CANCELLED']
+  response_evidence jsonb [not null, note: 'Allowlist полей; без tokens, secrets, raw body']
+  job_id uuid [not null, note: 'Назначение runner']
+  indexes {
+    (job_id, step_id, attempt_no) [unique]
+  }
+  Note: 'Один реальный HTTP-attempt, включая retry и timeout.'
+}
+Table control.reports {
+  id uuid [pk, not null, note: 'Report UUID']
+  run_id uuid [not null, note: 'Run']
+  revision integer [not null, note: 'Номер пересчета']
+  evaluator_version text [not null, note: 'Версия evaluator']
+  completeness text [not null, note: 'COMPLETE / INCONCLUSIVE']
+  body jsonb [not null, note: 'Полный отчет, coverage, hashes, причины и metrics']
+  body_hash bytea [not null, note: 'SHA-256 канонического отчета']
+  created_at timestamptz [not null, note: 'Реальное время']
+  snapshot jsonb [note: 'Конечное readonly бизнес-состояние; NULL при ошибке снимка']
+  snapshot_hash bytea [note: 'SHA-256 снимка']
+  snapshot_captured_at timestamptz [note: 'Реальное время снимка после quiescence']
+  indexes {
+    (run_id, revision) [unique]
+  }
+  Note: 'Immutable report revision: snapshot и body с caseResults, episodeResults, incidentAssessments и evidence.'
+}
+Table audit.log_streams {
+  id uuid [pk, not null, note: 'Stream UUID, выдаёт control']
+  run_id uuid [not null, note: 'Run']
+  partition_id uuid [not null, note: 'Непрозрачная partition']
+  producer_kind text [not null, note: 'GATEWAY / SHOP']
+  source text [not null, note: 'Доверенный CloudEvents source']
+  source_instance_id uuid [not null, note: 'UUID процесса, неизменяемый во время run']
+  file_name text [not null, note: 'Уникальный относительный путь, сформированный control']
+  state text [not null, default: `'READING'`, note: 'READING / DRAINED / ERROR']
+  last_ingested_seq bigint [not null, default: `0`, note: 'Последний непрерывно принятый seq']
+  expected_last_seq bigint [note: 'Значение lastSeq из STREAM_END']
+  end_seen_at timestamptz [note: 'Реальное время чтения STREAM_END']
+  error_reason text [note: 'Причина неполноты']
+  registered_at timestamptz [not null, note: 'Реальное время регистрации']
+  indexes {
+    (run_id, producer_kind) [unique]
+    (id, run_id, partition_id) [unique]
+    (file_name) [unique]
+  }
+  Note: 'Один JSONL-файл producer на run; collector отмечает прочтение STREAM_END и всего диапазона seq.'
+}
+Table audit.security_events {
+  id uuid [pk, not null, note: 'Глобальный Event UUID']
+  stream_id uuid [not null, note: 'Зарегистрированный JSONL stream']
+  seq bigint [not null, note: 'Порядковый номер EVENT в файле, начиная с 1']
+  run_id uuid [not null, note: 'Доверенная привязка run']
+  partition_id uuid [not null, note: 'Доверенная opaque partition']
+  request_id uuid [not null, note: 'HTTP-attempt']
+  trace_id char(32) [not null, note: 'Trace context']
+  occurred_at timestamptz [not null, note: 'Реальное время наблюдения']
+  received_at timestamptz [not null, default: `clock_timestamp()`, note: 'Время приема']
+  payload jsonb [not null, note: 'Валидированный CloudEvents v1']
+  payload_hash bytea [not null, note: 'SHA-256 canonical payload']
+  indexes {
+    (stream_id, seq) [unique]
+    (partition_id, occurred_at, id)
+    (stream_id)
+    (request_id)
+    (run_id)
+  }
+  Note: 'Валидированное событие из JSONL; append-only; raw payload не доступен detector.'
+}
+Table detection.partitions {
+  id uuid [pk, not null, note: 'Opaque partition UUID; без FK на control']
+  ruleset_hash bytea [not null, note: 'Hash зафиксированного ruleset']
+  ruleset_snapshot jsonb [not null, note: 'Полные разрешенные правила и engine version']
+  indexes {
+    (id, ruleset_hash) [unique]
+  }
+  Note: 'Неизменяемый ruleset; один worker на partition внутри единственного процесса detector.'
+}
+Table detection.jobs {
+  id uuid [pk, not null, note: 'Job UUID']
+  partition_id uuid [not null, note: 'Partition']
+  ruleset_hash bytea [not null, note: 'Зафиксированный ruleset']
+  kind text [not null, note: 'PREPARE / CLOSE / CANCEL']
+  state text [not null, default: `'PENDING'`, note: 'PENDING / RUNNING / ACK / ERROR']
+  manifest_hash bytea [note: 'Обязателен для CLOSE']
+  expected_count bigint [note: 'Размер CLOSE набора']
+  processed_count bigint [note: 'ACK обработанного набора']
+  errors jsonb [not null, default: `'[]'::jsonb`, note: 'Безопасные коды ошибок']
+  created_at timestamptz [not null, note: 'Реальное время']
+  finished_at timestamptz [note: 'ACK / ERROR время']
+  expected_event_ids "uuid[]" [note: 'Безопасный CLOSE event set; без private manifest']
+  indexes {
+    (partition_id, state)
+  }
+  Note: 'Sanitized SQL commands; control вставляет, detector обновляет outcome.'
+}
+Table detection.processed_events {
+  partition_id uuid [not null, note: 'Partition']
+  ruleset_hash bytea [not null, note: 'Ruleset hash']
+  event_id uuid [not null, note: 'Event UUID; без FK на raw audit']
+  processed_at timestamptz [not null, note: 'Реальное время']
+  indexes {
+    (partition_id, ruleset_hash, event_id) [pk]
+  }
+  Note: 'Atomic marker вместе с state/evidence/incident.'
+}
+Table detection.rule_state {
+  partition_id uuid [not null, note: 'Partition']
+  ruleset_hash bytea [not null, note: 'Ruleset hash']
+  rule_id text [not null, note: 'Rule ID']
+  correlation_key text [not null, note: 'Нормализованный group key']
+  window_key text [not null, note: 'Стабильная граница окна или causal key']
+  state jsonb [not null, note: 'Ограниченное состояние правила']
+  updated_at timestamptz [not null, note: 'Реальное время']
+  indexes {
+    (partition_id, ruleset_hash, rule_id, correlation_key, window_key) [pk]
+  }
+  Note: 'Bounded event-time windows и buffers; версия JSON pinned ruleset.'
+}
+Table detection.incidents {
+  id uuid [pk, not null, note: 'Incident UUID']
+  partition_id uuid [not null, note: 'Partition']
+  ruleset_hash bytea [not null, note: 'Ruleset hash']
+  rule_id text [not null, note: 'Rule ID']
+  rule_version integer [not null, note: 'Версия правила']
+  detector_version text [not null, note: 'Версия engine']
+  correlation_key text [not null, note: 'Ключ корреляции']
+  window_key text [not null, note: 'Window/causal key; никогда NULL']
+  category text [not null, note: 'Класс угрозы']
+  technique text [not null, note: 'Техника']
+  tags "text[]" [not null, note: 'Теги']
+  severity text [not null, note: 'LOW / MEDIUM / HIGH']
+  confidence_level text [not null, note: 'UNKNOWN / LOW / MEDIUM / HIGH']
+  method text [not null, note: 'RULE / CORRELATION']
+  analysis_state text [not null, default: `'PROVISIONAL'`, note: 'PROVISIONAL / FINAL / RETRACTED']
+  status text [not null, default: `'OPEN'`, note: 'OPEN / ACKNOWLEDGED / RESOLVED']
+  revision bigint [not null, default: `0`, note: 'Версия CAS обновлений']
+  impact_status text [not null, default: `'UNKNOWN'`, note: 'SUSPECTED / UNKNOWN']
+  summary jsonb [not null, note: 'Whitelist evidence summary и ресурсы']
+  created_at timestamptz [not null, note: 'Реальное время создания']
+  detected_at timestamptz [not null, note: 'Реальное время обнаружения']
+  updated_at timestamptz [not null, note: 'Последнее изменение']
+  evidence_event_ids "uuid[]" [not null, default: `'{}'::uuid[]`, note: 'Уникальные UUID наблюдений; проверяются через safe view']
+  history jsonb [not null, default: `'[]'::jsonb`, note: 'Append-only записи analysis/operator transitions']
+  indexes {
+    (partition_id, ruleset_hash, rule_id, correlation_key, window_key) [unique]
+    (partition_id, analysis_state, created_at)
+  }
+  Note: 'Наблюдаемая угроза; не содержит TP/FP и confirmed impact.'
+}
+Ref: control.runs.experiment_id > control.experiments.id [delete: restrict]
+Ref: control.scenario_jobs.run_id > control.runs.id [delete: restrict]
+Ref: control.attempts.job_id > control.scenario_jobs.id [delete: restrict]
+Ref: control.reports.run_id > control.runs.id [delete: restrict]
+Ref: audit.log_streams.run_id > control.runs.id [delete: restrict]
+Ref: audit.security_events.stream_id > audit.log_streams.id [delete: restrict]
+Ref: audit.security_events.run_id > control.runs.id [delete: restrict]
+Ref: detection.jobs.partition_id > detection.partitions.id [delete: restrict]
+Ref: detection.processed_events.partition_id > detection.partitions.id [delete: restrict]
+Ref: detection.rule_state.partition_id > detection.partitions.id [delete: restrict]
+Ref: detection.incidents.partition_id > detection.partitions.id [delete: restrict]
+Ref: audit.log_streams.(run_id, partition_id) > control.runs.(id, partition_id)
+Ref: audit.security_events.(stream_id, run_id, partition_id) > audit.log_streams.(id, run_id, partition_id)
+Ref: detection.jobs.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)
+Ref: detection.processed_events.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)
+Ref: detection.rule_state.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)
+Ref: detection.incidents.(partition_id, ruleset_hash) > detection.partitions.(id, ruleset_hash)

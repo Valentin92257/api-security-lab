@@ -1,0 +1,3115 @@
+---
+openapi: 3.1.0
+info:
+  title: API Security Lab — управление стендом
+  version: 1.0.0
+  description: |-
+    Публичный API lab-control для дашборда и локального оператора. Это контракт реализации v1: он уточняет DTO, каталоги, пагинацию и CAS там, где design-doc задавал только семантику. Один активный run; paired runs выполняются последовательно. Эксперимент после создания неизменяем; start создаёт runIds один раз.
+    Выбран способ operator-аутентификации: отдельный непрозрачный Bearer token из локальной конфигурации, не JWT магазина и не admin/run credential. Cookie-аутентификация не поддерживается; UI передаёт Authorization явно, хранит token только в памяти. CORS закрыт, unsafe запрос с посторонним Origin отклоняется 403; при будущем переходе на cookies потребуется отдельный CSRF-контракт. Опубликован только loopback listener.
+    Runner — Java-модуль, detector получает SQL jobs: HTTP-эндпоинтов для них нет. /internal/v1/... gateway/shop — отдельный management interface и в этот публичный контракт не входит. JSONL — файловый протокол, не HTTP ingestion API.
+    Объекты запросов закрытые; неизвестные/повторяющиеся query и JSON-поля запрещены. GET без тела. POST/PATCH требуют JSON. Все ответы и exports: Cache-Control:no-store; секреты, raw payloads и bearer не возвращаются. UUID и UTC RFC3339; revision — CAS. 202 означает принятие, не завершение. Управляющие retries проверяются по commandId и canonical payload до проверки устаревшей revision; другое тело того же commandId — 409 COMMAND_CONFLICT. Проверка, сохранение команды и переход состояния атомарны. Перезапуск процесса делает незавершённый run INCONCLUSIVE; resume не предоставляется.
+servers:
+- url: "/control/v1"
+security:
+- OperatorBearer: []
+tags:
+- name: Catalog
+- name: Experiments
+- name: Runs
+- name: Incidents
+- name: Reports
+paths:
+  "/catalog":
+    get:
+      operationId: getLabCatalog
+      tags:
+      - Catalog
+      summary: Доступные сценарии, версии и бюджеты
+      description: Read-only каталог для формы создания experiment. Пользователь выбирает
+        опубликованные refs; произвольный код/URL не принимаются.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Catalog"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+  "/experiments":
+    post:
+      operationId: createExperiment
+      tags:
+      - Experiments
+      summary: Создать неизменяемый эксперимент
+      description: '400 для неизвестной версии, повторного scenario id, несовместимости
+        fixtures или превышения /catalog limits. Не запускает нагрузку. POST создания
+        не идемпотентен: после потери ответа сначала сверить список experiments, не
+        повторять автоматически.'
+      responses:
+        '201':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ExperimentCreated"
+              example:
+                experimentId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+                definitionHash: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                state: CREATED
+                epoch: e42fb0db-45dc-4b1a-8157-66c3a815e450
+                revision: 0
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+        '415':
+          "$ref": "#/components/responses/Error415"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ExperimentDefinition"
+            example:
+              name: Проверка BOLA
+              scenarioRefs:
+              - id: BO-01
+                version: 1
+              - id: BO-02
+                version: 1
+              targets:
+              - VULNERABLE
+              - PROTECTED
+              seed: 42
+              fixtureVersion: shop-demo-v1
+              policyProfile: baseline-vs-enforce-v1
+              rulesetVersion: rules-v1
+              execution:
+                parallelism: 1
+                repetitions: 1
+    get:
+      operationId: listExperiments
+      tags:
+      - Experiments
+      summary: Список экспериментов
+      description: createdAt DESC, experimentId DESC. Offset-pagination отражает состояние
+        на момент запроса; при живых изменениях UI обновляет первую страницу.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ExperimentPage"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+          default: 0
+  "/experiments/{experimentId}":
+    get:
+      operationId: getExperiment
+      tags:
+      - Experiments
+      summary: Definition и состояние запуска
+      description: Definition и состояние запуска
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Experiment"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: experimentId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+  "/experiments/{experimentId}/start":
+    post:
+      operationId: startExperiment
+      tags:
+      - Experiments
+      summary: Принять запуск эксперимента
+      description: |-
+        epoch/revision берутся из Experiment. Все runIds сохраняются до 202, runs выполняются последовательно. Новый start после STARTED запрещён; повтор принятого commandId возвращает прежний результат. Очередь разных experiments не предусмотрена.
+
+        409: ACTIVE_RUN, CLEANUP_UNSAFE, STATE_CONFLICT, REVISION_CONFLICT, EPOCH_MISMATCH, COMMAND_CONFLICT.
+      responses:
+        '202':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/StartAccepted"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+        '415':
+          "$ref": "#/components/responses/Error415"
+        '409':
+          "$ref": "#/components/responses/Error409"
+      parameters:
+      - name: experimentId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/StartCommand"
+            example:
+              schemaVersion: 1
+              commandId: ecdc14c1-3b1a-464d-956f-75a9c728f640
+              epoch: e42fb0db-45dc-4b1a-8157-66c3a815e450
+              expectedRevision: 0
+              expectedState: CREATED
+  "/runs":
+    get:
+      operationId: listRuns
+      tags:
+      - Runs
+      summary: Список прогонов
+      description: createdAt DESC, runId DESC. Фильтры объединяются AND.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RunPage"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+          default: 0
+      - name: experimentId
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      - name: state
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/RunState"
+      - name: target
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Target"
+  "/runs/{runId}":
+    get:
+      operationId: getRun
+      tags:
+      - Runs
+      summary: Состояние, прогресс и результат прогона
+      description: Polling без SSE/WebSocket. finishedSteps=plannedSteps не заменяет
+        барьер DRAINING. cleanupSafe=false запрещает следующий reset независимо от
+        terminal state.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Run"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+  "/runs/{runId}/cancel":
+    post:
+      operationId: cancelRun
+      tags:
+      - Runs
+      summary: Принять отмену прогона
+      description: |-
+        epoch/revision/state берутся из GET run. Cancel прекращает новые попытки, затем выполняет DRAINING; не отменяет уже committed orders и не обещает немедленную остановку SQL.
+
+        409: STATE_CONFLICT, REVISION_CONFLICT, EPOCH_MISMATCH, COMMAND_CONFLICT.
+      responses:
+        '202':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CancelAccepted"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+        '415':
+          "$ref": "#/components/responses/Error415"
+        '409':
+          "$ref": "#/components/responses/Error409"
+      parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CancelCommand"
+            example:
+              schemaVersion: 1
+              commandId: fcf672ac-ff67-41ac-a68e-438fe6babbed
+              epoch: 447c5978-23ee-49f0-862b-625b00bc3fd2
+              expectedRevision: 3
+              expectedState: RUNNING
+  "/runs/{runId}/events":
+    get:
+      operationId: listRunEvents
+      tags:
+      - Runs
+      summary: Безопасная хронология событий
+      description: occurredAt ASC,eventId ASC; from включительно, to исключительно,
+        from<to. route — точное совпадение шаблона; фильтры AND. scenarioId присоединяет
+        control по attempts/plan, не detector. decision фильтрует policy.wouldDecision,
+        поэтому BLOCK в OBSERVE не означает блокировку. Это чтение безопасной проекции,
+        не raw audit export.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/EventViewPage"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+          default: 0
+      - name: requestId
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      - name: scenarioId
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/ScenarioId"
+      - name: route
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 256
+          minLength: 1
+      - name: decision
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - ALLOW
+          - FLAG
+          - BLOCK
+      - name: from
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Time"
+      - name: to
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Time"
+  "/runs/{runId}/incidents":
+    get:
+      operationId: listRunIncidents
+      tags:
+      - Incidents
+      summary: Инциденты прогона
+      description: createdAt DESC,incidentId DESC; фильтры AND. scenario/route берутся
+        по evidence event→request→step; не меняют классификацию detector. По умолчанию
+        возвращаются также PROVISIONAL и RETRACTED; метрики считают только FINAL.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/IncidentPage"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+          default: 0
+      - name: severity
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Severity"
+      - name: status
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/IncidentStatus"
+      - name: analysisState
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/AnalysisState"
+      - name: category
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/Category"
+      - name: scenarioId
+        in: query
+        required: false
+        schema:
+          "$ref": "#/components/schemas/ScenarioId"
+      - name: route
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 256
+          minLength: 1
+  "/incidents/{incidentId}":
+    get:
+      operationId: getIncident
+      tags:
+      - Incidents
+      summary: Карточка инцидента и история
+      description: Карточка инцидента и история
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Incident"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+      parameters:
+      - name: incidentId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+    patch:
+      operationId: updateIncidentStatus
+      tags:
+      - Incidents
+      summary: Изменить операторский статус
+      description: |-
+        CAS по expectedRevision; analysisState/severity/impact/TP-FP не принимаются. actor определяется operator credential. История append-only. Replay commandId проверяется до CAS.
+
+        409: REVISION_CONFLICT, STATE_CONFLICT, COMMAND_CONFLICT, HISTORY_LIMIT_REACHED.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Incident"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+        '415':
+          "$ref": "#/components/responses/Error415"
+        '409':
+          "$ref": "#/components/responses/Error409"
+      parameters:
+      - name: incidentId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/IncidentUpdate"
+            example:
+              schemaVersion: 1
+              commandId: 193e15b5-4bfe-48ab-98bc-7f7f423c2d93
+              expectedRevision: 2
+              status: ACKNOWLEDGED
+              comment: Проверено оператором
+              resolution:
+  "/runs/{runId}/report":
+    get:
+      operationId: getRunReport
+      tags:
+      - Reports
+      summary: Просмотреть или скачать JSON-отчёт
+      description: |-
+        Без revision — последняя опубликованная; revision фиксирует immutable результат. download=true возвращает тот же JSON с Content-Disposition: attachment; filename формирует сервер из runId/revision. Неизвестная revision готового отчёта — 404. Диагностические partial results обозначены INCONCLUSIVE, не итоговым успехом.
+
+        409: REPORT_NOT_READY: опубликованного отчёта ещё нет.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'При download=true: attachment; filename="report-<runId>-r<revision>.json";
+                имя формируется сервером.'
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Report"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+        '409':
+          "$ref": "#/components/responses/Error409"
+      parameters:
+      - name: runId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+      - name: revision
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2147483647
+      - name: download
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+  "/experiments/{experimentId}/comparison":
+    get:
+      operationId: getExperimentComparison
+      tags:
+      - Reports
+      summary: Сравнить paired runs до/после
+      description: |-
+        Доступно только для обоих targets и всех соответствующих COMPLETED runs с COMPLETE reports. Пары по repetition; контракты workload/fixture/ruleset сверяются. Нельзя трактовать частичный run как корректную точку сравнения.
+
+        409: COMPARISON_NOT_READY, TARGET_PAIR_REQUIRED, RUNS_NOT_COMPARABLE.
+      responses:
+        '200':
+          description: Успешный результат
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+              description: Обязателен для ответов API.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Comparison"
+        '400':
+          "$ref": "#/components/responses/Error400"
+        '401':
+          "$ref": "#/components/responses/Error401"
+        '403':
+          "$ref": "#/components/responses/Error403"
+        '404':
+          "$ref": "#/components/responses/Error404"
+        '405':
+          "$ref": "#/components/responses/Error405"
+        '413':
+          "$ref": "#/components/responses/Error413"
+        '429':
+          "$ref": "#/components/responses/Error429"
+        '500':
+          "$ref": "#/components/responses/Error500"
+        '503':
+          "$ref": "#/components/responses/Error503"
+        '409':
+          "$ref": "#/components/responses/Error409"
+      parameters:
+      - name: experimentId
+        in: path
+        required: true
+        schema:
+          "$ref": "#/components/schemas/Uuid"
+components:
+  securitySchemes:
+    OperatorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Opaque local operator token
+      description: Отдельный credential локального оператора. Не принимает shop JWT,
+        run или management credential.
+  headers:
+    RequestId:
+      description: UUID текущего HTTP-attempt, присутствует во всех ответах.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Error400:
+      description: 'VALIDATION_FAILED: синтаксис, типы, неизвестные или повторяющиеся
+        поля/query, bounds.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: VALIDATION_FAILED
+            status: 400
+            code: VALIDATION_FAILED
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error401:
+      description: 'AUTH_REQUIRED: отсутствующий или недействительный credential.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+        WWW-Authenticate:
+          schema:
+            type: string
+          description: Bearer challenge; обязателен.
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:auth-required
+            title: AUTH_REQUIRED
+            status: 401
+            code: AUTH_REQUIRED
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error403:
+      description: 'FORBIDDEN: недостаточные полномочия или недопустимый Origin.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: FORBIDDEN
+            status: 403
+            code: FORBIDDEN
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error404:
+      description: 'NOT_FOUND: объект отсутствует либо недоступен.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: NOT_FOUND
+            status: 404
+            code: NOT_FOUND
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error405:
+      description: 'METHOD_NOT_ALLOWED: метод не поддерживается для существующего
+        маршрута.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+        Allow:
+          schema:
+            type: string
+          description: Поддерживаемые методы; обязателен.
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: METHOD_NOT_ALLOWED
+            status: 405
+            code: METHOD_NOT_ALLOWED
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error409:
+      description: Конфликт состояния или уникальности; конкретные code перечислены
+        у операции.
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: Конфликт состояния или уникальности; конкретные code перечислены
+              у операции.
+            status: 409
+            code: STATE_CONFLICT
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error413:
+      description: 'PAYLOAD_TOO_LARGE: превышен настроенный бюджет тела.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: PAYLOAD_TOO_LARGE
+            status: 413
+            code: PAYLOAD_TOO_LARGE
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error415:
+      description: 'UNSUPPORTED_MEDIA_TYPE: требуется application/json.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: UNSUPPORTED_MEDIA_TYPE
+            status: 415
+            code: UNSUPPORTED_MEDIA_TYPE
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error429:
+      description: 'RATE_LIMITED: превышен лимит; Retry-After в секундах.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+        Retry-After:
+          schema:
+            type: string
+            pattern: "^[0-9]+$"
+          description: Количество секунд; обязателен.
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: RATE_LIMITED
+            status: 429
+            code: RATE_LIMITED
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error500:
+      description: 'INTERNAL_ERROR: без SQL, stack trace или секретов.'
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: INTERNAL_ERROR
+            status: 500
+            code: INTERNAL_ERROR
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+    Error503:
+      description: DEPENDENCY_UNAVAILABLE либо RUN_CLOSED; инфраструктурный отказ
+        не считается предотвращённой атакой.
+      headers:
+        X-Request-Id:
+          "$ref": "#/components/headers/RequestId"
+        Cache-Control:
+          schema:
+            type: string
+            const: no-store
+      content:
+        application/problem+json:
+          schema:
+            "$ref": "#/components/schemas/Problem"
+          example:
+            type: urn:lab:problem:error
+            title: DEPENDENCY_UNAVAILABLE либо RUN_CLOSED; инфраструктурный отказ
+              не считается предотвращённой атакой.
+            status: 503
+            code: DEPENDENCY_UNAVAILABLE
+            requestId: e42fb0db-45dc-4b1a-8157-66c3a815e450
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    Time:
+      type: string
+      format: date-time
+      pattern: Z$
+      description: UTC RFC 3339, окончание Z.
+    Revision:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 9007199254740991
+    Hash:
+      type: string
+      pattern: "^[a-f0-9]{64}$"
+      maxLength: 64
+      minLength: 64
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - title
+      - status
+      - code
+      - requestId
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+          maxLength: 240
+          minLength: 1
+        status:
+          type: integer
+          format: int64
+          minimum: 400
+          maximum: 599
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]*$"
+          maxLength: 80
+          minLength: 1
+        requestId:
+          "$ref": "#/components/schemas/Uuid"
+    Target:
+      type: string
+      enum:
+      - VULNERABLE
+      - PROTECTED
+    RunState:
+      type: string
+      enum:
+      - CREATED
+      - PREPARING
+      - RUNNING
+      - DRAINING
+      - EVALUATING
+      - COMPLETED
+      - FAILED
+      - CANCELLED
+      - INCONCLUSIVE
+    Category:
+      type: string
+      enum:
+      - AUTHENTICATION_ABUSE
+      - ACCESS_CONTROL
+      - REPLAY
+      - INJECTION
+      - BUSINESS_ABUSE
+    ScenarioId:
+      type: string
+      enum:
+      - CS-01
+      - CS-02
+      - BO-01
+      - BO-02
+      - RP-01
+      - RP-02
+      - IJ-01
+      - BL-01
+      - BL-02
+      - BL-03
+      - BL-04
+    Severity:
+      type: string
+      enum:
+      - LOW
+      - MEDIUM
+      - HIGH
+    IncidentStatus:
+      type: string
+      enum:
+      - OPEN
+      - ACKNOWLEDGED
+      - RESOLVED
+    AnalysisState:
+      type: string
+      enum:
+      - PROVISIONAL
+      - FINAL
+      - RETRACTED
+    PolicyMode:
+      type: string
+      enum:
+      - 'OFF'
+      - OBSERVE
+      - ENFORCE
+    Effect:
+      type: string
+      enum:
+      - EFFECT_OBSERVED
+      - EFFECT_NOT_OBSERVED
+      - ERROR
+      - INCONCLUSIVE
+    Rate:
+      type: number
+      minimum: 0
+      maximum: 1
+    Reason:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]*$"
+          maxLength: 80
+          minLength: 1
+        message:
+          type: string
+          maxLength: 1000
+          minLength: 1
+    ScenarioRef:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - version
+      properties:
+        id:
+          "$ref": "#/components/schemas/ScenarioId"
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2147483647
+    Execution:
+      type: object
+      additionalProperties: false
+      required:
+      - parallelism
+      - repetitions
+      properties:
+        parallelism:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 256
+        repetitions:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+      description: Технические потолки контракта; GET /catalog сообщает более низкие
+        бюджеты текущего стенда. Конкурентность сценария внутри run, не несколько
+        активных runs.
+    ExperimentDefinition:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - scenarioRefs
+      - targets
+      - seed
+      - fixtureVersion
+      - policyProfile
+      - rulesetVersion
+      - execution
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+        scenarioRefs:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ScenarioRef"
+          minItems: 1
+          maxItems: 32
+          uniqueItems: true
+        targets:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Target"
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+        seed:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        fixtureVersion:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        policyProfile:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        rulesetVersion:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        execution:
+          "$ref": "#/components/schemas/Execution"
+      description: Только опубликованные версии GET /catalog; по одному ref на scenario
+        id. Произвольные URL, SQL, callbacks, actors и executable code не принимаются.
+        Actors выбирает plan по fixture manifest.
+    ExperimentCreated:
+      type: object
+      additionalProperties: false
+      required:
+      - experimentId
+      - definitionHash
+      - state
+      - epoch
+      - revision
+      properties:
+        experimentId:
+          "$ref": "#/components/schemas/Uuid"
+        definitionHash:
+          "$ref": "#/components/schemas/Hash"
+        state:
+          type: string
+          const: CREATED
+        epoch:
+          "$ref": "#/components/schemas/Uuid"
+        revision:
+          type: integer
+          const: 0
+      description: epoch=experimentId — неизменяемая управляющая эпоха experiment
+        для start, не эпоха отдельного run. UUID создаёт control.
+    Experiment:
+      type: object
+      additionalProperties: false
+      required:
+      - experimentId
+      - definitionHash
+      - definition
+      - state
+      - epoch
+      - revision
+      - createdAt
+      - runIds
+      properties:
+        experimentId:
+          "$ref": "#/components/schemas/Uuid"
+        definitionHash:
+          "$ref": "#/components/schemas/Hash"
+        definition:
+          "$ref": "#/components/schemas/ExperimentDefinition"
+        state:
+          type: string
+          enum:
+          - CREATED
+          - STARTED
+        epoch:
+          "$ref": "#/components/schemas/Uuid"
+        revision:
+          "$ref": "#/components/schemas/Revision"
+        createdAt:
+          "$ref": "#/components/schemas/Time"
+        runIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 200
+          uniqueItems: true
+      description: CREATED/STARTED — состояние запуска definition. Итог выполнения
+        определяется связанными runs; definition не меняется. epoch=experimentId;
+        revision=0 до старта и 1 после. Эти поля выводятся из состояния, не требуют
+        новых SQL-столбцов. Start command/result атомарно сохраняются в command_journal
+        первого созданного run; unique(experiment_id,target,repetition) и сериализация
+        старта предотвращают повторное создание.
+    StartCommand:
+      type: object
+      additionalProperties: false
+      required:
+      - schemaVersion
+      - commandId
+      - epoch
+      - expectedRevision
+      - expectedState
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        commandId:
+          "$ref": "#/components/schemas/Uuid"
+        epoch:
+          "$ref": "#/components/schemas/Uuid"
+        expectedRevision:
+          "$ref": "#/components/schemas/Revision"
+        expectedState:
+          type: string
+          const: CREATED
+    StartAccepted:
+      type: object
+      additionalProperties: false
+      required:
+      - experimentId
+      - runIds
+      - commandId
+      - revision
+      properties:
+        experimentId:
+          "$ref": "#/components/schemas/Uuid"
+        runIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+        commandId:
+          "$ref": "#/components/schemas/Uuid"
+        revision:
+          "$ref": "#/components/schemas/Revision"
+    Progress:
+      type: object
+      additionalProperties: false
+      required:
+      - plannedSteps
+      - finishedSteps
+      - attempts
+      - percent
+      properties:
+        plannedSteps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        finishedSteps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        attempts:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        percent:
+          type: number
+          minimum: 0
+          maximum: 100
+      description: percent по завершённым плановым шагам; retries не увеличивают plannedSteps.
+        100% нагрузки не означает завершения DRAINING/evaluation.
+    Run:
+      type: object
+      additionalProperties: false
+      required:
+      - runId
+      - experimentId
+      - target
+      - repetition
+      - epoch
+      - revision
+      - state
+      - progress
+      - cleanupSafe
+      - failureReason
+      - reportId
+      - createdAt
+      - finishedAt
+      properties:
+        runId:
+          "$ref": "#/components/schemas/Uuid"
+        experimentId:
+          "$ref": "#/components/schemas/Uuid"
+        target:
+          "$ref": "#/components/schemas/Target"
+        repetition:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        epoch:
+          "$ref": "#/components/schemas/Uuid"
+        revision:
+          "$ref": "#/components/schemas/Revision"
+        state:
+          "$ref": "#/components/schemas/RunState"
+        progress:
+          "$ref": "#/components/schemas/Progress"
+        cleanupSafe:
+          type: boolean
+        failureReason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+        reportId:
+          anyOf:
+          - "$ref": "#/components/schemas/Uuid"
+          - type: 'null'
+        createdAt:
+          "$ref": "#/components/schemas/Time"
+        finishedAt:
+          anyOf:
+          - "$ref": "#/components/schemas/Time"
+          - type: 'null'
+    CancelCommand:
+      type: object
+      additionalProperties: false
+      required:
+      - schemaVersion
+      - commandId
+      - epoch
+      - expectedRevision
+      - expectedState
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        commandId:
+          "$ref": "#/components/schemas/Uuid"
+        epoch:
+          "$ref": "#/components/schemas/Uuid"
+        expectedRevision:
+          "$ref": "#/components/schemas/Revision"
+        expectedState:
+          "$ref": "#/components/schemas/RunState"
+    CancelAccepted:
+      type: object
+      additionalProperties: false
+      required:
+      - runId
+      - commandId
+      - revision
+      - state
+      properties:
+        runId:
+          "$ref": "#/components/schemas/Uuid"
+        commandId:
+          "$ref": "#/components/schemas/Uuid"
+        revision:
+          "$ref": "#/components/schemas/Revision"
+        state:
+          "$ref": "#/components/schemas/RunState"
+      description: Фиксирует намерение остановки; итог может стать CANCELLED или INCONCLUSIVE.
+        Для RUNNING обязателен DRAINING. После terminal state новая cancel-команда
+        даёт 409; retry принятого commandId возвращает сохранённый результат.
+    ScenarioEntry:
+      type: object
+      additionalProperties: false
+      required:
+      - ref
+      - name
+      - category
+      - description
+      - subcases
+      - fixtureVersions
+      properties:
+        ref:
+          "$ref": "#/components/schemas/ScenarioRef"
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+        category:
+          "$ref": "#/components/schemas/Category"
+        description:
+          type: string
+          maxLength: 2000
+          minLength: 1
+        subcases:
+          type: array
+          items:
+            type: string
+            maxLength: 80
+            minLength: 1
+          minItems: 0
+          maxItems: 16
+        fixtureVersions:
+          type: array
+          items:
+            type: string
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            maxLength: 120
+            minLength: 1
+          minItems: 1
+          maxItems: 32
+          uniqueItems: true
+    VersionEntry:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - hash
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+        hash:
+          "$ref": "#/components/schemas/Hash"
+    PolicySetting:
+      type: object
+      additionalProperties: false
+      required:
+      - policyId
+      - version
+      - mode
+      properties:
+        policyId:
+          type: string
+          maxLength: 80
+          minLength: 1
+        version:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        mode:
+          "$ref": "#/components/schemas/PolicyMode"
+    TargetPolicy:
+      type: object
+      additionalProperties: false
+      required:
+      - target
+      - settings
+      properties:
+        target:
+          "$ref": "#/components/schemas/Target"
+        settings:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PolicySetting"
+          minItems: 1
+          maxItems: 32
+    PolicyProfile:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - hash
+      - targets
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        name:
+          type: string
+          maxLength: 160
+          minLength: 1
+        hash:
+          "$ref": "#/components/schemas/Hash"
+        targets:
+          type: array
+          items:
+            "$ref": "#/components/schemas/TargetPolicy"
+          minItems: 1
+          maxItems: 2
+      description: Настройки только экспериментальных schema/login/input policies.
+        JWT, admission, logging и invariant checks protected не выключаются.
+    Catalog:
+      type: object
+      additionalProperties: false
+      required:
+      - schemaVersion
+      - scenarios
+      - fixtures
+      - rulesets
+      - policyProfiles
+      - limits
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        scenarios:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ScenarioEntry"
+          minItems: 1
+          maxItems: 128
+        fixtures:
+          type: array
+          items:
+            "$ref": "#/components/schemas/VersionEntry"
+          minItems: 1
+          maxItems: 32
+        rulesets:
+          type: array
+          items:
+            "$ref": "#/components/schemas/VersionEntry"
+          minItems: 1
+          maxItems: 32
+        policyProfiles:
+          type: array
+          items:
+            "$ref": "#/components/schemas/PolicyProfile"
+          minItems: 1
+          maxItems: 32
+        limits:
+          type: object
+          additionalProperties: false
+          required:
+          - maxParallelism
+          - maxRepetitions
+          - maxScenarioRefs
+          - maxActiveRuns
+          properties:
+            maxParallelism:
+              type: integer
+              format: int64
+              minimum: 1
+              maximum: 256
+            maxRepetitions:
+              type: integer
+              format: int64
+              minimum: 1
+              maximum: 100
+            maxScenarioRefs:
+              type: integer
+              format: int64
+              minimum: 1
+              maximum: 32
+            maxActiveRuns:
+              type: integer
+              const: 1
+    ResourceRef:
+      type: object
+      additionalProperties: false
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          enum:
+          - USER
+          - PRODUCT
+          - CART
+          - ORDER
+          - COUPON
+          - AUTH
+          - UNKNOWN
+        id:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+    IncidentSummary:
+      type: object
+      additionalProperties: false
+      required:
+      - text
+      - resources
+      - requestIds
+      properties:
+        text:
+          type: string
+          maxLength: 2000
+          minLength: 1
+        resources:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ResourceRef"
+          minItems: 0
+          maxItems: 100
+        requestIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 4096
+          uniqueItems: true
+    HistoryEntry:
+      type: object
+      additionalProperties: false
+      required:
+      - revision
+      - analysisState
+      - status
+      - actor
+      - comment
+      - resolution
+      - changedAt
+      - summary
+      properties:
+        revision:
+          "$ref": "#/components/schemas/Revision"
+        analysisState:
+          "$ref": "#/components/schemas/AnalysisState"
+        status:
+          "$ref": "#/components/schemas/IncidentStatus"
+        actor:
+          type: string
+          maxLength: 120
+          minLength: 1
+        comment:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+        resolution:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+        changedAt:
+          "$ref": "#/components/schemas/Time"
+        summary:
+          "$ref": "#/components/schemas/IncidentSummary"
+    Incident:
+      type: object
+      additionalProperties: false
+      required:
+      - incidentId
+      - partitionId
+      - runId
+      - category
+      - technique
+      - tags
+      - severity
+      - confidenceLevel
+      - confidenceScore
+      - ruleId
+      - ruleVersion
+      - rulesetHash
+      - detectorVersion
+      - method
+      - analysisState
+      - status
+      - revision
+      - impactStatus
+      - summary
+      - evidenceEventIds
+      - history
+      - createdAt
+      - detectedAt
+      - updatedAt
+      properties:
+        incidentId:
+          "$ref": "#/components/schemas/Uuid"
+        partitionId:
+          "$ref": "#/components/schemas/Uuid"
+        runId:
+          "$ref": "#/components/schemas/Uuid"
+        category:
+          "$ref": "#/components/schemas/Category"
+        technique:
+          type: string
+          maxLength: 120
+          minLength: 1
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 80
+            minLength: 1
+          minItems: 0
+          maxItems: 32
+          uniqueItems: true
+        severity:
+          "$ref": "#/components/schemas/Severity"
+        confidenceLevel:
+          type: string
+          enum:
+          - UNKNOWN
+          - LOW
+          - MEDIUM
+          - HIGH
+        confidenceScore:
+          type: 'null'
+        ruleId:
+          type: string
+          maxLength: 120
+          minLength: 1
+        ruleVersion:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2147483647
+        rulesetHash:
+          "$ref": "#/components/schemas/Hash"
+        detectorVersion:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        method:
+          type: string
+          enum:
+          - RULE
+          - CORRELATION
+        analysisState:
+          "$ref": "#/components/schemas/AnalysisState"
+        status:
+          "$ref": "#/components/schemas/IncidentStatus"
+        revision:
+          "$ref": "#/components/schemas/Revision"
+        impactStatus:
+          type: string
+          enum:
+          - SUSPECTED
+          - UNKNOWN
+        summary:
+          "$ref": "#/components/schemas/IncidentSummary"
+        evidenceEventIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 4096
+          uniqueItems: true
+        history:
+          type: array
+          items:
+            "$ref": "#/components/schemas/HistoryEntry"
+          minItems: 1
+          maxItems: 1024
+        createdAt:
+          "$ref": "#/components/schemas/Time"
+        detectedAt:
+          "$ref": "#/components/schemas/Time"
+        updatedAt:
+          "$ref": "#/components/schemas/Time"
+      description: runId добавляет control для оператора; detector его не получает
+        из этой проекции. AnalysisState и impactStatus меняет detector, operator status
+        — только PATCH. Оператор не может присвоить TP/FP или подтвердить эффект.
+    IncidentUpdate:
+      type: object
+      additionalProperties: false
+      required:
+      - schemaVersion
+      - commandId
+      - expectedRevision
+      - status
+      - comment
+      - resolution
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        commandId:
+          "$ref": "#/components/schemas/Uuid"
+        expectedRevision:
+          "$ref": "#/components/schemas/Revision"
+        status:
+          "$ref": "#/components/schemas/IncidentStatus"
+        comment:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+        resolution:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+      description: OPEN→ACKNOWLEDGED/RESOLVED; ACKNOWLEDGED→OPEN/RESOLVED; RESOLVED→OPEN.
+        Тот же status разрешён с непустым comment; RESOLVED требует непустой resolution,
+        иначе resolution=null. CAS с detector updates; журнал append-only, revision+1.
+        Повтор commandId возвращает сохранённый ответ без второй history entry. CommandId/fingerprint/result
+        хранит control в приватной записи command_journal связанного run; JSONB-поле
+        уже существует. Сравнение payload, CAS и запись history выполняются одной
+        транзакцией.
+    PolicyFact:
+      type: object
+      additionalProperties: false
+      required:
+      - policyId
+      - policyVersion
+      - mode
+      - evaluationStatus
+      - wouldDecision
+      - enforcedAction
+      - reasonCode
+      properties:
+        policyId:
+          type: string
+          maxLength: 80
+          minLength: 1
+        policyVersion:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        mode:
+          "$ref": "#/components/schemas/PolicyMode"
+        evaluationStatus:
+          type: string
+          enum:
+          - EVALUATED
+          - SKIPPED
+          - NOT_APPLICABLE
+          - NOT_REACHED
+          - MISSING_CONTEXT
+          - ERROR
+        wouldDecision:
+          anyOf:
+          - type: string
+            enum:
+            - ALLOW
+            - FLAG
+            - BLOCK
+          - type: 'null'
+        enforcedAction:
+          type: string
+          enum:
+          - CONTINUE
+          - REJECT
+          - INFRA_REJECT
+        reasonCode:
+          type: string
+          maxLength: 80
+          minLength: 1
+      description: 'OFF: SKIPPED, wouldDecision=null, CONTINUE. wouldDecision задан
+        только при EVALUATED. OBSERVE: EVALUATED и CONTINUE; ENFORCE+BLOCK: REJECT.
+        Ошибка инфраструктуры: INFRA_REJECT; последующие невыполненные проверки: NOT_REACHED.
+        FLAG не создаёт incident автоматически.'
+      allOf:
+      - if:
+          properties:
+            evaluationStatus:
+              const: EVALUATED
+        then:
+          properties:
+            wouldDecision:
+              type: string
+              enum:
+              - ALLOW
+              - FLAG
+              - BLOCK
+        else:
+          properties:
+            wouldDecision:
+              type: 'null'
+    Observations:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        subjectMatchesOwner:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+        downstreamInvoked:
+          type: boolean
+        operationExecuted:
+          type: boolean
+        stateChanged:
+          type: boolean
+        quantityWithinBounds:
+          type: boolean
+        quoteMatchesServer:
+          type: boolean
+        couponEligibility:
+          type: string
+          enum:
+          - VALID
+          - EXPIRED
+          - EXHAUSTED
+          - NONE
+          - UNKNOWN
+        idempotencyOutcome:
+          type: string
+          enum:
+          - NEW
+          - REPLAYED
+          - CONFLICT
+          - NONE
+        authOutcome:
+          type: string
+          enum:
+          - SUCCESS
+          - FAILURE
+        accountKey:
+          "$ref": "#/components/schemas/Hash"
+        idempotencyKeyHash:
+          "$ref": "#/components/schemas/Hash"
+        cartKey:
+          "$ref": "#/components/schemas/Hash"
+        cartRevision:
+          "$ref": "#/components/schemas/Revision"
+        orderId:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9007199254740991
+        validationCategories:
+          type: array
+          items:
+            type: string
+            enum:
+            - SQL_LIKE
+            - TYPE_MISMATCH
+            - UNKNOWN_FIELD
+            - QUANTITY_OUT_OF_RANGE
+          minItems: 0
+          maxItems: 4
+          uniqueItems: true
+      description: Только allowlist фактов. Отсутствие поля означает неприменимость/неполноту,
+        не false. CHECKOUT обязан содержать cartKey/cartRevision/idempotencyKeyHash/stateChanged;
+        effect — orderId. Условия обязательности контролирует JSONL validator.
+    EventView:
+      type: object
+      additionalProperties: false
+      required:
+      - eventId
+      - runId
+      - requestId
+      - traceId
+      - type
+      - producer
+      - occurredAt
+      - receivedAt
+      - method
+      - route
+      - reasonCode
+      - httpStatus
+      - policy
+      - observations
+      properties:
+        eventId:
+          "$ref": "#/components/schemas/Uuid"
+        runId:
+          "$ref": "#/components/schemas/Uuid"
+        requestId:
+          "$ref": "#/components/schemas/Uuid"
+        traceId:
+          type: string
+          pattern: "^[a-f0-9]{32}$"
+          maxLength: 32
+          minLength: 32
+        type:
+          type: string
+          enum:
+          - lab.http.request.started.v1
+          - lab.http.request.completed.v1
+          - lab.api.request.started.v1
+          - lab.api.request.completed.v1
+          - lab.policy.evaluated.v1
+          - lab.auth.attempted.v1
+          - lab.object.accessed.v1
+          - lab.operation.completed.v1
+          - lab.input.observed.v1
+        producer:
+          type: string
+          enum:
+          - GATEWAY
+          - SHOP
+        occurredAt:
+          "$ref": "#/components/schemas/Time"
+        receivedAt:
+          "$ref": "#/components/schemas/Time"
+        method:
+          type: string
+          enum:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - HEAD
+          - OPTIONS
+        route:
+          type: string
+          maxLength: 256
+          minLength: 1
+        reasonCode:
+          anyOf:
+          - type: string
+            maxLength: 80
+            minLength: 1
+          - type: 'null'
+        httpStatus:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 100
+            maximum: 599
+          - type: 'null'
+        policy:
+          anyOf:
+          - "$ref": "#/components/schemas/PolicyFact"
+          - type: 'null'
+        observations:
+          "$ref": "#/components/schemas/Observations"
+      description: Безопасная UI-проекция JSONL, не raw payload/приёмник логов. У
+        start reasonCode/httpStatus=null; start — не успех операции.
+    EvidenceRef:
+      type: object
+      additionalProperties: false
+      required:
+      - requestIds
+      - eventIds
+      - resources
+      properties:
+        requestIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 4096
+          uniqueItems: true
+        eventIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 4096
+          uniqueItems: true
+        resources:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ResourceRef"
+          minItems: 0
+          maxItems: 100
+    InvariantResult:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - status
+      - reason
+      - evidence
+      properties:
+        id:
+          type: string
+          maxLength: 100
+          minLength: 1
+        status:
+          type: string
+          enum:
+          - HELD
+          - VIOLATED
+          - NOT_APPLICABLE
+        reason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+        evidence:
+          "$ref": "#/components/schemas/EvidenceRef"
+    CaseResult:
+      type: object
+      additionalProperties: false
+      required:
+      - caseId
+      - scenario
+      - subcase
+      - category
+      - label
+      - effect
+      - reason
+      - invariants
+      - prevention
+      - evidence
+      properties:
+        caseId:
+          "$ref": "#/components/schemas/Uuid"
+        scenario:
+          "$ref": "#/components/schemas/ScenarioRef"
+        subcase:
+          anyOf:
+          - type: string
+            maxLength: 80
+            minLength: 1
+          - type: 'null'
+        category:
+          "$ref": "#/components/schemas/Category"
+        label:
+          type: string
+          enum:
+          - MALICIOUS
+          - BENIGN
+        effect:
+          "$ref": "#/components/schemas/Effect"
+        reason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+        invariants:
+          type: array
+          items:
+            "$ref": "#/components/schemas/InvariantResult"
+          minItems: 0
+          maxItems: 100
+        prevention:
+          type: object
+          additionalProperties: false
+          required:
+          - status
+          - mechanism
+          - evidence
+          properties:
+            status:
+              type: string
+              enum:
+              - CONFIRMED
+              - NOT_CONFIRMED
+              - UNKNOWN
+            mechanism:
+              anyOf:
+              - type: string
+                maxLength: 120
+                minLength: 1
+              - type: 'null'
+            evidence:
+              "$ref": "#/components/schemas/EvidenceRef"
+        evidence:
+          "$ref": "#/components/schemas/EvidenceRef"
+      description: Label доступен оператору/evaluator, не detector. ERROR/INCONCLUSIVE
+        исключаются из знаменателя ASR, но отражаются в coverage.
+    EpisodeResult:
+      type: object
+      additionalProperties: false
+      required:
+      - episodeId
+      - scenario
+      - label
+      - assessment
+      - incidentIds
+      - reason
+      - evidence
+      properties:
+        episodeId:
+          "$ref": "#/components/schemas/Uuid"
+        scenario:
+          "$ref": "#/components/schemas/ScenarioRef"
+        label:
+          type: string
+          enum:
+          - MALICIOUS
+          - BENIGN
+        assessment:
+          type: string
+          enum:
+          - DETECTED
+          - MISSED
+          - FALSE_POSITIVE
+          - CLEAN
+          - UNASSESSED
+        incidentIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 4096
+          uniqueItems: true
+        reason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+        evidence:
+          "$ref": "#/components/schemas/EvidenceRef"
+    IncidentAssessment:
+      type: object
+      additionalProperties: false
+      required:
+      - incidentId
+      - assessment
+      - confirmedImpact
+      - episodeIds
+      - reason
+      - incidentSnapshot
+      properties:
+        incidentId:
+          "$ref": "#/components/schemas/Uuid"
+        assessment:
+          type: string
+          enum:
+          - TP
+          - FP
+          - UNASSESSED
+        confirmedImpact:
+          type: string
+          enum:
+          - CONFIRMED
+          - NOT_CONFIRMED
+          - UNKNOWN
+        episodeIds:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Uuid"
+          minItems: 0
+          maxItems: 4096
+          uniqueItems: true
+        reason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+        incidentSnapshot:
+          "$ref": "#/components/schemas/Incident"
+    FractionMetric:
+      type: object
+      additionalProperties: false
+      required:
+      - numerator
+      - denominator
+      - value
+      - excludedCount
+      - reason
+      properties:
+        numerator:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        denominator:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        value:
+          anyOf:
+          - "$ref": "#/components/schemas/Rate"
+          - type: 'null'
+        excludedCount:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        reason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+      description: value=numerator/denominator; numerator<=denominator. denominator=0
+        → value=null (N/A). Неполные результаты не маскируются нулями.
+    Distribution:
+      type: object
+      additionalProperties: false
+      required:
+      - sampleCount
+      - p50
+      - p95
+      - p99
+      - unit
+      - reason
+      properties:
+        sampleCount:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        p50:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+        p95:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+        p99:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+        unit:
+          type: string
+          enum:
+          - ms
+        reason:
+          anyOf:
+          - "$ref": "#/components/schemas/Reason"
+          - type: 'null'
+    Metrics:
+      type: object
+      additionalProperties: false
+      required:
+      - attackSuccessRate
+      - detectionRecall
+      - incidentPrecision
+      - benignFalsePositiveRate
+      - falseBlockRate
+      - detectionDelayLive
+      - detectionDelayFinal
+      - requestLatency
+      - throughputPerSecond
+      - httpErrorRate
+      properties:
+        attackSuccessRate:
+          "$ref": "#/components/schemas/FractionMetric"
+        detectionRecall:
+          "$ref": "#/components/schemas/FractionMetric"
+        incidentPrecision:
+          "$ref": "#/components/schemas/FractionMetric"
+        benignFalsePositiveRate:
+          "$ref": "#/components/schemas/FractionMetric"
+        falseBlockRate:
+          "$ref": "#/components/schemas/FractionMetric"
+        detectionDelayLive:
+          "$ref": "#/components/schemas/Distribution"
+        detectionDelayFinal:
+          "$ref": "#/components/schemas/Distribution"
+        requestLatency:
+          "$ref": "#/components/schemas/Distribution"
+        throughputPerSecond:
+          anyOf:
+          - type: number
+            minimum: 0
+          - type: 'null'
+        httpErrorRate:
+          "$ref": "#/components/schemas/FractionMetric"
+    Coverage:
+      type: object
+      additionalProperties: false
+      required:
+      - plannedCases
+      - executedCases
+      - evaluableCases
+      - plannedEpisodes
+      - evaluableEpisodes
+      - missingSteps
+      - missingEvents
+      - errorCount
+      - inconclusiveCount
+      - reasons
+      properties:
+        plannedCases:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        executedCases:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        evaluableCases:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        plannedEpisodes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        evaluableEpisodes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        missingSteps:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        missingEvents:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        errorCount:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        inconclusiveCount:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        reasons:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Reason"
+          minItems: 0
+          maxItems: 1000
+    ConfigurationSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+      - kind
+      - version
+      - hash
+      - content
+      properties:
+        kind:
+          type: string
+          enum:
+          - PLAN
+          - FIXTURE
+          - POLICIES
+          - RULESET
+          - COMPONENTS
+        version:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        hash:
+          "$ref": "#/components/schemas/Hash"
+        content:
+          type: string
+          maxLength: 1000000
+          minLength: 1
+      description: Полный безопасный snapshot в canonical JSON, сериализованном строкой;
+        без passwords/tokens/raw requests. Hash относится к UTF-8 content. PLAN/FIXTURE
+        экспортируются с удалёнными секретами; исходные private hashes отдельно в
+        Provenance. Содержимое не исполняется и не подаётся detector.
+    Provenance:
+      type: object
+      additionalProperties: false
+      required:
+      - definitionHash
+      - planHash
+      - fixtureHash
+      - policyHash
+      - rulesetHash
+      - snapshotHash
+      - evaluatorVersion
+      - seed
+      - businessTimeBase
+      - snapshots
+      properties:
+        definitionHash:
+          "$ref": "#/components/schemas/Hash"
+        planHash:
+          anyOf:
+          - "$ref": "#/components/schemas/Hash"
+          - type: 'null'
+        fixtureHash:
+          anyOf:
+          - "$ref": "#/components/schemas/Hash"
+          - type: 'null'
+        policyHash:
+          anyOf:
+          - "$ref": "#/components/schemas/Hash"
+          - type: 'null'
+        rulesetHash:
+          anyOf:
+          - "$ref": "#/components/schemas/Hash"
+          - type: 'null'
+        snapshotHash:
+          anyOf:
+          - "$ref": "#/components/schemas/Hash"
+          - type: 'null'
+        evaluatorVersion:
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          maxLength: 120
+          minLength: 1
+        seed:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        businessTimeBase:
+          "$ref": "#/components/schemas/Time"
+        snapshots:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ConfigurationSnapshot"
+          minItems: 0
+          maxItems: 16
+    Report:
+      type: object
+      additionalProperties: false
+      required:
+      - schemaVersion
+      - reportId
+      - revision
+      - experimentId
+      - runId
+      - target
+      - state
+      - cleanupSafe
+      - completeness
+      - createdAt
+      - startedAt
+      - finishedAt
+      - provenance
+      - caseResults
+      - episodeResults
+      - incidentAssessments
+      - policyDecisions
+      - metrics
+      - coverage
+      - residualRisks
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        reportId:
+          "$ref": "#/components/schemas/Uuid"
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2147483647
+        experimentId:
+          "$ref": "#/components/schemas/Uuid"
+        runId:
+          "$ref": "#/components/schemas/Uuid"
+        target:
+          "$ref": "#/components/schemas/Target"
+        state:
+          "$ref": "#/components/schemas/RunState"
+        cleanupSafe:
+          type: boolean
+        completeness:
+          type: string
+          enum:
+          - COMPLETE
+          - INCONCLUSIVE
+        createdAt:
+          "$ref": "#/components/schemas/Time"
+        startedAt:
+          anyOf:
+          - "$ref": "#/components/schemas/Time"
+          - type: 'null'
+        finishedAt:
+          anyOf:
+          - "$ref": "#/components/schemas/Time"
+          - type: 'null'
+        provenance:
+          "$ref": "#/components/schemas/Provenance"
+        caseResults:
+          type: array
+          items:
+            "$ref": "#/components/schemas/CaseResult"
+          minItems: 0
+          maxItems: 10000
+        episodeResults:
+          type: array
+          items:
+            "$ref": "#/components/schemas/EpisodeResult"
+          minItems: 0
+          maxItems: 10000
+        incidentAssessments:
+          type: array
+          items:
+            "$ref": "#/components/schemas/IncidentAssessment"
+          minItems: 0
+          maxItems: 10000
+        policyDecisions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - policyId
+            - policyVersion
+            - mode
+            - evaluatedCount
+            - skippedCount
+            - blockedCount
+            - flaggedCount
+            properties:
+              policyId:
+                type: string
+                maxLength: 80
+                minLength: 1
+              policyVersion:
+                type: string
+                pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                maxLength: 120
+                minLength: 1
+              mode:
+                "$ref": "#/components/schemas/PolicyMode"
+              evaluatedCount:
+                type: integer
+                format: int64
+                minimum: 0
+                maximum: 9007199254740991
+              skippedCount:
+                type: integer
+                format: int64
+                minimum: 0
+                maximum: 9007199254740991
+              blockedCount:
+                type: integer
+                format: int64
+                minimum: 0
+                maximum: 9007199254740991
+              flaggedCount:
+                type: integer
+                format: int64
+                minimum: 0
+                maximum: 9007199254740991
+          minItems: 0
+          maxItems: 100
+        metrics:
+          "$ref": "#/components/schemas/Metrics"
+        coverage:
+          "$ref": "#/components/schemas/Coverage"
+        residualRisks:
+          type: array
+          items:
+            type: string
+            maxLength: 2000
+            minLength: 1
+          minItems: 0
+          maxItems: 100
+      description: Immutable revision. Экспорт и просмотр возвращают один объект;
+        body не содержит собственный hash (нет самоссылки). Политики и метрики — evaluator,
+        не статус HTTP. При раннем отказе подготовки snapshots могут быть пустыми,
+        отсутствующие hashes — null. COMPLETE требует всех provenance hashes, конечного
+        snapshotHash и полного набора безопасных snapshots. Диагностический отчёт
+        допускает completeness INCONCLUSIVE; final сравнение требует COMPLETED/COMPLETE.
+      allOf:
+      - if:
+          properties:
+            completeness:
+              const: COMPLETE
+        then:
+          properties:
+            provenance:
+              properties:
+                planHash:
+                  "$ref": "#/components/schemas/Hash"
+                fixtureHash:
+                  "$ref": "#/components/schemas/Hash"
+                policyHash:
+                  "$ref": "#/components/schemas/Hash"
+                rulesetHash:
+                  "$ref": "#/components/schemas/Hash"
+                snapshotHash:
+                  "$ref": "#/components/schemas/Hash"
+    ComparisonPair:
+      type: object
+      additionalProperties: false
+      required:
+      - repetition
+      - vulnerableReportId
+      - protectedReportId
+      - vulnerableMetrics
+      - protectedMetrics
+      - conditions
+      properties:
+        repetition:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        vulnerableReportId:
+          "$ref": "#/components/schemas/Uuid"
+        protectedReportId:
+          "$ref": "#/components/schemas/Uuid"
+        vulnerableMetrics:
+          "$ref": "#/components/schemas/Metrics"
+        protectedMetrics:
+          "$ref": "#/components/schemas/Metrics"
+        conditions:
+          type: object
+          additionalProperties: false
+          required:
+          - sameFixture
+          - sameSeed
+          - sameBusinessTimeBase
+          - sameWorkload
+          - sameConcurrency
+          - sameRuleset
+          properties:
+            sameFixture:
+              type: boolean
+            sameSeed:
+              type: boolean
+            sameBusinessTimeBase:
+              type: boolean
+            sameWorkload:
+              type: boolean
+            sameConcurrency:
+              type: boolean
+            sameRuleset:
+              type: boolean
+      description: Все conditions=true. Политики могут отличаться по зафиксированному
+        profile. Знаменатели/coverage показываются раздельно; 1-ASR не называется
+        общей эффективностью.
+    Comparison:
+      type: object
+      additionalProperties: false
+      required:
+      - experimentId
+      - definitionHash
+      - pairs
+      - createdAt
+      properties:
+        experimentId:
+          "$ref": "#/components/schemas/Uuid"
+        definitionHash:
+          "$ref": "#/components/schemas/Hash"
+        pairs:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ComparisonPair"
+          minItems: 1
+          maxItems: 100
+        createdAt:
+          "$ref": "#/components/schemas/Time"
+    ExperimentPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Experiment"
+          minItems: 0
+          maxItems: 100
+        limit:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+    RunPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Run"
+          minItems: 0
+          maxItems: 100
+        limit:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+    IncidentPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Incident"
+          minItems: 0
+          maxItems: 100
+        limit:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+    EventViewPage:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      - limit
+      - offset
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            "$ref": "#/components/schemas/EventView"
+          minItems: 0
+          maxItems: 100
+        limit:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+x-contract-decisions:
+- OperatorBearer выбран для локального MVP; session/cookie auth не вводится.
+- Catalog/list/events/incidents/comparison уточняют ранее описанные возможности UI.
+- epoch experiment равен experimentId, revision выводится из наличия runs; новая таблица
+  не нужна.
+- Command journal использует JSONB control.runs.command_journal; общий лимит 1024
+  записей действует на start/cancel/incident commands.
+- Внутренние management HTTP-команды gateway/shop и JSONL здесь намеренно не представлены
+  как публичные операции.
