@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: lab-gateway
+  threads:
+    virtual:
+      enabled: true
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+lab:
+  gateway:
+    additional-port: ${GATEWAY_ADDITIONAL_PORT:8082}

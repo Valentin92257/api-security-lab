@@ -61,7 +61,7 @@ Targets — только enum. Name 1…120 символов, scenarioRefs не�
 
 ## Встроенный runner и контракты управления
 
-Runner — библиотека `modules/scenario-runner`, подключённая к lab-control. PlanExecutor/StepExecutor используют отдельный executor, Java HttpClient с фиксированными gateway targets, semaphore и конечные бюджеты. Один активный run в MVP. Cancellation token/deadline проверяются перед каждой новой попыткой/retry и ожиданием barrier. Сценарии поставляются доверенным кодом; пользовательский Java/shell/SQL не исполняется.
+Runner — пакет `lab.control.runner` внутри исходников lab-control, без отдельного Maven-модуля. PlanExecutor/StepExecutor используют отдельный executor, Java HttpClient с фиксированными gateway targets, semaphore и конечные бюджеты. Один активный run в MVP. Cancellation token/deadline проверяются перед каждой новой попыткой/retry и ожиданием barrier. Сценарии поставляются доверенным кодом; пользовательский Java/shell/SQL не исполняется.
 
 Orchestrator сохраняет один control.scenario_jobs на run: id/runId/epoch, plan/hash, deadline_at, state, final step_manifest/hash/sealed_at. `prepare(plan)` валидирует planHash и лимиты; `start(prepared, token, attemptSink)` запускает executor и возвращает completion handle; `cancel()` прекращает новые действия. Потеря UI-вкладки не прекращает серверное управление run. Final manifest записывается после всех результатов; прерванный процесс не возобновляет job.
 

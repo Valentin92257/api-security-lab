@@ -80,7 +80,7 @@ Control не проксирует каждую покупку через себ�
 
 | Решение | Зачем оно нужно | Что приходится учитывать |
 |---|---|---|
-| Java 25, Maven Wrapper | Один язык команды, воспроизводимая сборка; virtual threads для HTTP-исполнения | Потоки не заменяют бюджеты, таймауты и ограничения соединений |
+| Java 25, Maven внутри Docker | Один язык команды, воспроизводимая сборка; virtual threads для HTTP-исполнения | Потоки не заменяют бюджеты, таймауты и ограничения соединений |
 | Spring Boot 4.0.x | Конфигурация приложений, HTTP, security, lifecycle и интеграция с БД | Patch-версии фиксируются после проверки сборки |
 | Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x | Gateway в совместимой servlet-линии | Проверяется работа фильтров, двух входов и чтения body |
 | Spring JDBC/JdbcClient, PostgreSQL 17 | SQL, locks и транзакции видны явно | Нужно самостоятельно аккуратно проектировать запросы и границы транзакций |
@@ -97,7 +97,7 @@ Control не проксирует каждую покупку через себ�
 
 ## 6. Как организован Java-проект
 
-Репозиторий — Maven monorepo с отдельным собираемым приложением для каждого процесса. Корневой pom фиксирует общие версии и порядок сборки; Maven Wrapper обеспечивает одинаковый запуск у участников и в CI.
+Репозиторий — Maven monorepo с отдельным собираемым приложением для каждого процесса. Корневой pom фиксирует общие версии и порядок сборки; Maven внутри Docker обеспечивает одинаковый запуск у участников и в CI.
 
 ```text
 apps/
@@ -105,8 +105,7 @@ apps/
   lab-gateway/       # listeners, routing, policies, admission, audit
   lab-detector/      # ingestion, rules, windows, incidents, jobs
   lab-control/       # orchestration, fixtures, log-ingestor, evaluator, ui, reports
-modules/
-  scenario-runner/   # plan, scenarios, executor, cancellation, result ports; без Boot main
+  lab-control/src/main/java/lab/control/runner/ # plan, scenarios, executor; часть control
 libs/
   lab-contracts/     # общие wire records/enums
   lab-observability/ # trace propagation, redaction, соглашения метрик
@@ -121,7 +120,7 @@ contracts/
 config/{policies,rules,scenarios}/
 db/{shop/common,shop/protected,lab}/
 fixtures/
-infra/compose.yaml
+compose.yaml
 tests/acceptance/
 ```
 
@@ -224,7 +223,7 @@ State namespace включает opaque partition, policy version и mode, по�
 
 ## 10. Как работает встроенный генератор сценариев
 
-Scenario-runner — библиотека внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один активный run выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
+Scenario-runner — пакет внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один активный run выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
 
 `PlanExecutor` управляет порядком, barriers и конечными циклами; `StepExecutor` превращает типизированный шаг в запрос; `ScenarioHttpClient` выбирает фиксированный gateway origin; `AttemptSink` передаёт результат адаптеру control. Модуль не импортирует JDBC, evaluator, log-reader или admin-клиенты. Отдельный Maven-модуль и ArchUnit проверяют эти зависимости. Это доверенный код, не песочница для произвольных программ.
 
@@ -412,7 +411,7 @@ Control имеет доступ к shop-admin и lab-data, а его встро�
 
 ### Инициализация и эксплуатация
 
-Планируемая команда `docker compose -f infra/compose.yaml up --build` запускает локальную генерацию keys/credentials, миграции, seed и readiness. Health означает готовность работать с зависимостями, а не только поднятый JVM. В git входят versioned config и `.env.example` с placeholders; рабочие ключи лежат в локальном хранилище.
+Планируемая команда `docker compose up --build` запускает локальную генерацию keys/credentials, миграции, seed и readiness. Health означает готовность работать с зависимостями, а не только поднятый JVM. В git входят versioned config и `.env.example` с placeholders; рабочие ключи лежат в локальном хранилище.
 
 Fixture generator создаёт 24 синтетических пользователя с корзинами, 12 опубликованных товаров и draft canary, пять купонных состояний и согласованную историю заказов. Seed, бизнес-время, owners, counts и snapshots фиксируются. Пустые password hashes запрещены; реальные credentials не используются.
 
@@ -480,7 +479,7 @@ Unit tests проверяют чистые политики/parser/calculator. C
 
 Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Logging tests проверяют формат/порядок JSONL после commit/rollback, отсутствие секретов, конфликт eventId/seq, пропуск terminal/END и INCONCLUSIVE при нарушении допущения о непрерывной работе. Detector tests проверяют late/out-of-order events, atomic state/marker и CLOSE/retraction. Сетевые проверки подтверждают отсутствие обхода gateway, а secret scans/escaping tests — отсутствие утечки или интерпретации входа в UI.
 
-Планируемые команды: `./mvnw verify` для основной сборки/unit/integration/smoke и `./mvnw -Pacceptance verify` для полной серии с фиксированными seeds/budgets и reports. Эти же команды запускаются в CI. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
+Планируемые команды: `mvn verify` внутри Docker build-stage для основной сборки/unit/integration/smoke и `mvn -Pacceptance verify` внутри отдельного Docker test-stage для полной серии с фиксированными seeds/budgets и reports. Эти же команды запускаются в CI. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
 
 ### Результат сдачи
 

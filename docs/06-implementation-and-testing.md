@@ -39,7 +39,7 @@
 
 SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для setQuantity/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
-Планируемый pipeline `./mvnw verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия — `./mvnw -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Обе команды выполняются в CI; после появления реализации они должны совпадать с её фактическими Maven profiles.
+Планируемый pipeline `mvn verify` внутри Docker build-stage: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия — `mvn -Pacceptance verify` внутри отдельного Docker test-stage с фиксированными seed/budget/config и сохранёнными reports. Обе команды выполняются в CI; после появления реализации они должны совпадать с её фактическими Maven profiles.
 
 Regression падает при нарушении обещанного protected-инварианта, неподтверждённом vulnerable baseline, несовместимых snapshots, потере обязательного evidence, нарушении изоляции или утечке секрета. Гонки проверяются серией; отсутствие воспроизведения в серии не выдаётся за успешную демонстрацию. CS-02 и другие объявленные остаточные риски оцениваются по их реальной гарантии.
 
