@@ -1,77 +1,87 @@
 # Реализация и приёмка
 
-Текущий результат - согласованные [контракты](../contracts/README.md), примеры и генерация Java-интерфейсов/DTO. Таблицы ниже описывают проверки будущей реализации, а не уже пройденную приёмку.
+Сейчас готовы [контракты](../contracts/README.md), Java-порты и генерация HTTP-интерфейсов/DTO. Ниже описан план реализации и приёмки, а не уже пройденные проверки.
 
 ## Порядок разработки
 
 | Этап | Работа | Критерий выхода |
 |---|---|---|
-| Контракты | Четыре OpenAPI, общие schemas, примеры и генерация | Спецификации валидны, код генерируется и компилируется |
-| Каркас | Приложения, локальные сети/ключи, БД, Runtime API | Запрос проходит Gateway; Detector изолирован от эталона |
-| Вертикальный BOLA | Фикстуры, BO-01 и benign, access-логи, Detector, evaluator, UI | Эффект проверен независимо; подозрение оценено по requestIds |
-| API и защита | Девять операций, checkout, купоны, SQL, два фиксированных профиля | Benign-контракты общие; защищённые инварианты выполняются |
-| Все угрозы | Пять семейств и business subcases | У каждого case есть независимый критерий эффекта |
-| Полнота | CLOSED/lastSequence, finishAnalysis, observedRequestIds, timeout/cancel | Потеря доказательств не даёт достоверный успешный отчёт |
-| Сдача | Общий отчёт двух режимов, запуск, измерения и документация | Воспроизводимые результаты с видимыми знаменателями |
+| 0. Контракты | Wire schemas, API/errors, версии зависимостей; spikes validator, локальный limiter, SQL grants | Примеры валидны, зависимости собираются, используемые OpenAPI keywords проверены |
+| 1. Skeleton | Maven modules, Compose, БД и роли, keys, health, logs/traces, служебные interfaces | Запрос через gateway; ScenarioHttpClient допускает только gateway, внешний egress control закрыт, detector не читает labels |
+| 2. Вертикальный BOLA | Fixture/users/orders, BO-01 и benign, access-log writer и доставка Detector, одно правило, oracle, UI/report | Доказана утечка vulnerable, protected сохраняет owner; есть обнаружение при 200 и JSON-отчёт |
+| 3. API и защита | Полный API, catalog canary, checkout/idempotency/coupon, schema/rate policies | Общие benign contract tests двух режимов; согласованные фикстуры и атомарный checkout |
+| 4. Все угрозы | CS/BO/RP/IJ/BL со всеми subcases, benign episodes, windows/incidents | Для каждого случая есть effect criterion, oracle, evidence и результат |
+| 5. Достоверность | CLOSED/lastSequence/finishAnalysis, in-flight, log gaps/duplicates, timeout при живом сервере, безопасный reset | Потеря доказательств не даёт достоверный зелёный отчёт; сбой делает run INCONCLUSIVE без продолжения |
+| 6. Сдача | Paired series/seeds, performance/cold start, export, runbook, схемы, вклад | Воспроизводимый запуск, regression reports, демонстрация и документация реализации |
 
-## Первая интеграция команды
+Порядок отражает зависимости, календарный план уточняется после первого сквозного результата. Исследования OpenFGA, Schemathesis или PyOD начинаются после обязательного набора и не блокируют его.
 
-Р1 предоставляет свой/чужой order, стратегии owner-check, данные Fixture и readonly oracle, пишет итоговые access-логи. Р2 реализует два входа Gateway, JWT, профили OBSERVE/ENFORCE, Runtime и логи. Р3 предоставляет встроенный Runner, планы/виртуальные IP, AttemptSink и cancel. Р4 соединяет Control, Fixture, Detector, evaluator и UI. Детали портов - в [modules.md](../contracts/modules.md).
+## Первая интеграция четырёх участников
+
+Р1 делает собственный/чужой order, данные Fixture, две стратегии owner-check, access-log writer и readonly данные для oracle. Р2 делает два listener, JWT, единые errors, access-log writer и сетевые проверки. Р3 делает BO-01/benign plans, Java prepare/start/cancel и AttemptSink, HTTP execution и step results. Р4 соединяет control states, приём логов Detector, правило, evaluator и минимальный UI/report.
+
+Общие контракты имеют owner и совместное ревью: API - Р1+Р2; policy/access-log - Р2+Р4; plan/steps - Р3+Р4; oracle - Р1+Р3+Р4. Р4 не должен самостоятельно реализовывать все интеграционные адаптеры: fixture/oracle data предоставляет Р1, Runtime/lastSequence - Р2, модуль исполнения и cancellation - Р3.
 
 ## Проверки реализации
 
-| Область | Проверяемое поведение |
+| Область | Обязательная проверка |
 |---|---|
-| Shop API | Девять операций, required/types/bounds/nullability, закрытые тела запросов; один spec двух режимов |
-| Регистрация | Атомарные User + пустая Cart, нормализация login/email, конфликты 409, отсутствие password/hash в ответах |
-| JWT/BOLA | Подпись/claims/срок; JWT многократен; свой объект доступен, чужой и отсутствующий дают 404 |
-| Виртуальные IP | Доверенный X-Forwarded-For влияет на limiter/remote_addr; недоверенный заголовок не подменяет источник; backend и user не меняются |
-| Лимиты | Раздельное состояние runs; OBSERVE не блокирует, ENFORCE применяет решение; TTL/concurrency/overflow не сбрасывают ограничения |
-| Replay | Same key/body возвращает прежний Order; другое тело и оформленная revision дают 409; два key одной revision дают один эффект |
-| Бизнес-логика | Quantity, цена, expiry, купон и конкурентность; rollback, независимый пересчёт, один заказ на revision |
-| Injection | Draft canary в vulnerable, параметризованный protected; обычный поиск и апострофы не ломаются |
-| Access-логи | Одна итоговая запись у producer, корректный status после ошибки, path с query, полный req_hash либо null, отсутствие секретов |
-| Доставка | ACK только после хранения всей пачки, конфликт отклоняет её целиком; FINISHING соблюдает N, COMPLETED/FAILED принимает только идентичные повторы; N ниже сохранённого sequence даёт 409 |
-| Detector | Только HTTP-наблюдения; объединение двух producers по requestId, итоговые incidents после COMPLETED, необязательный family |
-| Control | Идемпотентный start, один слот испытания, prepare БД без отдельного HTTP API, cancel и safe cleanup |
-| Завершение | Gateway CLOSED перед Shop; lastSequence окончателен, finish и observedRequestIds сверены; timeout не равен остановке SQL |
-| Оценка/UI | detection выводится из assessed incidents и полноты шагов, согласован во всех cases эпизода; TP несовместим с MISSED; классификация отдельно, 0/0=N/A |
-| Изоляция | Runner не получает admin/JDBC порты, Detector не читает shop/control state; секреты и тела не экспортируются |
+| API/schema | Один spec для обоих режимов; positive examples, unknown/duplicate fields, types/bounds/nullability/query, body forwarding |
+| JWT/BOLA | Неверные alg/signature/iss/aud/exp/nbf; valid token многократен; чужие profile/order и отсутствующие дают 404, свои доступны |
+| Login limits | Параллельный consume/backoff; OBSERVE/ENFORCE/run isolation; безопасный TTL; overflow 503 + INCONCLUSIVE; старый callback не меняет новый run; restart не продолжает опыт |
+| Replay | Same key/body, altered body, оформленная cart revision/new key, параллельные key, expiry купона, cart revision, retry после потери ответа/commit |
+| Бизнес-транзакция | Реальные cart/coupon races, rollback на критичных шагах, один эффект, expiry equality, серверная цена и независимый пересчёт |
+| Injection | Реальный canary leakage vulnerable, отсутствие leakage protected, literal punctuation/search и фиксированный порядок по id |
+| Security logs | AccessLog/schema/redaction; один реальный status после commit/rollback/ошибки; sequence 1..N; identical duplicate/conflict; oversized record; отсутствие sampling/drop |
+| Detector | Изоляция от Shop/Control, YAML whitelist AccessLog, out-of-order/ties, отсутствие двойного вклада; FINISHING в границах N, COMPLETED/FAILED только identical retries; конфликт отклоняет всю пачку |
+| Orchestration | Client timeout при продолжающемся SQL, deadline/cancellation и смена instanceId, missing sequence/attempt, finish ниже принятого sequence → 409, запрет reset до quiescence |
+| Исполнение/UI | Один активный trial; UI/cancel доступны при максимальном бюджете runner; отдельные executors; bounded results; остановка без новых retry после cancel/deadline |
+| Метрики/UI | N/A при нуле, incomplete не FN, ошибка family не меняет TP; detection согласован с IncidentAssessment и всеми cases episode, несколько incidents на episode, benign retry, escaping/явный Operator Bearer и отсутствие секретов |
+| Runtime | Внешний egress control закрыт; ScenarioHttpClient отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
 
-SQL и конкурентность проверяются через Testcontainers с PostgreSQL, а не только на in-memory БД. JUnit подходит чистым правилам и вычислениям; jqwik - независимой модели последовательностей cart/coupon/checkout. Независимый oracle не переиспользует production calculator. Пропуск доступа или ошибка логирования не выдаются за успешную защиту.
+SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для setQuantity/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
-## Команды и автоматизация
+Планируемый pipeline `./mvnw verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия - `./mvnw -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Это план будущего pipeline; сейчас CI проверяет генерацию через `./mvnw clean generate-sources`, а `./mvnw compile` собирает код; после появления реализации они должны совпадать с её фактическими Maven profiles.
 
-`./mvnw clean generate-sources` обновляет исходники; `./mvnw compile` проверяет их совместимость. Существующий CI сравнивает перегенерированный код с Git. Сгенерированный интерфейс не подтверждает работающий endpoint.
+Regression падает при нарушении обещанного protected-инварианта, неподтверждённом vulnerable baseline, несовместимых snapshots, потере обязательного evidence, нарушении изоляции или утечке секрета. Гонки проверяются серией; отсутствие воспроизведения в серии не выдаётся за успешную демонстрацию. CS-02 и другие объявленные остаточные риски оцениваются по их реальной гарантии.
 
-Полный pipeline реализации должен включить unit/contract/PostgreSQL/security smoke проверки. Acceptance profile, Compose и интеграционные тесты описываются командами только после их появления; текущая генерация их не заменяет.
+## Покрытие функциональных требований
 
-## Покрытие требований
+Коды служат идентификаторами приёмки; содержание требований дано здесь полностью в пределах указанных групп. Текущий контракт использует фиксированные vulnerable/protected; индивидуальное переключение политик FR-29 не входит в MVP.
 
-- FR-1..FR-9: сокращённое API из девяти операций; без истории заказов, карточки товара и удаления позиций.
-- FR-10..FR-16: пять семейств угроз, business subcases, активы, гарантии и остаточные риски.
-- FR-17..FR-20: выбор families/seed, автоматический запуск обоих режимов, прогресс, cancel и безопасная подготовка БД.
-- FR-21..FR-29: JWT, schema/login policies, owner-check, SQL и checkout. Профили только vulnerable/protected.
-- FR-30..FR-35: access-логи, независимый Detector, итоговые incidents, оценка Control, сравнение и JSON-отчёт.
-- FR-36..FR-39: benign episodes, технические logs/traces, redaction и наблюдаемость.
+| Требования | Проверяемый результат |
+|---|---|
+| FR-1-FR-3 (сокращённый scope) | Атомарная регистрация пользователя/корзины, login/JWT и профиль по ID; исходных пользователей готовит fixture |
+| FR-4-FR-9 (сокращённый scope) | Поиск каталога, GET cart, PUT количества/купона, checkout и заказ по ID; карточка товара, история и удаления исключены; один контракт двух режимов |
+| FR-10-FR-16 | Активы/угрозы/меры/остаточные риски; credential stuffing, BOLA profile/order, replay, injection, четыре business subcases; отдельный критерий эффекта и инвариант |
+| FR-17-FR-20 | Создание trial с families/seed; автоматические vulnerable/protected runs; подготовка/шаги/результаты; безопасный reset модулем Control |
+| FR-21-FR-22 | Обязательный gateway; JWT claims/signature и одноразовость бизнес-операции при многократном access JWT |
+| FR-23-FR-28 | Schema и неизвестные поля; owner-check; source/account limits/backoff; SQL-параметризация; серверная цена/idempotency/atomic coupon; итоговые access-логи; причины решений - во внутренней диагностике |
+| FR-29 | Два фиксированных набора: vulnerable/OBSERVE и protected/ENFORCE; обязательные эксплуатационные проверки не отключаются |
+| FR-30-FR-35 | AccessLog; независимый Detector и итоговые incidents; UI/progress/cases/reasons; TP/FP/FN; сравнение эффектов/детекции/FP; JSON-отчёт |
+| FR-36-FR-39 | Benign workload для FP; централизованные structured logs; trace runner→gateway→shop→detector; redaction секретов |
 
 ## Нефункциональная приёмка
 
 | Код | Условие готовности |
 |---|---|
-| NFR-1 | Внешний egress Control закрыт сетевыми проверками; ScenarioHttpClient допускает только Gateway. Внутри JVM Runner не является отдельным сетевым sandbox |
-| NFR-2 | Одна Compose-команда на описанной чистой машине; цель cold readiness - не более 10 минут с загрузками, warm time измеряется отдельно |
-| NFR-3 | Синтетические данные, локальная генерация ключей, безопасный env example без реальных секретов |
-| NFR-5 | Логи отправляются напрямую Detector без участия Control; задержка допустима до deadline, потеря и restart дают INCONCLUSIVE без resume |
-| NFR-6 | Java-модули, типизированные контракты и фиксированные конфигурации |
-| NFR-7 | Проверки реализации запускаются одной документированной командой и в CI, результаты сохраняются |
-| NFR-8 | Актуальные контракты, схемы, измерения и описание фактического вклада каждого участника |
-| NFR-9 | UI предоставляет выбор families, запуск, прогресс, cancel, сравнение и сохранение общего JSON-отчёта |
+| NFR-1 | Внешний egress control закрыт сетевыми тестами; сценарный HTTP-клиент отвергает внутренние цели кроме gateway. Внутри общей JVM нет отдельной сетевой изоляции runner |
+| NFR-2 | Одна Compose-команда на чистой описанной машине; cold readiness ≤10 минут, downloads учтены, warm time отдельно |
+| NFR-3 | Только synthetic data, локальная генерация keys, safe env example и отсутствие реальных секретов |
+| NFR-5 | API отправляет access-логи напрямую Detector без участия Control; отставание обработки допустимо до deadline. Restart/отказ процесса делает run INCONCLUSIVE, восстановления run нет |
+| NFR-6 | Java modules, typed contracts и versioned config, а не несвязанные скрипты |
+| NFR-7 | Автоматические проверки одной командой и в CI, сохранённые reports |
+| NFR-8 | README, архитектура/схемы, решения и tradeoffs, API/сценарии/метрики, описание фактического вклада |
+| NFR-9 | Из UI доступны создание/start/cancel, сравнение, карточки и export; отдельная дизайн-проработка не требуется |
 
-Это цели приёмки будущей реализации, а не результаты выполненного benchmark. Ресурсные пределы и числовые пороги качества Detector фиксируются до измерений; результаты публикуются со знаменателями и ограничениями. Внешние цели и продолжение прерванного run не поддерживаются.
+## Демонстрация и сдача
 
-## Демонстрация
+Поднять стенд и показать health/версии/роли; выполнить BO-01 на двух режимах; показать response, owner oracle, incident и decision; продемонстрировать checkout retry/race по числу эффектов; выполнить пять семейств с benign traffic и открыть сравнение со знаменателями. Затем показать отставание обработки при работающем detector и корректное ожидание FINALIZING; для пропущенного sequence или перезапуска процесса показать INCONCLUSIVE без возобновления run. Завершить JSON-export и traces с объяснением остаточных рисков.
 
-Запустить BO-01 с benign-контролем в обоих режимах, сопоставить ответы, readonly oracle и incidents. Показать checkout retry/race по числу заказов. Затем выполнить все пять семейств и сохранить общий отчёт с числителями/знаменателями. Для потери записи, deadline и перезапуска показать INCONCLUSIVE; при cleanupSafe=false новый запуск запрещён.
+Результат сдачи: исходный код в публичном репозитории, воспроизводимые команды, актуальные схемы и документация, тестовые отчёты, видео либо сценарий демонстрации и фактический вклад каждого участника. До выполнения проверок проектная спецификация не считается доказательством готового стенда.
 
-Успешность обнаружения не обещается для любой атаки: ограниченность access-логов и возможные ложные срабатывания - часть измеряемого результата.
+Проверки упрощённого checkout: новый key для оформленной revision возвращает CART_ALREADY_CHECKED_OUT; устаревшая неоформленная revision - CART_CHANGED. Успешный retry после очистки корзины и истечения купона возвращает прежний Order. Два разных key одной revision создают один заказ; vulnerable replay той же версии создаёт повторный эффект. Изменение замороженного каталога/условий купона приводит к INCONCLUSIVE, а не к корректному результату ASR.
+
+Минимальный контракт магазина содержит 9 операций. Проверить создание позиции через PUT, замену количества без инкремента и no-op без повышения revision; protected отклоняет quantity=0, vulnerable допускает учебный BL-02; общая генерация Shop API не запускает Bean Validation до выбора режима. Сценарии получают ID своих/чужих ресурсов из приватного manifest, подтверждают login чтением профиля по ID и не требуют регистрации или истории заказов. Исключённые маршруты дают 404, а неподдерживаемый метод существующего маршрута - 405.
+
+Регистрация: проверить 201 User и пустую Cart с revision=0, отсутствие password/hash в ответе и логах, вход созданного пользователя, 400 для невалидных полей и 409 LOGIN_TAKEN/EMAIL_TAKEN после нормализации. Гонка одинаковых регистраций создаёт ровно одного пользователя и одну корзину; ошибка создания корзины откатывает пользователя. Проверки одинаковы для vulnerable и protected.

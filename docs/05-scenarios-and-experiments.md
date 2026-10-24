@@ -1,14 +1,12 @@
-# Сценарии, испытания и оценка
-
-Нормативные источники: [Control API](../contracts/control-api.openapi.yaml), [типы Control](../contracts/schemas/control.yaml), [порты модулей](../contracts/modules.md) и [общие правила](../contracts/semantics.md).
+# Сценарии, эксперименты и оценка
 
 ## Угрозы и гарантии
 
-Стенд моделирует клиента локального API с синтетическими credentials и объектами. Активы: учётные записи/JWT, профили/заказы, каталог/цены, корзина/купоны, access-логи и независимый ground truth. Runtime-компрометация Docker host/DBA не входит в модель. Генератор работает по конечному каталогу сценариев и встроенным targets.
+Стенд моделирует клиента локального API с синтетическими credentials и объектами. Активы: учётные записи/JWT, профили/заказы, каталог/цены, корзина/купоны, доказательные access-логи и независимый ground truth. Runtime-компрометация Docker host/DBA не входит в модель. Генератор работает по конечному каталогу сценариев и встроенным targets.
 
 | Case | Действие и критерий эффекта атакующего | Защита и benign-контроль |
 |---|---|---|
-| CS-01 | Серия пар login/password; полученный token действительно открывает профиль жертвы | IP/account limits/backoff; небольшое число ошибочных и корректный легитимный вход |
+| CS-01 | Серия пар login/password; полученный token действительно открывает профиль жертвы | Source/account limits/backoff; небольшое число ошибочных и корректный легитимный вход |
 | CS-02 | Первая корректная пара даёт рабочую сессию жертвы | Явный остаточный риск парольной auth; отсутствие блокировки допустимо |
 | BO-01 | Подмена orderId раскрывает чужой заказ | Owner-check/404; свой и отсутствующий order |
 | BO-02 | Подмена userId раскрывает чужой профиль | Owner-check/404; свой и отсутствующий userId |
@@ -24,81 +22,117 @@ BL-01 имеет отдельные expired/exhausted/repeated-apply subcases; B
 
 CS-01: 200 сгенерированных попыток образуют один detection episode; три аккаунта с корректными парами - три case достижения доступа. Неверные пары создают контекст кампании, но не добавляют 197 заведомых неуспехов в знаменатель ASR. RP-01 содержит отдельно malicious попытку повторного эффекта и benign retry. Их намерение может быть неразличимо по HTTP; это ограничение отражается в метриках, а не устраняется передачей label detector.
 
-Секретность id не заменяет owner-check; ошибка 500 не доказывает injection; JWT остаётся многократным. Украденный bearer позволяет новые допустимые операции. Rate policy не обещает остановить первую корректную пару, а правила detector покрывают только описанные признаки. Эти ограничения учитываются при интерпретации результатов и документируются вместе с измерениями.
+Секретность id не заменяет owner-check; ошибка 500 не доказывает injection; JWT остаётся многократным. Украденный bearer позволяет новые допустимые операции. Rate policy не обещает остановить первую корректную пару, а правила detector покрывают только описанные признаки. Эти остаточные риски входят в отчёт.
 
 Подготовка сценариев использует сокращённый API: login, GET профиля по ID, поиск products, GET cart, PUT /cart/items/{productId}, PUT /cart/coupon, POST /orders и GET заказа по ID. PUT количества создаёт или заменяет позицию; нулевое количество - отрицательный BL-02, не удаление. BO-01/BO-02 получают известные ID из приватного manifest; CS подтверждает доступ собственным профилем по ID. Для независимых случаев с пустой корзиной/без купона выделяются fixture-пользователи; удаления не нужны, отдельная ручка регистрации проверяется контрактными тестами и не меняет исходный fixture manifest. Повторный выбор купона проверяет BL-01; чтение cart после выбора не должно показывать накопление скидки. BL-03 использует разные key одной cartRevision либо общий купон разных пользователей.
 
-## Модель испытания
+## Модель эксперимента
 
 | Сущность | Определение |
 |---|---|
-| Trial | Неизменяемый выбор families и seed; включает последовательные vulnerable/protected runs |
-| Run | Один режим с чистой фикстурой и собственными runtime/analysis context |
-| Case / subcase | Цель атакующего с независимым критерием эффекта |
+| Trial | Испытание выбранных families с seed; включает vulnerable/protected runs |
+| Run | Один режим с чистой фикстурой, runId и исполнением плана |
+| Case / subcase | Одна цель атакующего и проверяемые инварианты |
 | Episode | Заранее ограниченная последовательность; единица recall и benign FPR |
-| Step | Действие плана с actor, clientIp и возможными retries |
-| Attempt | Одна HTTP-отправка с UUID requestId, созданным до запроса |
+| Step | Действие плана, возможно с несколькими retries/HTTP-attempts |
+| Attempt | Одна отправка с уникальным UUID attemptId=requestId доверенного harness |
 
-План и FixtureData приватны для Control. Ресурсы, actors/owners, ATTACK/BENIGN, attack-specific шаги и независимые критерии задаются до старта. Пароли/JWT доступны Runner в памяти, но не попадают в attempts, логи и отчёт. Detector получает только runId и access-логи.
+Scenario definition задаёт id/version/family/subcase, actors, fixture requirements, последовательность и concurrent groups, input generator/seed, budgets, episode boundaries, attack-specific steps, benign/malicious labels и oracle ids. Control хранит полную definition; runner получает исполнимый план/синтетические credentials, detector - только наблюдения. Подготовительные login/cart steps не увеличивают число malicious cases.
 
-GET `/control/v1/scenarios` возвращает пять семейств. POST `/control/v1/trials` с Idempotency-Key создаёт и сразу запускает испытание:
+До запуска сохраняется manifest с definition/plan/fixture hashes, кодом/контрактами/dependency/image versions, seed/businessTimeBase, actor mapping, policy/ruleset hashes, budgets, deadlines и evaluator version. UUID не кодируют сценарий или target; связь runId с режимом известна Control, Detector получает только runId. Это внутренние данные Control, не дополнительные поля HTTP TrialReport. Полные исходные данные сохраняются приватно для независимой проверки.
+
+Пример создания через POST /control/v1/trials с Idempotency-Key:
 
 ```json
-{"families":["BOLA","REPLAY"],"seed":42}
+{
+  "families": ["BOLA", "REPLAY"],
+  "seed": 42
+}
 ```
 
-families содержит от одного до пяти уникальных значений; выбор всех пяти запускает весь набор. Seed необязателен: Control выбирает его и возвращает в trial. Оба режима обязательны, профили фиксированы, baseUrl/actors/policies/executable code в запросе отсутствуют. Тот же ключ/body возвращает прежний trial, другой body или занятый слот - 409.
+Выбирается от одного до пяти известных families или все пять; seed необязателен. Оба режима запускаются автоматически, сначала vulnerable, затем protected. Остальные настройки фиксируются конфигурацией стенда. Неизвестные поля и превышение бюджета - 400. BaseUrl, внешний callback, SQL assertions и executable expressions не принимаются. Objects/actors разрешаются по FixtureData; labels и ожидаемые эффекты не выводятся из ответа Detector.
 
-## Runner и подготовка данных
+## Встроенный runner и контракты управления
 
-Fixture - модуль Control с прямым административным доступом к shop DB. Он готовит данные при закрытых runtimes; Shop/Gateway не предоставляют API наполнения БД. В paired runs одинаковы seed, FixtureData и businessTimeBase, но бизнес-БД и состояние политик раздельны.
+Runner - библиотека `modules/scenario-runner`, подключённая к lab-control. PlanExecutor/StepExecutor используют отдельный executor, Java HttpClient с фиксированными gateway targets, semaphore и конечные бюджеты. Один активный trial с двумя последовательными runs в MVP. Cancellation token/deadline проверяются перед каждой новой попыткой/retry и ожиданием barrier. Сценарии поставляются доверенным кодом; пользовательский Java/shell/SQL не исполняется.
 
-Runner также работает внутри Control: prepare/start/cancel и AttemptSink - Java-порты. Отдельный executor и конечные бюджеты не блокируют UI. clientIp шага передаётся в X-Forwarded-For; один виртуальный клиент сохраняет адрес в обоих режимах. Каждый retry получает новый requestId, повтор checkout - тот же Idempotency-Key/body.
+Orchestrator вызывает Runner.prepare(runId, mode, families, seed, fixture, deadlineAt), получает PreparedRun с plan(), затем вызывает start(http, attemptSink). CompletionStage завершается после сохранения всех начатых attempts; cancel() прекращает новые действия. Потеря UI-вкладки не прекращает серверное управление run. Прерванный процесс не возобновляет выполнение. Точные Java-сигнатуры заданы в [modules.md](../contracts/modules.md), внутренние таблицы не являются HTTP-контрактом.
 
-ScenarioHttpClient разрешает только встроенные входы Gateway и бизнес-маршруты, не произвольные URL, redirects, proxy, SQL или management. Runner не получает datasource/Fixture/Evaluator через свои порты. Это граница доверенного кода общей JVM, не изоляция от злонамеренного Java-кода.
-
-AttemptSink сохраняет результаты HTTP-запросов по [внутреннему порту](../contracts/modules.md) до completion Runner. Ошибка сохранения или отсутствие ожидаемого результата делает оценку неполной. Cancel/deadline прекращают новые шаги и retries; отмена HTTP Future не доказывает остановку SQL в Shop.
-
-## Управление и завершение
-
-| Метод | Назначение |
+| Интерфейс | Контракт |
 |---|---|
-| GET `/control/v1/trials` | Пагинированный список |
-| GET `/control/v1/trials/{trialId}` | Состояние, общий прогресс и cleanupSafe |
-| POST `/control/v1/trials/{trialId}/cancel` | Остановка новых шагов с безопасным завершением активных операций |
-| GET `/control/v1/trials/{trialId}/report` | Общий отчёт, до сохранения 409 |
+| Operator: `GET /control/v1/scenarios` | Пять доступных families |
+| Operator: `POST /control/v1/trials` | Создать и сразу запустить оба режима; 202 новый trial, 200 идентичный повтор |
+| Operator: `GET /control/v1/trials` | Список испытаний с пагинацией |
+| Operator: `GET /control/v1/trials/{trialId}` | Состояние, общий прогресс, cleanupSafe и необязательный error |
+| Operator: `POST /control/v1/trials/{trialId}/cancel` | 202 Trial; окончание определяется состоянием |
+| Operator: `GET /control/v1/trials/{trialId}/report` | TrialReport; до готовности 409 |
+| Orchestrator → Runner: Java | prepare → PreparedRun.plan/start/cancel, CompletionStage |
+| Runner → AttemptSink: Java | append(runId, Attempt), подтверждение сохранения до completion |
+| Control → Gateway/Shop: Runtime API | PUT /runs/{runId}, GET status, POST open/close; без HTTP подготовки/reset БД |
+| Control → Detector: HTTP API | prepare/status/finish/incidents; Shop/Gateway отправляют log-batches |
 
-Нормальные состояния Trial: PREPARING → RUNNING → FINALIZING → COMPLETED. Терминальные альтернативы: FAILED, CANCELLED, INCONCLUSIVE. Отмена повторяема; настройки trial не редактируются. При cleanupSafe=false нельзя готовить новую БД или запускать следующее испытание.
+Между Runner и Control нет HTTP endpoints, worker listener, heartbeat или lease. POST trials требует Idempotency-Key: одинаковый ключ/body возвращает прежний trial, другой body - 409. Управляющие prepare/open/close/finish допускают безопасный идентичный повтор; изменённые контекст или границы дают 409. HTTP 202 означает принятие, не завершение. Operator/service credentials отделены от пользовательского JWT; runId берётся из Runtime-контекста, без X-Lab-заголовков.
 
-Для каждого run Control готовит БД, контексты Shop/Gateway и анализ Detector. Открывает Shop, затем Gateway. После завершения Runner:
+Attempt содержит caseId, stepId, requestId, businessTime, transportOutcome RESPONSE/TIMEOUT/TRANSPORT_ERROR, nullable status и безопасный responseFacts. UUID создаётся до отправки, передаётся в X-Request-Id и сохраняется Gateway/Shop. Retry получает новый UUID. В responseFacts JWT заменяется признаком tokenReceived, credentials не сохраняются. Повтор requestId с другим содержимым - ошибка.
 
-1. Дождаться сохранения attempts и прекращения новых отправок.
-2. Закрыть Gateway и дождаться CLOSED, затем закрыть Shop. У каждого inFlight=0 и окончательный lastSequence.
-3. Передать оба lastSequence и deadlineAt в Detector finishAnalysis.
-4. Дождаться COMPLETED; сверить observedRequestIds с attempts, получить итоговые incidents.
-5. Снять readonly состояние, выполнить evaluator и сохранить результаты. Только после безопасного завершения возможна следующая подготовка.
+AttemptSink - порт persistence adapter Control. Ошибка сохранения или переполнение запрещают новые шаги и дают INCONCLUSIVE при неполноте. Сценарные классы не получают datasource/admin/evaluator interfaces. Это граница доверенного Java-кода, не sandbox: процесс Control имеет соответствующие сети и credentials. ScenarioHttpClient запрещает любой origin кроме Gateway и служебные routes; запрет внешнего egress проверяется отдельно на контейнере. Fixtures устанавливает отдельный модуль Control напрямую в БД, не сценарный HTTP-клиент.
 
-Detector имеет отдельные состояния ACCEPTING → FINISHING → COMPLETED либо FAILED. Runtime: PREPARED → OPEN → CLOSING → CLOSED либо ERROR. Произвольный sleep не заменяет эти проверки. Потеря логов, смена instanceId, недоступный baseline и deadline дают INCONCLUSIVE. Прерванный run не возобновляется; выполненные транзакции не откатываются.
+## Жизненный цикл и завершение
 
-Штатный порядок режимов всегда vulnerable, затем protected. Seed не фиксирует SQL/OS interleaving: конкурентные cases используют barriers и явно учитывают повторы. При отмене/ошибке второй run может отсутствовать; он не считается выполненным. Отчёт содержит доступные результаты.
+Нормальный путь: PREPARING → RUNNING → FINALIZING → COMPLETED. Trial хранит общий прогресс и cleanupSafe; после restart control помечает незавершённый run INCONCLUSIVE и не возобновляет исполнение. Терминальные альтернативы:
+
+- FAILED - конфигурация/подготовка или исполнение технически не выполнены.
+- CANCELLED - отмена после остановки новых действий и фиксации оставшихся.
+- INCONCLUSIVE - исход или полнота доказательств не установлены.
+
+Отрицательный результат защиты может быть достоверным COMPLETED. Любой выход из RUNNING, включая fatal/cancel, проходит FINALIZING; желаемый terminal state хранится отдельно. При cleanupSafe=false даже терминальный run блокирует следующий reset на target.
+
+PREPARING закрывает admission, проверяет отсутствие старых работ, устанавливает фикстуру и проверяет baseline invariants. Control подготавливает Runtime-контексты Shop/Gateway, Runner и анализ Detector, проверяет instanceId и состояние limiter; затем открывает Shop, после него Gateway. Ready означает готовность работать, а не только живой процесс.
+
+Сравнение состоит из последовательных paired runs с одинаковыми fixture/seed/business-time base, workload, concurrency и ruleset. Target DB и policy state раздельны. Порядок фиксирован: vulnerable, затем protected; concurrency внутри race сохраняется. Текущий API предоставляет два фиксированных набора защит, без переключателей отдельных политик. Seed не фиксирует OS/SQL interleaving: гонки запускаются серией с barrier и публикуемым числом повторов.
+
+Барьер FINALIZING:
+
+1. Orchestrator отменяет новые шаги/retries, ждёт completion и сохранения attempts.
+2. Закрывает Gateway и ждёт CLOSED, затем закрывает Shop и ждёт CLOSED.
+3. CLOSED означает in-flight=0 и окончательный lastSequence при неизменном instanceId. Client timeout не означает завершения SQL.
+4. Control передаёт gatewayLastSequence, shopLastSequence и deadlineAt в finishAnalysis; Detector проверяет непрерывные 1..N и обрабатывает все логи.
+5. После COMPLETED Control сверяет observedRequestIds с attempts и получает все итоговые incidents.
+6. Control снимает readonly конечное состояние, выполняет oracle и сохраняет отчёт; после этого разрешается безопасная подготовка следующей БД.
+
+Каждый этап имеет deadline. Недостающий лог/result, пропуск sequence или неподтверждённый COMPLETED дают INCONCLUSIVE. Фиксированное ожидание «несколько секунд» не заменяет барьер. В FINISHING принимаются только записи до объявленных N, после COMPLETED/FAILED - только идентичные сохранённые повторы; изменённый finish или N ниже сохранённого sequence даёт 409. Перезапуск любого участника или отказ обязательной инфраструктуры нарушает допущение опыта: INCONCLUSIVE, без продолжения. Старые исполнители останавливаются; новый run начинается после подготовки фикстур.
 
 ## Независимый эталон
 
-Evaluator использует исходный snapshot, план, HTTP responseFacts, readonly состояние Shop и итоговые incidents. Он не вызывает production calculator/rule engine и не принимает HTTP BLOCK или incident как доказательство предотвращения.
+Приватный evaluation plan до запуска задаёт actors/owners, атакующие steps, цели, benign labels, инварианты и causal attribution. Oracle использует response evidence, before/after state и trusted fixture snapshots; он не вызывает production calculator/rule engine и не принимает BLOCK/incident как доказательство.
 
-Case effect: EFFECT_OBSERVED / EFFECT_NOT_OBSERVED / INCONCLUSIVE. Для BOLA проверяются возвращённые чужие поля; для login - пригодность токена; для replay/race - число эффектов; для injection - draft canary; для бизнес-логики - соответствующий инвариант. TIMEOUT/ошибка инфраструктуры сами по себе не означают отсутствие эффекта.
+Case effect: EFFECT_OBSERVED / EFFECT_NOT_OBSERVED / INCONCLUSIVE. Проверки инвариантов служат доказательством effect и описываются в reason; технические ошибки отражаются в state/error. Обнаружение оценивается отдельно в detection. CS-02 может достичь цели при корректной проверке JWT - это остаточный риск, не ошибка signature validation.
 
-Control связывает incident с episode по атакующим requestIds и эталону. Семейство в incident необязательно; ошибочная классификация поясняется в reason отдельно от факта обнаружения. Несколько incidents дают один обнаруженный episode. Benign retry остаётся benign, даже если Detector ошибочно объявил его атакой.
+HTTP 200 при retry может быть сохранённым прежним Order; 409 при ошибочной транзакции может сопровождаться побочным эффектом. Неверные credentials и infrastructure rejects не объявляются успешной защитой. Для BOLA проверяется раскрытие полей, для login - пригодность token, для replay/race - число эффектов, для injection - canary/выборка, для бизнес-логики - соответствующий state invariant.
 
-## Метрики и отчёт
+## Метрики
 
-| Метрика | Формула |
+| Метрика | Единица и формула |
 |---|---|
-| ASR | Успешные / оценённые attack cases |
-| Precision | TRUE_POSITIVE / (TRUE_POSITIVE + FALSE_POSITIVE) incidents |
-| Recall | Обнаруженные / оценённые attack episodes |
-| FPR | Benign episodes с ложным incident / оценённые benign episodes |
+| ASR | Cases с EFFECT_OBSERVED / все полноценно оценённые malicious cases; по family/subcase и общий итог с явными весами |
+| Detection recall | Malicious episodes с detection=DETECTED / все полностью наблюдённые malicious episodes |
+| Incident precision | TP incidents / (TP + FP incidents) |
+| Benign FPR | Benign episodes хотя бы с одним ложным incident / все полностью наблюдённые benign episodes |
+| False block rate | Легитимные logical operations, ошибочно остановленные защитой / все пригодные легитимные operations |
+| Detection delay | Время появления incident − первое attack-specific evidence time; для итоговых incidents, отдельным измерением |
+| Нагрузка | p50/p95/p99 latency, throughput, error rate, CPU/RAM при одинаковом workload |
+| Coverage | Planned/executed/evaluable cases/episodes, missing steps/logs, ошибки/INCONCLUSIVE и причины |
 
-Заблокированные попытки входят в обнаружение. INCONCLUSIVE/UNASSESSED исключаются из соответствующих знаменателей; 0/0 показывается как N/A. При незавершённом анализе incidents=null, а detection у cases - INCONCLUSIVE, а не пустой успешный результат. Недостаток наблюдений нельзя объявлять пропуском детектора.
+Recall включает предотвращённые попытки. `1−ASR` не называется общей эффективностью защиты: эффект мог отсутствовать по иной причине. Нулевой знаменатель - N/A. INCONCLUSIVE/UNASSESSED исключаются из соответствующих знаменателей, но их counts/причины стоят рядом. Неполный run имеет диагностические частичные результаты; итоговое paired comparison требует двух COMPLETED runs.
 
-TrialReport содержит trialId, families, seed, state и runs. Каждый RunReport содержит runId, mode, state, cases, incidents и необязательный текст error. CaseResult объединяет effect и detection; episodeId группирует одну кампанию. family, label и detection одинаковы внутри группы. Incidents включают оценку Control; метрики дашборд вычисляет из результатов, считая уникальные episodeId для recall/FPR. У отчёта нет отдельной revision, редактирования incidents или HTTP-метода сравнения: оба режима уже находятся в одном JSON. Успешное парное сравнение требует двух полноценно завершённых runs; частичные результаты показываются с причинами.
+Incident относится к episode по requestId → attack-specific step. Совпадения только run/IP или подготовительного login недостаточно. Несколько incidents дают один detected episode, но несколько наблюдений precision. Один incident покрывает несколько episodes только при evidence для каждого и считается один раз в precision. Ошибка/отсутствие family не меняет TP; её объясняют в reason. Неопределённая оценка - UNASSESSED. detection выводится по [правилам контракта](../contracts/semantics.md), одинаково у cases одного episode и отдельно от effect. MISSED/CLEAN требуют полноты шагов и логов; при незавершённом анализе detection=INCONCLUSIVE и incidents=null.
+
+False block rate, detection delay и нагрузка требуют отдельной технической телеметрии: текущий TrialReport не хранит их исходные данные.
+
+Для гонок и стохастических профилей публикуются seeds/repetitions и k/n. Доверительные интервалы требуют указанного метода и единицы независимости; requests одного episode не являются независимыми наблюдениями. Числовые цели качества определяются после пилота и фиксируются до итоговой серии.
+
+## Отчёт
+
+TrialReport содержит trialId, families, seed, terminal state и до двух RunReport. Каждый run содержит runId, mode, state, cases, incidents и необязательный error. CaseResult задаёт caseId/episodeId, family, label ATTACK/BENIGN, effect, detection, requestIds и reason. IncidentAssessment включает итоговый incident, verdict, matchedEpisodeIds и reason. Метрики UI выводит из cases/incidents, отдельного массива episodes и дублирующих счётчиков нет.
+
+После финализации отчёт неизменяем; пересчёт и operator notes не входят в текущий HTTP-контракт. JSON-отчёт можно сохранить на стороне UI; он не содержит паролей, токенов и необработанных секретных запросов. Отсутствующий incident показывается как detection результата episode, а не созданное задним числом обнаружение.

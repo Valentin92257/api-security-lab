@@ -1,3 +1,11 @@
-# Итоговые контракты
+# Контракты между компонентами
 
-Актуальная выжимка и реестр спецификаций: [contracts/README.md](../contracts/README.md). API Control перенесён из `docs/data/lab-openapi.yaml` в [contracts/control-api.openapi.yaml](../contracts/control-api.openapi.yaml).
+Комплект спецификаций: [contracts/README.md](../contracts/README.md).
+
+- Сетевые интерфейсы: OpenAPI 3.1 + HTTP/JSON.
+- Detector получает логи прямо от Shop/Gateway, хранит их сам и выдаёт только итоговые инциденты.
+- Инцидент: ID инцидента, необязательное семейство предполагаемой атаки, время обнаружения, requestIds и объяснение. runId задаётся URL и в теле не повторяется.
+- Control самостоятельно определяет успех атак и верность инцидентов; испытание сравнивает vulnerable и protected.
+- Генератор и подготовка БД остаются модулями Control; их входы/выходы описаны [Java-портами](../contracts/modules.md) без новых сетевых сервисов.
+
+Реестр спецификаций, краткая выжимка и происхождение технических решений находятся в указанном комплекте. API Control перенесён из `docs/data/lab-openapi.yaml` в [contracts/control-api.openapi.yaml](../contracts/control-api.openapi.yaml).
