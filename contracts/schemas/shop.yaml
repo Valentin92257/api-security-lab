@@ -40,7 +40,7 @@ $defs:
     additionalProperties: false
     required: [id, login, name, email]
     properties:
-      id: {$ref: './common.yaml#/$defs/Id'}
+      id: {$ref: ./common.yaml#/$defs/Id}
       login: {type: string, pattern: '^[a-z0-9_]+$', maxLength: 32, minLength: 3}
       name: {type: string, maxLength: 100, minLength: 1}
       email: {type: string, format: email, maxLength: 254, minLength: 3}
@@ -50,7 +50,7 @@ $defs:
     additionalProperties: false
     required: [id, name, description, price, currency]
     properties:
-      id: {$ref: './common.yaml#/$defs/Id'}
+      id: {$ref: ./common.yaml#/$defs/Id}
       name: {type: string, maxLength: 120, minLength: 1}
       description: {type: string, maxLength: 4000}
       price: {$ref: '#/$defs/Price'}
@@ -59,15 +59,13 @@ $defs:
     title: ProductPage
     type: object
     additionalProperties: false
-    required: [items, limit, offset, total]
+    required: [items, total]
     properties:
       items:
         type: array
         items: {$ref: '#/$defs/Product'}
         minItems: 0
         maxItems: 100
-      limit: {type: integer, minimum: 1, maximum: 100}
-      offset: {type: integer, minimum: 0, maximum: 10000}
       total: {type: integer, format: int64, minimum: 0, maximum: 9007199254740991}
   LineItem:
     title: LineItem
@@ -75,7 +73,7 @@ $defs:
     additionalProperties: false
     required: [productId, name, quantity, unitPrice, lineTotal]
     properties:
-      productId: {$ref: './common.yaml#/$defs/Id'}
+      productId: {$ref: ./common.yaml#/$defs/Id}
       name: {type: string, maxLength: 120, minLength: 1}
       quantity: {$ref: '#/$defs/Quantity'}
       unitPrice: {$ref: '#/$defs/Price'}
@@ -88,17 +86,15 @@ $defs:
     properties:
       code: {type: string, pattern: '^[A-Z0-9_-]+$', maxLength: 32, minLength: 1}
       discountPercent: {type: integer, minimum: 1, maximum: 100}
-      eligibility:
-        type: string
-        enum: [VALID, EXPIRED, EXHAUSTED]
+      eligibility: {type: string, enum: [VALID, EXPIRED, EXHAUSTED]}
   Cart:
     title: Cart
     type: object
     additionalProperties: false
     required: [id, userId, revision, items, coupon, subtotal, discount, total, currency, updatedAt]
     properties:
-      id: {$ref: './common.yaml#/$defs/Id'}
-      userId: {$ref: './common.yaml#/$defs/Id'}
+      id: {$ref: ./common.yaml#/$defs/Id}
+      userId: {$ref: ./common.yaml#/$defs/Id}
       revision: {$ref: '#/$defs/Revision'}
       items:
         type: array
@@ -113,7 +109,7 @@ $defs:
       discount: {$ref: '#/$defs/Money'}
       total: {$ref: '#/$defs/Money'}
       currency: {type: string, const: RUB}
-      updatedAt: {$ref: './common.yaml#/$defs/Time'}
+      updatedAt: {$ref: ./common.yaml#/$defs/Time}
   OrderCoupon:
     title: OrderCoupon
     type: object
@@ -126,14 +122,12 @@ $defs:
     title: Order
     type: object
     additionalProperties: false
-    required: [id, userId, cartId, cartRevision, status, items, coupon, subtotal, discount, total, currency,
-      createdAt]
+    required: [id, userId, cartId, cartRevision, items, coupon, subtotal, discount, total, currency, createdAt]
     properties:
-      id: {$ref: './common.yaml#/$defs/Id'}
-      userId: {$ref: './common.yaml#/$defs/Id'}
-      cartId: {$ref: './common.yaml#/$defs/Id'}
+      id: {$ref: ./common.yaml#/$defs/Id}
+      userId: {$ref: ./common.yaml#/$defs/Id}
+      cartId: {$ref: ./common.yaml#/$defs/Id}
       cartRevision: {$ref: '#/$defs/Revision'}
-      status: {type: string, const: CREATED}
       items:
         type: array
         items: {$ref: '#/$defs/LineItem'}
@@ -147,7 +141,7 @@ $defs:
       discount: {$ref: '#/$defs/Money'}
       total: {$ref: '#/$defs/Money'}
       currency: {type: string, const: RUB}
-      createdAt: {$ref: './common.yaml#/$defs/Time'}
+      createdAt: {$ref: ./common.yaml#/$defs/Time}
   SetQuantityRequest:
     title: SetQuantityRequest
     type: object

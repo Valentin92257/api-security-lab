@@ -1,173 +1,35 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $defs:
-  Producer:
-    type: string
-    enum: [GATEWAY, SHOP]
-  LogFacts:
-    title: LogFacts
+  Producer: {type: string, enum: [GATEWAY, SHOP]}
+  AccessLog:
+    title: AccessLog
     type: object
     properties:
-      resourceType:
-        type: [string, 'null']
-        enum: [USER, ORDER, PRODUCT, CART, COUPON, null]
-      resourceId:
-        type: [integer, 'null']
-        format: int64
-        minimum: 1
-        maximum: 9007199254740991
-      resourceOwnerId:
-        type: [integer, 'null']
-        format: int64
-        minimum: 1
-        maximum: 9007199254740991
-      subjectMatchesOwner:
-        type: [boolean, 'null']
-      operation:
-        type: [string, 'null']
-        enum: [REGISTER, LOGIN, READ_PROFILE, SEARCH, READ_CART, SET_QUANTITY, SET_COUPON, CHECKOUT, READ_ORDER,
-          null]
-      operationExecuted:
-        type: [boolean, 'null']
-      stateChanged:
-        type: [boolean, 'null']
-      quantity:
-        type: [integer, 'null']
-      quantityWithinBounds:
-        type: [boolean, 'null']
-      quoteMatchesServer:
-        type: [boolean, 'null']
-      cartId:
-        type: [integer, 'null']
-        format: int64
-        minimum: 1
-        maximum: 9007199254740991
-      cartRevision:
-        type: [integer, 'null']
-        format: int64
-        minimum: 0
-        maximum: 9007199254740991
-      orderId:
-        type: [integer, 'null']
-        format: int64
-        minimum: 1
-        maximum: 9007199254740991
-      couponId:
-        type: [integer, 'null']
-        format: int64
-        minimum: 1
-        maximum: 9007199254740991
-      couponUsedCount:
-        type: [integer, 'null']
-      couponMaxUses:
-        type: [integer, 'null']
-        format: int64
-        minimum: 0
-        maximum: 9007199254740991
-      couponEligibility:
-        type: [string, 'null']
-        enum: [VALID, EXPIRED, EXHAUSTED, NONE, UNKNOWN, null]
-      accountKey:
-        type: [string, 'null']
-        minLength: 64
-        maxLength: 64
-        pattern: ^[0-9a-f]{64}$
-      authOutcome:
-        type: [string, 'null']
-        enum: [SUCCESS, FAILURE, null]
-      idempotencyKeyHash:
-        type: [string, 'null']
-        minLength: 64
-        maxLength: 64
-        pattern: ^[0-9a-f]{64}$
-      idempotencyOutcome:
-        type: [string, 'null']
-        enum: [NEW, REPLAYED, CONFLICT, NONE, null]
-      policyId:
-        type: [string, 'null']
-        enum: [JWT, OPENAPI, LOGIN_LIMIT, null]
-      policyDecision:
-        type: [string, 'null']
-        enum: [ALLOW, BLOCK, FLAG, null]
-      enforcedAction:
-        type: [string, 'null']
-        enum: [CONTINUE, REJECT, INFRA_REJECT, null]
-      reasonCode:
-        type: [string, 'null']
-        minLength: 1
-        maxLength: 100
-      inputCategories:
-        type: array
-        items:
-          type: string
-          enum: [SQL_LIKE, TYPE_MISMATCH, UNKNOWN_FIELD, QUANTITY_OUT_OF_RANGE]
-        minItems: 0
-        maxItems: 4
-        uniqueItems: true
-      downstreamInvoked:
-        type: [boolean, 'null']
-      evaluationStatus:
-        type: string
-        enum: [EVALUATED, SKIPPED, NOT_APPLICABLE, NOT_REACHED, MISSING_CONTEXT, ERROR]
-      returnedProductIds:
-        type: [array, 'null']
-        items: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991}
-        minItems: 0
-        maxItems: 100
-      containsUnpublishedProduct:
-        type: [boolean, 'null']
-    required: []
-    additionalProperties: false
-    description: Только наблюдаемые факты; неизвестные значения опускаются или null.
-  LogEvent:
-    title: LogEvent
-    type: object
-    properties:
-      eventId: {type: string, format: uuid}
       sequence: {type: integer, minimum: 1, maximum: 100000}
-      time: {type: string, format: date-time, pattern: Z$}
-      eventType:
-        type: string
-        enum: [lab.http.request.started.v1, lab.http.request.completed.v1, lab.api.request.started.v1, lab.api.request.completed.v1,
-          lab.policy.evaluated.v1, lab.auth.attempted.v1, lab.object.accessed.v1, lab.operation.completed.v1,
-          lab.input.observed.v1]
       requestId: {type: string, format: uuid}
-      actorId:
-        type: [integer, 'null']
-        format: int64
-        minimum: 1
-        maximum: 9007199254740991
-      sourceKey: {type: string, minLength: 1, maxLength: 128}
-      http:
-        type: object
-        properties:
-          method: {type: string, minLength: 1, maxLength: 32, pattern: '^[A-Z][A-Z0-9!#$%&''*+.^_`|~-]*$'}
-          route: {type: string, minLength: 1, maxLength: 200, pattern: ^/}
-          status:
-            type: [integer, 'null']
-            minimum: 100
-            maximum: 599
-        required: [method, route, status]
-        additionalProperties: false
-      facts: {$ref: '#/$defs/LogFacts'}
-    required: [eventId, sequence, time, eventType, requestId, actorId, sourceKey, http, facts]
+      time: {type: string, format: date-time}
+      remote_addr: {type: string, minLength: 2, maxLength: 45}
+      user: {type: [integer, 'null'], format: int64, minimum: 1, maximum: 9007199254740991}
+      method: {type: string, minLength: 1, maxLength: 32, pattern: '^[A-Z][A-Z0-9!#$%&''*+.^_`|~-]*$'}
+      path: {type: string, minLength: 1, maxLength: 8192, pattern: ^/.*$}
+      route: {type: [string, 'null'], minLength: 1, maxLength: 200, pattern: ^/.*$}
+      status: {type: integer, minimum: 100, maximum: 599}
+      bytes: {type: integer, format: int64, minimum: 0}
+      request_time: {type: number, format: double, minimum: 0}
+      user_agent: {type: [string, 'null'], maxLength: 1024}
+      req_hash: {type: [string, 'null'], minLength: 64, maxLength: 64, pattern: '^[0-9a-f]{64}$'}
+    required: [sequence, requestId, time, remote_addr, user, method, path, route, status, bytes, request_time, user_agent,
+      req_hash]
     additionalProperties: false
   LogBatch:
     title: LogBatch
     type: object
     properties:
       producer: {$ref: '#/$defs/Producer'}
-      events:
+      entries:
         type: array
-        items: {$ref: '#/$defs/LogEvent'}
+        items: {$ref: '#/$defs/AccessLog'}
         minItems: 1
         maxItems: 100
-    required: [producer, events]
-    additionalProperties: false
-  LogBatchAck:
-    title: LogBatchAck
-    type: object
-    properties:
-      accepted: {type: integer, minimum: 0, maximum: 100}
-      duplicates: {type: integer, minimum: 0, maximum: 100}
-    required: [accepted, duplicates]
+    required: [producer, entries]
     additionalProperties: false

@@ -41,7 +41,7 @@ paths:
     - {$ref: '#/components/parameters/runId'}
     post:
       operationId: closeRuntime
-      description: Закрыть приём, дождаться операций и terminal logs. Повтор безопасен.
+      description: Закрыть приём, дождаться операций и итоговых access-логов. Повтор безопасен.
       responses:
         '202': {$ref: '#/components/responses/RuntimeStatus'}
         '200': {$ref: '#/components/responses/RuntimeStatus'}

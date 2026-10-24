@@ -16,6 +16,7 @@
   <properties>
     <java.version>25</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <openapi-generator.version>7.26.0</openapi-generator.version>
   </properties>
   <modules>
     <module>apps/shop-api</module>
@@ -23,12 +24,44 @@
     <module>apps/lab-detector</module>
     <module>apps/lab-control</module>
   </modules>
+  <dependencies>
+    <dependency>
+      <groupId>jakarta.validation</groupId>
+      <artifactId>jakarta.validation-api</artifactId>
+    </dependency>
+  </dependencies>
   <build>
     <pluginManagement>
       <plugins>
         <plugin>
           <groupId>org.springframework.boot</groupId>
           <artifactId>spring-boot-maven-plugin</artifactId>
+        </plugin>
+        <plugin>
+          <groupId>org.openapitools</groupId>
+          <artifactId>openapi-generator-maven-plugin</artifactId>
+          <version>${openapi-generator.version}</version>
+          <configuration>
+            <generatorName>spring</generatorName>
+            <generateApiTests>false</generateApiTests>
+            <generateModelTests>false</generateModelTests>
+            <generateApiDocumentation>false</generateApiDocumentation>
+            <generateModelDocumentation>false</generateModelDocumentation>
+            <cleanupOutput>true</cleanupOutput>
+            <generateSupportingFiles>false</generateSupportingFiles>
+            <configOptions>
+              <interfaceOnly>true</interfaceOnly>
+              <skipDefaultInterface>true</skipDefaultInterface>
+              <useTags>true</useTags>
+              <requestMappingMode>api_interface</requestMappingMode>
+              <useSpringBoot4>true</useSpringBoot4>
+              <useJackson3>true</useJackson3>
+              <openApiNullable>false</openApiNullable>
+              <annotationLibrary>none</annotationLibrary>
+              <documentationProvider>none</documentationProvider>
+              <hideGenerationTimestamp>true</hideGenerationTimestamp>
+            </configOptions>
+          </configuration>
         </plugin>
       </plugins>
     </pluginManagement>

@@ -2,7 +2,6 @@
   "trialId": "00000000-0000-4000-8000-000000000030",
   "seed": 42,
   "state": "COMPLETED",
-  "generatedAt": "2026-10-23T12:00:00Z",
   "runs": [
     {
       "runId": "00000000-0000-4000-8000-000000000020",
@@ -11,40 +10,27 @@
       "cases": [
         {
           "caseId": "BO-01",
+          "episodeId": "BO-01-episode",
           "family": "BOLA",
           "label": "ATTACK",
           "effect": "EFFECT_OBSERVED",
+          "detection": "DETECTED",
           "requestIds": [
             "00000000-0000-4000-8000-000000000010"
           ],
           "reason": "Возвращены чужие поля"
         }
       ],
-      "episodes": [
-        {
-          "episodeId": "BO-01-episode",
-          "family": "BOLA",
-          "label": "ATTACK",
-          "result": "DETECTED",
-          "matchedIncidentIds": [
-            "00000000-0000-4000-8000-000000000200"
-          ],
-          "requestIds": [
-            "00000000-0000-4000-8000-000000000010"
-          ]
-        }
-      ],
       "incidents": [
         {
           "incident": {
             "incidentId": "00000000-0000-4000-8000-000000000200",
-            "runId": "00000000-0000-4000-8000-000000000020",
             "family": "BOLA",
             "detectedAt": "2026-10-23T12:00:00Z",
             "requestIds": [
               "00000000-0000-4000-8000-000000000010"
             ],
-            "description": "Пользователь запросил чужой заказ; зафиксировано несовпадение владельца."
+            "description": "Подозрительные запросы к заказам; возможен перебор идентификаторов."
           },
           "verdict": "TRUE_POSITIVE",
           "matchedEpisodeIds": [
@@ -53,7 +39,6 @@
           "reason": "Реальная попытка доступа к чужому заказу; успех атаки оценивается отдельно."
         }
       ],
-      "analysisState": "COMPLETED",
       "error": null
     },
     {
@@ -63,40 +48,27 @@
       "cases": [
         {
           "caseId": "BO-01",
+          "episodeId": "BO-01-episode",
           "family": "BOLA",
           "label": "ATTACK",
           "effect": "EFFECT_NOT_OBSERVED",
+          "detection": "DETECTED",
           "requestIds": [
             "00000000-0000-4000-8000-000000000011"
           ],
           "reason": "404, чужие поля отсутствуют"
         }
       ],
-      "episodes": [
-        {
-          "episodeId": "BO-01-episode",
-          "family": "BOLA",
-          "label": "ATTACK",
-          "result": "DETECTED",
-          "matchedIncidentIds": [
-            "00000000-0000-4000-8000-000000000201"
-          ],
-          "requestIds": [
-            "00000000-0000-4000-8000-000000000011"
-          ]
-        }
-      ],
       "incidents": [
         {
           "incident": {
             "incidentId": "00000000-0000-4000-8000-000000000201",
-            "runId": "00000000-0000-4000-8000-000000000021",
             "family": "BOLA",
             "detectedAt": "2026-10-23T12:00:00Z",
             "requestIds": [
               "00000000-0000-4000-8000-000000000011"
             ],
-            "description": "Пользователь запросил чужой заказ; зафиксировано несовпадение владельца."
+            "description": "Подозрительные запросы к заказам; возможен перебор идентификаторов."
           },
           "verdict": "TRUE_POSITIVE",
           "matchedEpisodeIds": [
@@ -105,7 +77,6 @@
           "reason": "Реальная попытка доступа к чужому заказу; успех атаки оценивается отдельно."
         }
       ],
-      "analysisState": "COMPLETED",
       "error": null
     }
   ],

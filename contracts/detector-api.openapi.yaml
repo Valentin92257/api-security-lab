@@ -1,10 +1,10 @@
 openapi: 3.1.0
-info: {title: Detector, version: 1.0.0, description: Control управляет анализом; Shop/Gateway отправляют логи
-    токенами своей роли.}
+info: {title: Detector, version: 1.0.0, description: Control управляет анализом; Shop/Gateway отправляют логи токенами своей
+    роли.}
 servers:
 - {url: /internal/v1}
 security:
-- ServiceBearer: []
+- {ServiceBearer: []}
 paths:
   /runs/{runId}:
     parameters:
@@ -27,21 +27,28 @@ paths:
     - {$ref: '#/components/parameters/runId'}
     post:
       operationId: ingestLogs
-      description: ACK после хранения пачки. Повтор eventId/sequence/content безопасен; конфликт - 409.
+      description: >-
+        204 после сохранения всей пачки. ACCEPTING принимает новые записи;
+        FINISHING принимает только sequence в объявленных границах. После COMPLETED/FAILED
+        допустимы только уже сохранённые идентичные повторы. Конфликт содержания,
+        выход за границу или новая запись после завершения - 409; вся пачка отклоняется.
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: ./schemas/logs.yaml#/$defs/LogBatch}
       responses:
-        '200': {$ref: '#/components/responses/LogBatchAck'}
+        '204': {description: 'Все записи сохранены, включая уже принятые повторы.'}
         default: {$ref: '#/components/responses/Error'}
   /runs/{runId}/finish:
     parameters:
     - {$ref: '#/components/parameters/runId'}
     put:
       operationId: finishAnalysis
-      description: Ждать непрерывные 1..N обоих producers до deadlineAt; изменённый повтор - 409.
+      description: >-
+        Фиксирует границы и deadlineAt, ждёт непрерывные 1..N обоих producers.
+        Граница ниже уже сохранённого sequence или изменённый повтор - 409 без смены состояния.
+        Идентичный повтор возвращает текущее состояние. После COMPLETED логи и инциденты неизменяемы.
       requestBody:
         required: true
         content:
@@ -69,11 +76,6 @@ components:
       content:
         application/json:
           schema: {$ref: ./schemas/detector.yaml#/$defs/AnalysisStatus}
-      description: OK
-    LogBatchAck:
-      content:
-        application/json:
-          schema: {$ref: ./schemas/logs.yaml#/$defs/LogBatchAck}
       description: OK
     IncidentPage:
       content:

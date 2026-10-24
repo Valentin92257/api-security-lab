@@ -2,21 +2,9 @@ $schema: https://json-schema.org/draft/2020-12/schema
 $defs:
   Uuid: {type: string, format: uuid}
   Id: {type: integer, format: int64, minimum: 1, maximum: 9007199254740991}
-  Time: {type: string, format: date-time, pattern: Z$}
-  Mode:
-    type: string
-    enum: [VULNERABLE, PROTECTED]
-  Family:
-    type: string
-    enum: [CREDENTIAL_STUFFING, BOLA, REPLAY, INJECTION, BUSINESS_LOGIC]
-  Failure:
-    title: Failure
-    type: object
-    properties:
-      code: {type: string, minLength: 1, maxLength: 80, pattern: '^[A-Z][A-Z0-9_]*$'}
-      message: {type: string, minLength: 1, maxLength: 500}
-    required: [code, message]
-    additionalProperties: false
+  Time: {type: string, format: date-time}
+  Mode: {type: string, enum: [VULNERABLE, PROTECTED]}
+  Family: {type: string, enum: [CREDENTIAL_STUFFING, BOLA, REPLAY, INJECTION, BUSINESS_LOGIC]}
   Problem:
     title: Problem
     type: object

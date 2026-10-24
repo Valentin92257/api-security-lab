@@ -1,58 +1,35 @@
 {
   "producer": "SHOP",
-  "events": [
+  "entries": [
     {
-      "eventId": "00000000-0000-4000-8000-000000000101",
       "sequence": 1,
-      "time": "2026-10-23T12:00:00Z",
-      "eventType": "lab.api.request.started.v1",
       "requestId": "00000000-0000-4000-8000-000000000010",
-      "actorId": null,
-      "sourceKey": "source-1",
-      "http": {
-        "method": "GET",
-        "route": "/api/v1/orders/{orderId}",
-        "status": null
-      },
-      "facts": {}
+      "time": "2026-10-23T12:00:00Z",
+      "remote_addr": "192.0.2.10",
+      "user": 7,
+      "method": "GET",
+      "path": "/api/v1/orders/123",
+      "route": "/api/v1/orders/{orderId}",
+      "status": 404,
+      "bytes": 162,
+      "request_time": 0.012,
+      "user_agent": "lab-runner/1.0",
+      "req_hash": "c53e65d95e95336f65a5859bba83f890217ec18c32458ea800a3e1d65082f8da"
     },
     {
-      "eventId": "00000000-0000-4000-8000-000000000102",
       "sequence": 2,
+      "requestId": "00000000-0000-4000-8000-000000000012",
       "time": "2026-10-23T12:00:00Z",
-      "eventType": "lab.object.accessed.v1",
-      "requestId": "00000000-0000-4000-8000-000000000010",
-      "actorId": 7,
-      "sourceKey": "source-1",
-      "http": {
-        "method": "GET",
-        "route": "/api/v1/orders/{orderId}",
-        "status": 404
-      },
-      "facts": {
-        "resourceType": "ORDER",
-        "resourceId": 123,
-        "resourceOwnerId": 8,
-        "subjectMatchesOwner": false
-      }
-    },
-    {
-      "eventId": "00000000-0000-4000-8000-000000000103",
-      "sequence": 3,
-      "time": "2026-10-23T12:00:00Z",
-      "eventType": "lab.api.request.completed.v1",
-      "requestId": "00000000-0000-4000-8000-000000000010",
-      "actorId": 7,
-      "sourceKey": "source-1",
-      "http": {
-        "method": "GET",
-        "route": "/api/v1/orders/{orderId}",
-        "status": 404
-      },
-      "facts": {
-        "operationExecuted": false,
-        "stateChanged": false
-      }
+      "remote_addr": "192.0.2.10",
+      "user": 7,
+      "method": "GET",
+      "path": "/api/v1/orders/124",
+      "route": "/api/v1/orders/{orderId}",
+      "status": 404,
+      "bytes": 162,
+      "request_time": 0.012,
+      "user_agent": "lab-runner/1.0",
+      "req_hash": "896457ae412eafcb1d312d5524c5693dc32e287f93f1d9f8ff56e3373fa263dd"
     }
   ]
 }

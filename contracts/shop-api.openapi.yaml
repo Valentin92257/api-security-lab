@@ -1,6 +1,8 @@
 openapi: 3.1.0
 info: {title: Shop, version: 1.0.0, description: Общий API vulnerable/protected; JWT кроме register/login.
-    X-Request-Id возвращается в ответах.}
+    X-Request-Id возвращается в ответах. Ограничения схем обязательны в PROTECTED;
+    в VULNERABLE учебные нарушения quantity/quotedTotal наблюдаются без блокировки.
+    Общие DTO не включают Bean Validation; проверки режима выполняет реализация.}
 servers:
 - {url: 'http://lab-gateway:8081/api/v1', description: VULNERABLE}
 - {url: 'http://lab-gateway:8082/api/v1', description: PROTECTED}
@@ -9,10 +11,8 @@ security:
 paths:
   /auth/register:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     post:
       operationId: registerUser
       description: Создаёт пользователя и пустую корзину; занятые login/email - 409.
@@ -28,10 +28,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /auth/login:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     post:
       operationId: loginUser
       description: Неверные credentials - 401; ограничение Gateway - 429.
@@ -48,10 +46,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /users/{userId}:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     - {$ref: '#/components/parameters/userId'}
     get:
       operationId: getUser
@@ -62,10 +58,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /products:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     get:
       operationId: searchProducts
       description: Буквальный поиск q; только published, порядок id по возрастанию.
@@ -78,10 +72,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /cart:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     get:
       operationId: getCart
       responses:
@@ -89,10 +81,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /cart/items/{productId}:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     - {$ref: '#/components/parameters/productId'}
     put:
       operationId: setCartQuantity
@@ -107,10 +97,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /cart/coupon:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     put:
       operationId: selectCartCoupon
       description: Один купон без накопления скидок; расходуется при checkout.
@@ -124,10 +112,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /orders:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     post:
       operationId: checkoutOrder
       description: Тот же key/body - прежние 201/Order. Другой body или использованная revision - 409. Цену
@@ -145,10 +131,8 @@ paths:
         default: {$ref: '#/components/responses/Error'}
   /orders/{orderId}:
     parameters:
-    - {$ref: '#/components/parameters/XLabRunId'}
-    - {$ref: '#/components/parameters/XLabRunToken'}
-    - {$ref: '#/components/parameters/XLabSource'}
     - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
     - {$ref: '#/components/parameters/orderId'}
     get:
       operationId: getOrder
@@ -198,26 +182,16 @@ components:
         application/problem+json:
           schema: {$ref: ./schemas/common.yaml#/$defs/Problem}
   parameters:
-    XLabRunId:
-      name: X-Lab-Run-Id
-      in: header
-      schema: {type: string, format: uuid}
-      required: true
-    XLabRunToken:
-      name: X-Lab-Run-Token
-      in: header
-      schema: {type: string, minLength: 32, maxLength: 256}
-      required: true
-    XLabSource:
-      name: X-Lab-Source
-      in: header
-      schema: {type: string, minLength: 1, maxLength: 128}
-      required: true
     XRequestId:
       name: X-Request-Id
       in: header
       schema: {type: string, format: uuid}
       required: true
+    XForwardedFor:
+      name: X-Forwarded-For
+      in: header
+      description: Один IPv4/IPv6 виртуального клиента; только от доверенного отправителя.
+      schema: {type: string, minLength: 2, maxLength: 45}
     userId:
       name: userId
       in: path

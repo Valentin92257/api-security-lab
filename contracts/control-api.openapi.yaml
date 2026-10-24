@@ -1,9 +1,10 @@
 openapi: 3.1.0
-info: {title: Control, version: 1.0.0, description: Испытания и итоговые отчёты; отдельный operator Bearer.}
+info: {title: Control, version: 1.0.0, description: 'API дашборда: выбор семейств атак, запуск испытаний и итоговые отчёты.
+    Отдельный operator Bearer; испытание включает VULNERABLE и PROTECTED.'}
 servers:
 - {url: /control/v1}
 security:
-- OperatorBearer: []
+- {OperatorBearer: []}
 paths:
   /scenarios:
     get:
@@ -14,8 +15,8 @@ paths:
   /trials:
     post:
       operationId: startTrial
-      description: VULNERABLE затем PROTECTED. Повтор ключа/тела - существующий trial; конфликт/занятый слот
-        - 409.
+      description: Создать и сразу запустить VULNERABLE, затем PROTECTED. Без seed Control выбирает его и возвращает в trial.
+        Повтор ключа/тела - тот же trial; другой body или занятый слот - 409.
       parameters:
       - {$ref: '#/components/parameters/IdempotencyKey'}
       requestBody:
@@ -26,6 +27,7 @@ paths:
       responses:
         '202': {$ref: '#/components/responses/Trial'}
         '200': {$ref: '#/components/responses/Trial'}
+        '409': {$ref: '#/components/responses/Error'}
         default: {$ref: '#/components/responses/Error'}
     get:
       operationId: listTrials
@@ -40,6 +42,7 @@ paths:
     - {$ref: '#/components/parameters/trialId'}
     get:
       operationId: getTrial
+      description: Состояние испытания, общий прогресс и cleanupSafe; результаты обоих режимов доступны в отчёте.
       responses:
         '200': {$ref: '#/components/responses/Trial'}
         default: {$ref: '#/components/responses/Error'}
@@ -57,7 +60,8 @@ paths:
     - {$ref: '#/components/parameters/trialId'}
     get:
       operationId: getTrialReport
-      description: Итоговый отчёт с оценкой Control. Пока не готов - 409.
+      description: Общий отчёт двух режимов с оценкой Control; после отмены или ошибки - частичный. Пока отчёт не сохранён
+        - 409.
       responses:
         '200': {$ref: '#/components/responses/TrialReport'}
         '409': {$ref: '#/components/responses/Error'}
@@ -69,9 +73,10 @@ components:
         application/json:
           schema:
             type: array
-            items: {$ref: ./schemas/control.yaml#/$defs/ScenarioInfo}
+            items: {$ref: ./schemas/common.yaml#/$defs/Family}
             minItems: 5
             maxItems: 5
+            uniqueItems: true
       description: OK
     Trial:
       content:

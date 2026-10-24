@@ -1,162 +1,74 @@
 # Архитектура и эксплуатация
 
-## Компоненты
+Нормативные интерфейсы: [реестр контрактов](../contracts/README.md). Документ описывает целевую реализацию; готовность сервисов проверяется отдельно.
 
-Стенд состоит из четырёх Java-приложений. `shop-api` запускается дважды: vulnerable и protected имеют один нормативный HTTP-контракт и независимые данные. Четыре участника отвечают за API/данные, защиту, генератор и обнаружение/UI соответственно.
+## Компоненты
 
 | Приложение | Ответственность | Доступ к данным |
 |---|---|---|
-| `shop-api` × 2 | Auth, каталог, корзина, checkout, предметные проверки, структурированные JSONL-логи | Собственная shop DB; запись собственного security-log файла |
-| `lab-gateway` | Маршрутизация, JWT, политики, допуск запросов, аудит | Локальное состояние лимитов и запись собственного security-log файла |
-| `lab-detector` | Правила, окна, evidence и инциденты | Обезличенная проекция событий, собственное состояние и задания |
-| `lab-control` | Эксперименты, scenario-runner, сборщик логов, фикстуры, evaluator, UI и отчёты | Lab DB, readonly shop state, административный API подготовки данных |
+| shop-api × 2 | Auth, каталог, корзина, checkout и предметные проверки | Своя shop DB; отправка итоговых access-логов Detector |
+| lab-gateway | Два фиксированных входа, JWT, schema/login policies, допуск запросов | Локальные лимиты; отправка итоговых access-логов Detector |
+| lab-detector | Хранение access-логов, анализ и итоговые инциденты | Только собственное хранилище; без эталона и shop/control DB |
+| lab-control | UI, испытания, Runner, подготовка БД, evaluator и отчёты | Своё состояние, fixture-доступ к shop DB и readonly данные для evaluator |
 
 ```text
-Оператор -> control [scenario-runner] -> gateway:8081 -> shop-vulnerable -> shop_vulnerable DB
-                            \-> gateway:8082 -> shop-protected  -> shop_protected DB
-gateway / shop -> JSONL files -> log-ingestor (control) -> audit -> safe view -> detector
-control / evaluator  -> steps + audit + readonly shop state + incidents -> report
-все приложения      -> локальные логи, метрики и traces
+operator -> control [Runner + Fixture + Evaluator]
+                 -> gateway:8081 -> shop-vulnerable -> shop_vulnerable DB
+                 -> gateway:8082 -> shop-protected  -> shop_protected DB
+                       gateway / shop -> Detector API -> detector storage
+control -> Runtime API shop/gateway
+control -> Detector API -> итоговые incidents
+control: план + attempts + readonly shop state + incidents -> общий report
 ```
 
-Gateway выбирает backend по локальному входному порту. Пользовательские Host, query и заголовки не меняют цель. Оператор управляет стендом через control; runner использует только встроенные targets.
+Один Gateway направляет порт 8081 в vulnerable, 8082 в protected. Host, query и клиентские заголовки не меняют backend. Прогоны выполняются последовательно: vulnerable, затем protected. Конкурентность допустима внутри одного прогона.
 
 ## Стек и структура
 
-| Область | Выбор и обоснование |
-|---|---|
-| Язык/сборка | Java 25, Maven внутри Docker, multi-module; ограниченный I/O на virtual threads |
-| Приложения | Spring Boot 4.0.x, Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x; единая servlet-модель |
-| Хранение | PostgreSQL 17, Spring JDBC/JdbcClient, Flyway; явные SQL и транзакции |
-| Лимиты | Bucket4j in-memory в одном gateway; локальное потокобезопасное состояние с ограничением ключей и TTL |
-| Контракты | OpenAPI 3.1.0, JSON Schema, общие Java records/enums |
-| UI/наблюдаемость | Thymeleaf; OpenTelemetry и локальный Grafana LGTM |
-| Проверки | JUnit, Testcontainers с PostgreSQL, jqwik для последовательностей операций |
-
-Точные patch-версии, локальный limiter, OpenAPI validator и digest образов фиксируются после сборочного spike. Проверяются required/type/bounds/additionalProperties, nullable, local refs, query и повторное чтение body. Контракт использует один относительный server `/api/v1`. Непроверенная поддержка отдельных OpenAPI keywords не принимается за готовую валидацию; `latest` в сборке и Compose не используется.
+Java 25, Maven Wrapper, Spring Boot 4, Spring MVC, PostgreSQL, Spring JDBC/Flyway; локальный limiter в одном Gateway. Для UI предусмотрен Thymeleaf, для технической наблюдаемости - OpenTelemetry/LGTM. Версии генератора и уже подключённых зависимостей фиксируются в pom.xml. Остальные библиотеки и контейнеры проверяются при реализации.
 
 ```text
-apps/{shop-api,lab-gateway,lab-detector,lab-control}/
-apps/lab-control/src/main/java/lab/control/runner/  # пакет Р3 внутри приложения lab-control
-libs/{lab-contracts,lab-observability,lab-test-support}/
-contracts/{shop-api,control-api,lab-admin-api}.yaml
-contracts/{security-event,incident,experiment}.schema.json
-config/{policies,rules,scenarios}/
-db/{shop/common,shop/protected,lab}/
-fixtures/
-compose.yaml
-tests/acceptance/
+apps/{shop-api,lab-gateway,lab-detector,lab-control}/pom.xml
+apps/<модуль>/target/generated-sources/<контракт>/src/main/java/
+contracts/{shop-api,control-api,detector-api,runtime-api}.openapi.yaml
+contracts/schemas/*.yaml
+contracts/examples/*.json
 docs/
-pom.xml
 ```
 
-Приложения не зависят от классов друг друга. Общие библиотеки содержат wire contracts и технические соглашения, но не business/evaluator logic. Detector не подключает fixtures и scenario catalog. Уязвимые адаптеры изолированы в пакете `lab.shop.vulnerable`, защищённые — в `lab.shop.secured` и выбираются конфигурацией запуска, а не запросом клиента.
-
-## Встроенное исполнение сценариев
-
-`apps/lab-control/src/main/java/lab/control/runner` — пакет с plan/scenarios/execution и портами `ScenarioHttpClient`, `AttemptSink` внутри lab-control. Р3 владеет этим пакетом и его тестами, Р4 — orchestration/UI/evaluator и адаптером сохранения результатов. Роли команды сохраняются.
-
-Orchestrator вызывает `prepare(plan)`, затем `start(prepared, cancellationToken, attemptSink)` и получает completion handle. `cancel()` прекращает новые шаги и отменяет ожидания клиента; после завершения всех задач формируется step manifest. HTTP-запрос оператора возвращает 202 сразу после принятия запуска. Отдельных runner HTTP endpoints, worker listener, heartbeat и lease нет.
-
-На MVP разрешён один активный run. Единственный экземпляр control атомарно резервирует слот исполнения до PREPARING; конкурентный start получает 409. Слот освобождается только после завершения и подтверждения cleanupSafe; INCONCLUSIVE с cleanupSafe=false блокирует новый запуск до безопасной подготовки. Runner использует отдельный executor, semaphore для concurrency, ограниченные очереди и размеры body/results, deadline всего плана и timeout запроса. Он не занимает servlet-потоки UI, общий ForkJoinPool и executor сборщика логов. AttemptSink сохраняет bounded batches в control.attempts; при ошибке или переполнении новые шаги прекращаются. Final manifest фиксируется только после сохранения всех результатов. Cancel/deadline проверяются также перед каждой попыткой и retry; отмена клиентского Future не доказывает завершения SQL в shop.
-
-У модулей общая JVM, heap и CPU: отдельный executor снижает взаимное влияние, но не изолирует OOM/GC/падения. При отказе control опыт INCONCLUSIVE без resume. Run deadline действует независимо от открытой вкладки UI; логирование и управление остановкой имеют отдельные рабочие ресурсы. Межмодульные зависимости проверяются ArchUnit/правилами сборки, сценарии поставляются только доверенным кодом репозитория.
+Интерфейсы и DTO генерируются из OpenAPI в соответствующий модуль. Генерация не создаёт реализацию endpoint. Runner, Fixture и Evaluator - модули Control; отдельные HTTP-сервисы для них не нужны. [Внутренние порты](../contracts/modules.md).
 
 ## Данные и полномочия
 
-Один PostgreSQL обслуживает три БД: `shop_vulnerable`, `shop_protected`, `lab`. В lab разделены схемы `audit` (потоки логов и разобранные события), `control` (runs, steps, labels, oracle, reports) и `detection` (jobs, markers, rule state, incidents). Это логическая изоляция; отказ общего сервера затрагивает все три БД.
+Два Shop используют независимые бизнес-БД с одинаковым набором таблиц. Один PostgreSQL может также хранить данные Control и Detector при раздельных владельцах и правах. Общего SQL-интерфейса передачи логов или команд между ними нет; внутренние таблицы не фиксируются OpenAPI.
 
-| Роль | Разрешённый доступ |
-|---|---|
-| `shop_*_app` | DML собственной DB; без DDL/TRUNCATE |
-| `catalog_reader_*` | Только SELECT каталога; отдельный datasource, включая уязвимый адаптер |
-| `lab_log_ingestor` | Модуль control: чтение зарегистрированных JSONL, добавление audit events и продвижение log cursor; без изменения исходных событий |
-| `detector_app` | SELECT безопасной view; свои jobs/state/incidents/markers |
-| `control_app` | Control schema, raw audit, чтение incidents, запись detector jobs |
-| `evaluator_reader_*` | Readonly бизнес-состояние без password_hash |
-| `fixture_admin_*` | Подготовка своей DB при закрытом admission и правильном epoch |
-| `migration_owner` | DDL в init job; credential отсутствует в обычных приложениях |
+- Shop имеет DML своей БД, без DDL/TRUNCATE; каталог читается ограниченным datasource.
+- Fixture-модуль Control готовит БД напрямую при закрытых runtimes. Отдельного API наполнения БД нет.
+- Evaluator использует readonly бизнес-состояние без password_hash и приватный исходный snapshot.
+- Detector хранит принятые логи и инциденты у себя. Его runtime-доступ не включает фикстуры, plan/labels, ответы Runner, режимы и shop DB.
+- Токены Shop/Gateway в Detector разрешают запись только своего producer. Токен Control - подготовку, завершение анализа и чтение.
+- Миграционная роль отделена от обычных приложений. SQL магазина: [data/README.md](data/README.md).
 
-Источник события определяется зарегистрированным файлом и process instance ID, а не входным HTTP-заголовком. Gateway/shop не имеют SQL-credentials lab DB. Collector — модуль lab-control с отдельной SQL-ролью lab_log_ingestor. Detector не читает файлы, raw audit, control и shop DB: ему доступна только whitelist-view. Запреты проверяются под runtime SQL-ролями.
+## Сети и доверенные заголовки
 
-Заказ, поля идемпотентности, корзина и купон фиксируются одной SQL-транзакцией. После успешного commit API пишет JSONL-событие результата. Эта запись не атомарна с SQL; надежность при падениях исключена из MVP. Состояние политик хранится в памяти единственного gateway. Collector индексирует прочитанные логи в lab DB; broker не нужен.
+Сценарный HTTP проходит Control → Gateway → Shop. Control отдельно обращается к служебным Runtime/Detector API и БД для Fixture/Evaluator. Shop/Gateway имеют сетевой доступ к Detector API. Открываются только UI/Grafana на loopback; ручной вход Gateway возможен отдельной локальной конфигурацией. Backend, БД и служебные API наружу не публикуются.
 
-## Сети и служебные интерфейсы
+X-Request-Id создаёт Runner до отправки, Gateway сохраняет его в Shop и ответе. Каждый retry получает новый UUID. X-Forwarded-For содержит один IP виртуального клиента: Gateway доверяет ему только от генератора, Shop - только от Gateway. Этот IP используется в логах и rate limiter. Доверенные адреса задаются конфигурацией развёртывания. X-Lab-заголовков нет; runId берётся из активного Runtime-контекста.
 
-| Internal network | Участники | Назначение |
-|---|---|---|
-| `lab-traffic` | control, gateway, LGTM collector | Сценарный HTTP и telemetry |
-| `shop-backend` | gateway, оба shop | Бизнес-трафик |
-| `shop-admin` | control, gateway, оба shop | Подготовка, admission, завершение |
-| `lab-data` | control, detector, shop, PostgreSQL | SQL; gateway к этой сети не подключается |
-| `lab-observe` | control, detector, gateway, shop, LGTM | Логи, traces, metrics |
+Служебный Bearer, operator Bearer и JWT пользователя разделены. Runtime API не проксируется через бизнес-вход. ScenarioHttpClient разрешает только фиксированные входы Gateway и бизнес-маршруты, без произвольного origin, proxy и redirects. Внешний egress контейнера Control закрывается и проверяется отдельно; Docker socket и privileged-режим не требуются. У модулей одна JVM: ограничения зависимостей Runner являются границей доверенного кода, а не отдельным сетевым sandbox.
 
-Только UI и Grafana публикуются на `127.0.0.1`. Ручной доступ к gateway возможен отдельным opt-in profile также через loopback. Backend, БД и management не публикуются. Соседи в bridge-сети могут обращаться к listener, поэтому нужны одновременно правильный bind address и проверка полномочий endpoint.
+## Исполнение, доставка и завершение
 
-Control вызывает runner как Java-модуль, без отдельного listener. Gateway/shop management используют административный scope; `/internal/**` не проксируется через бизнес-вход. Подготовка и закрытие защищены epoch, чтобы задержанная команда не изменила следующий run.
+Control атомарно резервирует один слот испытания. Runner работает в отдельном executor с конечными concurrency, timeout и deadline; UI не ждёт его окончания в servlet-потоке. AttemptSink сохраняет результаты до completion Runner. Потеря UI-вкладки не останавливает серверную работу.
 
-Control не имеет внешнего egress, proxy env, Docker socket или privileged-режима. ScenarioHttpClient принимает target enum и route из каталога, а не произвольный URL; redirects/proxy отключены. Сценарный модуль не импортирует JDBC, admin/evaluator/log-reader adapters и не получает их через интерфейсы. Это архитектурная граница доверенного кода, не sandbox: JVM control имеет доступ к lab-data, shop-admin и log mounts. Нельзя утверждать, что контейнерная сеть запрещает встроенному runner доступ к этим ресурсам. Тесты отдельно проверяют сетевой запрет внешнего egress и ограничения ScenarioHttpClient на внутренние цели.
+Каждый producer создаёт одну итоговую access-запись на запрос. Доставка в Detector - HTTP/JSON LogBatch с producer и entries; ACK подтверждает хранение. Сетевые retries сохраняют sequence и содержимое. Реализация очереди/буфера локальна producer; Control не читает файлы логов. Технические логи могут дополнительно уходить в LGTM.
 
-## Файлы событий и сборщик
+Control закрывает Gateway и ждёт CLOSED, затем закрывает Shop. CLOSED означает inFlight=0 и окончательный lastSequence. Эти границы передаются Detector через finish; Detector проверяет непрерывные 1..N обоих producers и возвращает COMPLETED после анализа. Control сверяет observedRequestIds с attempts, выполняет evaluator и сохраняет report. После этого возможна новая подготовка данных.
 
-Каждый gateway/shop получает собственный writable named volume для security-логов; control монтирует эти тома read-only. Один файл на producer/run: `<runId>/<streamId>.jsonl`. Control назначает путь, producer создаёт файл в своём writable volume; пользовательский запрос не выбирает файл. Detector не получает эти тома; сценарному модулю control не передаётся интерфейс чтения файлов, Docker socket не используется. Внутри control модуль log-ingestor читает файлы независимо от UI и сохраняет проверенные события в audit. Console/технические логи и traces могут дополнительно идти в LGTM; detector не зависит от поиска по Loki/Grafana.
+Перезапуск instanceId, потеря записи или deadline дают INCONCLUSIVE. Client timeout не доказывает остановку SQL. При cleanupSafe=false сброс данных и новый запуск запрещены. Бизнес-commit не откатывается из-за последующей ошибки логирования. Resume старого опыта не предусмотрен.
 
-## Запуск и конфигурация
+## Запуск
 
-Базовый Compose: пять Java-контейнеров (control, gateway, detector и два shop), PostgreSQL и LGTM — семь постоянно работающих контейнеров. Init jobs создают локальные ключи, выполняют миграции и seed. Планируемая команда запуска:
+Целевая локальная конфигурация: пять Java-процессов, PostgreSQL и LGTM. Compose, миграции, bootstrap ключей и проверки готовности реализуются отдельно; команды запуска не считаются работающими до появления соответствующих файлов. Секреты генерируются локально, в Git попадают только placeholders.
 
-```sh
-docker compose up --build
-```
-
-Readiness означает готовность профильных зависимостей. Ключи JWT, operator/admin/run credentials и HMAC redaction генерируются локально; в git только `.env.example` с placeholders. Образы, versions и config snapshots фиксируются. Ограничиваются body/response, число steps/events, concurrency, очереди, DB pool, длительность и диск. Параметры калибруются пилотом и сохраняются до запуска измерения.
-
-Цель cold start — готовность за 10 минут на документированной машине с указанной сетью. Измерение включает загрузки; тёплый запуск записывается отдельно. Команда и целевое время описывают требуемую реализацию, а не уже выполненный benchmark.
-
-## Допущение о сбоях
-
-MVP измеряет защиту при непрерывной работе процессов и хранилищ. Восстановление прерванного эксперимента не реализуется. Падение/перезапуск компонента, ошибка записи/разбора лога или нарушение протокола доставки делает run INCONCLUSIVE. Выполненные бизнес-транзакции при этом не отменяются. После сбоя стенд перезапускают, фикстуры пересоздают и запускают новый run; старый не продолжается. Незавершенные runs при старте control помечаются INCONCLUSIVE.
-
-Нормальные конкурентные запросы, задержки обработки, отказы бизнес-правил и HTTP-timeout при живом сервере остаются частью испытаний. Для них сохраняются транзакции, идемпотентность, ожидание завершения in-flight операций и обработка всех логов. Отсутствие падений не означает синхронной доставки последнего события.
-
-## Завершение и очистка
-
-Штатный порядок: stop runner → close admission gateway/shop → дождаться in-flight=0 в живых процессах → flush и STREAM_END в каждом файле → collector DRAINED → detector CLOSE/ACK → readonly oracle и отчет → reset. Счетчик in-flight уменьшается после записи terminal log. PROCESS instance ID и health проверяются до/после ожидания: после перезапуска счетчик не используется как доказательство завершения старого run.
-
-До завершения отчета логи не ротируются/не обрезаются. Ошибка записи, незавершенная строка на deadline, пропуск seq, смена process ID, отсутствие STREAM_END/ACK или превышение deadline дают INCONCLUSIVE. Нельзя подменять ожидание sleep фиксированной длины. Для недоказанно завершившейся работы cleanupSafe=false; обычный reset запрещен, нужен полный перезапуск стенда и новая фикстура.
-
-Контрольные метрики: log-ingest lag, detector lag, parse errors, seq gaps, открытые запросы и completeness. Security-логи не семплируются. Пароли, bearer, cookies и исходные idempotency keys не записываются ни в security-log, ни в HTTP-debug.
-
-## Архитектурные решения
-
-Отдельный detector изолирует правила от приватных labels/эталона. Control объединяет UI, runner, сборщик логов и evaluator, чтобы не добавлять приложение ради доставки. Shop использует общие API-контроллеры и отдельные реализации secured/vulnerable в двух профилях; gateway применяет внешние политики, shop — предметные ограничения. SQL обеспечивает корректность бизнес-эффекта, JSONL — наблюдаемость. Мы сознательно не обещаем сохранность события при падении между commit и записью лога.
-
-Правильность детектора оценивает независимый evaluator по плану, response evidence и readonly состоянию. HTTP-отказ или incident не равны результату атаки. Единый контракт логирования — требование к подключаемому API; без него внутренние бизнес-факты недоступны детектору.
-
-## Исходники модели данных
-
-В docs/data находятся начальные SQL, DBML/Mermaid и подробный ER HTML. SQL задаёт физическую схему; DBML, ER и словари полей документов 02/04 поддерживаются вместе с ним. В shop 7 таблиц, в lab 12; число физических таблиц трех баз — 26 (7×2+12). Protected constraints применяются только к защищённой shop DB. Python-генератора нет.
-
-Начальные SQL не подменяют транзакционный Java-код, проверку источников логов и bootstrap всех runtime-ролей. В docs/api-security-lab.html сохраняются 12 концептуальных схем; data/er.html показывает 8 подробных фрагментов реальной модели.
-
-## Реализации магазина
-
-Один образ shop-api запускается в двух контейнерах. Профиль `protected` выбирает
-`lab.shop.secured`, профиль `vulnerable` — `lab.shop.vulnerable`.
-Название пакета `secured` используется потому, что `protected` — ключевое слово Java.
-
-```text
-lab.shop
-├── api           общие контроллеры и DTO
-├── application   интерфейсы операций
-├── secured       защищённые реализации
-└── vulnerable    намеренно уязвимые реализации
-```
-
-Без профиля магазина или с обоими профилями запуск завершается ошибкой.
-Дополнительные профили, например `test`, допустимы. Клиент не выбирает реализацию.
-Контроллеры зависят от интерфейсов application; secured/vulnerable не вызывают друг друга.
-Проверки владельца, SQL, checkout и идемпотентность реализуются отдельно в каждом варианте.
-Сейчас созданы структура, выбор варианта и проверки запуска; бизнес-операций ещё нет.
-`ShopImplementation.mode()` обозначает вариант, а не наличие работающей защиты.
-`/health` предоставляет Actuator; тесты охватывают оба профиля и неверные конфигурации.
+Ограничиваются размеры HTTP/логов, число steps, concurrency, очередь доставки, память limiter, DB pool и длительность. Принятые лимиты и параметры правил фиксируются перед измерением. Числовые требования к производительности подтверждаются измерениями, а не самим описанием.

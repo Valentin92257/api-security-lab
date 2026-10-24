@@ -4,45 +4,37 @@ $defs:
     title: AnalysisStatus
     type: object
     properties:
-      runId: {type: string, format: uuid}
       instanceId: {type: string, format: uuid}
-      state:
-        type: string
-        enum: [ACCEPTING, FINISHING, COMPLETED, FAILED]
-      error:
-        anyOf:
-        - {$ref: './common.yaml#/$defs/Failure'}
-        - {type: 'null'}
+      state: {type: string, enum: [ACCEPTING, FINISHING, COMPLETED, FAILED]}
+      error: {type: [string, 'null'], maxLength: 500}
       observedRequestIds:
+        description: Уникальные requestId обоих producers после COMPLETED; до завершения null. Все Shop-запросы проходят через Gateway.
         type: [array, 'null']
         items: {type: string, format: uuid}
         minItems: 0
-        maxItems: 10000
+        maxItems: 100000
         uniqueItems: true
-    required: [runId, instanceId, state, error, observedRequestIds]
+    required: [instanceId, state, observedRequestIds]
     additionalProperties: false
   FinishAnalysisRequest:
     title: FinishAnalysisRequest
     type: object
     properties:
-      expectedLastSequence:
-        type: object
-        properties:
-          GATEWAY: {type: integer, minimum: 0, maximum: 100000}
-          SHOP: {type: integer, minimum: 0, maximum: 100000}
-        required: [GATEWAY, SHOP]
-        additionalProperties: false
-      deadlineAt: {type: string, format: date-time, pattern: Z$}
-    required: [expectedLastSequence, deadlineAt]
+      gatewayLastSequence: {type: integer, minimum: 0, maximum: 100000}
+      shopLastSequence: {type: integer, minimum: 0, maximum: 100000}
+      deadlineAt: {type: string, format: date-time}
+    required: [gatewayLastSequence, shopLastSequence, deadlineAt]
     additionalProperties: false
   Incident:
     title: Incident
     type: object
     properties:
       incidentId: {type: string, format: uuid}
-      runId: {type: string, format: uuid}
-      family: {$ref: './common.yaml#/$defs/Family'}
-      detectedAt: {type: string, format: date-time, pattern: Z$}
+      family:
+        anyOf:
+        - {$ref: ./common.yaml#/$defs/Family}
+        - {type: 'null'}
+      detectedAt: {type: string, format: date-time}
       requestIds:
         type: array
         items: {type: string, format: uuid}
@@ -50,7 +42,7 @@ $defs:
         maxItems: 10000
         uniqueItems: true
       description: {type: string, minLength: 1, maxLength: 1000}
-    required: [incidentId, runId, family, detectedAt, requestIds, description]
+    required: [incidentId, detectedAt, requestIds, description]
     additionalProperties: false
   IncidentPage:
     title: IncidentPage
@@ -61,8 +53,6 @@ $defs:
         items: {$ref: '#/$defs/Incident'}
         minItems: 0
         maxItems: 100
-      limit: {type: integer, minimum: 1, maximum: 100}
-      offset: {type: integer, format: int64, minimum: 0, maximum: 9007199254740991}
       total: {type: integer, format: int64, minimum: 0, maximum: 9007199254740991}
-    required: [items, limit, offset, total]
+    required: [items, total]
     additionalProperties: false
