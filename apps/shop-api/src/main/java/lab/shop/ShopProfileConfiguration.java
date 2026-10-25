@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
-/** Composition is fixed at startup and cannot be selected by an HTTP request. */
 @Configuration(proxyBeanMethods = false)
 public class ShopProfileConfiguration {
     @Bean
