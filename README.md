@@ -18,6 +18,7 @@ curl --fail http://127.0.0.1:8080/health
 только в build-stage Dockerfile, тесты выполняются при сборке. Локальные Maven/JDK
 и Maven Wrapper не нужны. `pom.xml` остаются конфигурацией сборки внутри Docker.
 Образ сборки — [Maven 3.9.11 / Temurin 25](https://hub.docker.com/_/maven).
+Runtime всех сервисов — `eclipse-temurin:25-jre-alpine`; `curl` для healthcheck устанавливается через `apk`.
 
 ```sh
 docker compose ps
