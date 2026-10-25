@@ -25,7 +25,7 @@ Gateway выбирает backend по локальному входному по
 
 | Область | Выбор и обоснование |
 |---|---|
-| Язык/сборка | Java 25, Maven Wrapper, multi-module; ограниченный I/O на virtual threads |
+| Язык/сборка | Java 25, Maven внутри Docker, multi-module; ограниченный I/O на virtual threads |
 | Приложения | Spring Boot 4.0.x, Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x; единая servlet-модель |
 | Хранение | PostgreSQL 17, Spring JDBC/JdbcClient, Flyway; явные SQL и транзакции |
 | Лимиты | Bucket4j in-memory в одном gateway; локальное потокобезопасное состояние с ограничением ключей и TTL |
@@ -37,14 +37,14 @@ Gateway выбирает backend по локальному входному по
 
 ```text
 apps/{shop-api,lab-gateway,lab-detector,lab-control}/
-modules/scenario-runner/  # библиотека Р3, подключается только к lab-control
+apps/lab-control/src/main/java/lab/control/runner/  # пакет Р3 внутри приложения lab-control
 libs/{lab-contracts,lab-observability,lab-test-support}/
 contracts/{shop-api,control-api,lab-admin-api}.yaml
 contracts/{security-event,incident,experiment}.schema.json
 config/{policies,rules,scenarios}/
 db/{shop/common,shop/protected,lab}/
 fixtures/
-infra/compose.yaml
+compose.yaml
 tests/acceptance/
 docs/
 pom.xml
@@ -54,7 +54,7 @@ pom.xml
 
 ## Встроенное исполнение сценариев
 
-`modules/scenario-runner` — библиотека с plan/scenarios/execution и портами `ScenarioHttpClient`, `AttemptSink`; единственное приложение-потребитель — lab-control. Р3 владеет библиотекой и её тестами, Р4 — orchestration/UI/evaluator и адаптером сохранения результатов. Роли команды сохраняются.
+`apps/lab-control/src/main/java/lab/control/runner` — пакет с plan/scenarios/execution и портами `ScenarioHttpClient`, `AttemptSink` внутри lab-control. Р3 владеет этим пакетом и его тестами, Р4 — orchestration/UI/evaluator и адаптером сохранения результатов. Роли команды сохраняются.
 
 Orchestrator вызывает `prepare(plan)`, затем `start(prepared, cancellationToken, attemptSink)` и получает completion handle. `cancel()` прекращает новые шаги и отменяет ожидания клиента; после завершения всех задач формируется step manifest. HTTP-запрос оператора возвращает 202 сразу после принятия запуска. Отдельных runner HTTP endpoints, worker listener, heartbeat и lease нет.
 
@@ -106,7 +106,7 @@ Control не имеет внешнего egress, proxy env, Docker socket или
 Базовый Compose: пять Java-контейнеров (control, gateway, detector и два shop), PostgreSQL и LGTM — семь постоянно работающих контейнеров. Init jobs создают локальные ключи, выполняют миграции и seed. Планируемая команда запуска:
 
 ```sh
-docker compose -f infra/compose.yaml up --build
+docker compose up --build
 ```
 
 Readiness означает готовность профильных зависимостей. Ключи JWT, operator/admin/run credentials и HMAC redaction генерируются локально; в git только `.env.example` с placeholders. Образы, versions и config snapshots фиксируются. Ограничиваются body/response, число steps/events, concurrency, очереди, DB pool, длительность и диск. Параметры калибруются пилотом и сохраняются до запуска измерения.
