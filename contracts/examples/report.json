@@ -1,0 +1,86 @@
+{
+  "trialId": "00000000-0000-4000-8000-000000000030",
+  "seed": 42,
+  "state": "COMPLETED",
+  "runs": [
+    {
+      "runId": "00000000-0000-4000-8000-000000000020",
+      "mode": "VULNERABLE",
+      "state": "COMPLETED",
+      "cases": [
+        {
+          "caseId": "BO-01",
+          "episodeId": "BO-01-episode",
+          "family": "BOLA",
+          "label": "ATTACK",
+          "effect": "EFFECT_OBSERVED",
+          "detection": "DETECTED",
+          "requestIds": [
+            "00000000-0000-4000-8000-000000000010"
+          ],
+          "reason": "Возвращены чужие поля"
+        }
+      ],
+      "incidents": [
+        {
+          "incident": {
+            "incidentId": "00000000-0000-4000-8000-000000000200",
+            "family": "BOLA",
+            "detectedAt": "2026-10-23T12:00:00Z",
+            "requestIds": [
+              "00000000-0000-4000-8000-000000000010"
+            ],
+            "description": "Подозрительные запросы к заказам; возможен перебор идентификаторов."
+          },
+          "verdict": "TRUE_POSITIVE",
+          "matchedEpisodeIds": [
+            "BO-01-episode"
+          ],
+          "reason": "Реальная попытка доступа к чужому заказу; успех атаки оценивается отдельно."
+        }
+      ],
+      "error": null
+    },
+    {
+      "runId": "00000000-0000-4000-8000-000000000021",
+      "mode": "PROTECTED",
+      "state": "COMPLETED",
+      "cases": [
+        {
+          "caseId": "BO-01",
+          "episodeId": "BO-01-episode",
+          "family": "BOLA",
+          "label": "ATTACK",
+          "effect": "EFFECT_NOT_OBSERVED",
+          "detection": "DETECTED",
+          "requestIds": [
+            "00000000-0000-4000-8000-000000000011"
+          ],
+          "reason": "404, чужие поля отсутствуют"
+        }
+      ],
+      "incidents": [
+        {
+          "incident": {
+            "incidentId": "00000000-0000-4000-8000-000000000201",
+            "family": "BOLA",
+            "detectedAt": "2026-10-23T12:00:00Z",
+            "requestIds": [
+              "00000000-0000-4000-8000-000000000011"
+            ],
+            "description": "Подозрительные запросы к заказам; возможен перебор идентификаторов."
+          },
+          "verdict": "TRUE_POSITIVE",
+          "matchedEpisodeIds": [
+            "BO-01-episode"
+          ],
+          "reason": "Реальная попытка доступа к чужому заказу; успех атаки оценивается отдельно."
+        }
+      ],
+      "error": null
+    }
+  ],
+  "families": [
+    "BOLA"
+  ]
+}

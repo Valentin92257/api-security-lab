@@ -1,0 +1,21 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  RunSetup:
+    title: RunSetup
+    type: object
+    properties:
+      mode: {$ref: ./common.yaml#/$defs/Mode}
+      businessTimeBase: {type: string, format: date-time}
+      deadlineAt: {type: string, format: date-time}
+    required: [mode, businessTimeBase, deadlineAt]
+    additionalProperties: false
+  RuntimeStatus:
+    title: RuntimeStatus
+    type: object
+    properties:
+      instanceId: {type: string, format: uuid}
+      state: {type: string, enum: [PREPARED, OPEN, CLOSING, CLOSED, ERROR]}
+      lastSequence: {type: integer, minimum: 0, maximum: 100000}
+      error: {type: [string, 'null'], maxLength: 500}
+    required: [instanceId, state, lastSequence]
+    additionalProperties: false

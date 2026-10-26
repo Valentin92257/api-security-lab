@@ -1,0 +1,26 @@
+name: Generated API code
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  generated-code:
+    runs-on: ubuntu-latest
+    container: maven:3.9.11-eclipse-temurin-25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Regenerate API code
+        run: mvn --batch-mode --no-transfer-progress clean generate-sources
+      - name: Check generated API code
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          generated=':(glob)apps/*/target/generated-sources/*/src/main/java/**/*.java'
+          if ! git diff --exit-code -- "$generated" ||
+             [ -n "$(git ls-files --others --exclude-standard -- "$generated")" ]; then
+            git status --short --untracked-files=all -- "$generated"
+            echo "::error::Сгенерированный код устарел. Повторите генерацию по инструкции в README и добавьте обновлённые Java-файлы в коммит."
+            exit 1
+          fi

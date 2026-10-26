@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info: {title: Control, version: 1.0.0, description: 'API дашборда: выбор семейств атак, запуск испытаний и итоговые отчёты.
+    Отдельный operator Bearer; испытание включает VULNERABLE и PROTECTED.'}
+servers:
+- {url: /control/v1}
+security:
+- {OperatorBearer: []}
+paths:
+  /scenarios:
+    get:
+      operationId: listScenarios
+      responses:
+        '200': {$ref: '#/components/responses/listScenarios'}
+        default: {$ref: '#/components/responses/Error'}
+  /trials:
+    post:
+      operationId: startTrial
+      description: Создать и сразу запустить VULNERABLE, затем PROTECTED. Без seed Control выбирает его и возвращает в trial.
+        Повтор ключа/тела - тот же trial; другой body или занятый слот - 409.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/control.yaml#/$defs/CreateTrialRequest}
+      responses:
+        '202': {$ref: '#/components/responses/Trial'}
+        '200': {$ref: '#/components/responses/Trial'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+    get:
+      operationId: listTrials
+      parameters:
+      - {$ref: '#/components/parameters/limit'}
+      - {$ref: '#/components/parameters/offset'}
+      responses:
+        '200': {$ref: '#/components/responses/TrialPage'}
+        default: {$ref: '#/components/responses/Error'}
+  /trials/{trialId}:
+    parameters:
+    - {$ref: '#/components/parameters/trialId'}
+    get:
+      operationId: getTrial
+      description: Состояние испытания, общий прогресс и cleanupSafe; результаты обоих режимов доступны в отчёте.
+      responses:
+        '200': {$ref: '#/components/responses/Trial'}
+        default: {$ref: '#/components/responses/Error'}
+  /trials/{trialId}/cancel:
+    parameters:
+    - {$ref: '#/components/parameters/trialId'}
+    post:
+      operationId: cancelTrial
+      description: Прекратить новые шаги, закрыть потоки, сохранить частичный отчёт. Повтор безопасен.
+      responses:
+        '202': {$ref: '#/components/responses/Trial'}
+        default: {$ref: '#/components/responses/Error'}
+  /trials/{trialId}/report:
+    parameters:
+    - {$ref: '#/components/parameters/trialId'}
+    get:
+      operationId: getTrialReport
+      description: Общий отчёт двух режимов с оценкой Control; после отмены или ошибки - частичный. Пока отчёт не сохранён
+        - 409.
+      responses:
+        '200': {$ref: '#/components/responses/TrialReport'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  responses:
+    listScenarios:
+      content:
+        application/json:
+          schema:
+            type: array
+            items: {$ref: ./schemas/common.yaml#/$defs/Family}
+            minItems: 5
+            maxItems: 5
+            uniqueItems: true
+      description: OK
+    Trial:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/control.yaml#/$defs/Trial}
+      description: OK
+    TrialPage:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/control.yaml#/$defs/TrialPage}
+      description: OK
+    TrialReport:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/control.yaml#/$defs/TrialReport}
+      description: OK
+    Error:
+      description: Ошибка
+      content:
+        application/problem+json:
+          schema: {$ref: ./schemas/common.yaml#/$defs/Problem}
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: {type: string, format: uuid}
+      required: true
+    limit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    offset:
+      name: offset
+      in: query
+      schema: {type: integer, minimum: 0, maximum: 100000, default: 0}
+    trialId:
+      name: trialId
+      in: path
+      schema: {type: string, format: uuid}
+      required: true
+  securitySchemes:
+    OperatorBearer: {type: http, scheme: bearer}

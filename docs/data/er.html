@@ -1,5 +1,5 @@
-<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Физическая модель: ER-представления</title><style>body{margin:32px;background:#f1f2f3;color:#28313a;font:16px system-ui}section{margin:40px 0}.scroll{overflow-x:auto}svg{min-width:1280px;width:100%;display:block}h1,h2{font-weight:600}p{max-width:1000px;line-height:1.5}a{color:#356986}</style><h1>Модель данных API Security Lab</h1><p>7 таблиц магазина и 12 таблиц лаборатории; две базы магазина дают 26 физических таблиц. В protected уникальны orders(cart_id, cart_revision) и orders(user_id, idempotency_key_hash). Каталог и условия купонов фиксированы на run; цена позиции сохраняется в order_items.unit_price.</p><p>ER-представления для разработчиков, doc-wide 1280×640. Показаны выбранные связи, без полного списка столбцов. Все таблицы и FK находятся в shop.dbml и lab.dbml; составные FK и ограничения — в SQL. Сплошные линии здесь обозначают физические FK. Отсутствующий FK между базами не подразумевается.</p>
-<section><h2>Эксперимент и исполнение</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-1-title data-er-1-desc"><title id="data-er-1-title">Эксперимент и исполнение</title><desc id="data-er-1-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Физическая модель: ER-представления</title><style>body{margin:32px;background:#f1f2f3;color:#28313a;font:16px system-ui}section{margin:40px 0}.scroll{overflow-x:auto}svg{min-width:1280px;width:100%;display:block}h1,h2{font-weight:600}p{max-width:1000px;line-height:1.5}a{color:#356986}</style><h1>Модель данных API Security Lab</h1><p>Семь таблиц в каждой Shop DB; protected добавляет уникальность orders(cart_id, cart_revision) и orders(user_id, idempotency_key_hash). Каталог и купоны фиксированы на run. Первые пять схем ниже сохранены как архив прежней lab-модели, последние три описывают актуальный магазин. Общие 12 lab-таблиц не задают текущий контракт Control/Detector.</p><p>ER-представления для разработчиков, doc-wide 1280×640. Показаны выбранные физические FK. Актуальная схема магазина: <a href="shop-schema.sql">SQL</a>, <a href="shop.dbml">DBML</a>, <a href="../02-api-and-data.md">словарь полей</a>. Прежние lab SQL/DBML и их ограничения находятся в <a href="legacy-lab/README.md">архиве</a>; соответствующие пять схем ниже не применять к текущей реализации.</p>
+<section><h2>Эксперимент и исполнение (архив)</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-1-title data-er-1-desc"><title id="data-er-1-title">Эксперимент и исполнение</title><desc id="data-er-1-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 576 120 H 704" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="580" y="93" width="28" height="18" fill="#f1f2f3"/><text x="594" y="106" text-anchor="middle" font-size="13">1</text>
 <rect x="672" y="93" width="28" height="18" fill="#f1f2f3"/><text x="686" y="106" text-anchor="middle" font-size="13">N</text>
@@ -32,8 +32,8 @@
 <text x="60" y="444" font-size="14" fill="#505963">job_id → control.scenario_jobs</text>
 <text x="60" y="468" font-size="14" fill="#505963">Всего полей: 9 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
-<section><h2>Отчет и источник доказательств</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-2-title data-er-2-desc"><title id="data-er-2-title">Отчет и источник доказательств</title><desc id="data-er-2-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<section><h2>Отчет и источник доказательств (архив)</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-2-title data-er-2-desc"><title id="data-er-2-title">Отчет и источник доказательств</title><desc id="data-er-2-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 704 120 H 576" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="672" y="93" width="28" height="18" fill="#f1f2f3"/><text x="686" y="106" text-anchor="middle" font-size="13">1</text>
 <rect x="580" y="93" width="28" height="18" fill="#f1f2f3"/><text x="594" y="106" text-anchor="middle" font-size="13">N</text>
@@ -68,8 +68,8 @@
 <text x="60" y="468" font-size="14" fill="#505963">run_id → control.runs</text>
 <text x="60" y="492" font-size="14" fill="#505963">Всего полей: 11 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
-<section><h2>Логи и проверка результата</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-3-title data-er-3-desc"><title id="data-er-3-title">Логи и проверка результата</title><desc id="data-er-3-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<section><h2>Логи и проверка результата (архив)</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-3-title data-er-3-desc"><title id="data-er-3-title">Логи и проверка результата</title><desc id="data-er-3-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 576 264 H 632 Q 640 264 640 256 V 112 Q 640 104 648 104 H 704" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="580" y="237" width="28" height="18" fill="#f1f2f3"/><text x="594" y="250" text-anchor="middle" font-size="13">N</text>
 <rect x="672" y="77" width="28" height="18" fill="#f1f2f3"/><text x="686" y="90" text-anchor="middle" font-size="13">1</text>
@@ -102,8 +102,8 @@
 <text x="724" y="516" font-size="14" fill="#505963">run_id → control.runs</text>
 <text x="724" y="540" font-size="14" fill="#505963">Всего полей: 11 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
-<section><h2>Завершение анализа</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-4-title data-er-4-desc"><title id="data-er-4-title">Завершение анализа</title><desc id="data-er-4-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<section><h2>Завершение анализа (архив)</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-4-title data-er-4-desc"><title id="data-er-4-title">Завершение анализа</title><desc id="data-er-4-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 576 264 H 632 Q 640 264 640 256 V 112 Q 640 104 648 104 H 704" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="580" y="237" width="28" height="18" fill="#f1f2f3"/><text x="594" y="250" text-anchor="middle" font-size="13">1</text>
 <rect x="672" y="77" width="28" height="18" fill="#f1f2f3"/><text x="686" y="90" text-anchor="middle" font-size="13">N</text>
@@ -136,8 +136,8 @@
 <text x="724" y="516" font-size="14" fill="#505963">partition_id → detection.partitions</text>
 <text x="724" y="540" font-size="14" fill="#505963">Всего полей: 24 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
-<section><h2>Состояние обработки логов</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-5-title data-er-5-desc"><title id="data-er-5-title">Состояние обработки логов</title><desc id="data-er-5-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<section><h2>Состояние обработки логов (архив)</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-5-title data-er-5-desc"><title id="data-er-5-title">Состояние обработки логов</title><desc id="data-er-5-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 576 264 H 632 Q 640 264 640 256 V 112 Q 640 104 648 104 H 704" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="580" y="237" width="28" height="18" fill="#f1f2f3"/><text x="594" y="250" text-anchor="middle" font-size="13">1</text>
 <rect x="672" y="77" width="28" height="18" fill="#f1f2f3"/><text x="686" y="90" text-anchor="middle" font-size="13">N</text>
@@ -170,7 +170,7 @@
 <text x="724" y="516" font-size="14" fill="#505963">partition_id → detection.partitions</text>
 <text x="724" y="540" font-size="14" fill="#505963">Всего полей: 24 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
 <section><h2>Корзина и версия расчета</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-6-title data-er-6-desc"><title id="data-er-6-title">Корзина и версия расчета</title><desc id="data-er-6-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 576 120 H 704" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="580" y="93" width="28" height="18" fill="#f1f2f3"/><text x="594" y="106" text-anchor="middle" font-size="13">1</text>
@@ -205,7 +205,7 @@
 <text x="60" y="420" font-size="14" fill="#505963">PK id</text>
 <text x="60" y="444" font-size="14" fill="#505963">Всего полей: 5 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
 <section><h2>Эффект оформления</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-7-title data-er-7-desc"><title id="data-er-7-title">Эффект оформления</title><desc id="data-er-7-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 576 120 H 704" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="580" y="93" width="28" height="18" fill="#f1f2f3"/><text x="594" y="106" text-anchor="middle" font-size="13">1</text>
@@ -228,7 +228,7 @@
 <text x="724" y="108" font-size="14" fill="#505963">PK id</text>
 <text x="724" y="132" font-size="14" fill="#505963">user_id → users</text>
 <text x="724" y="156" font-size="14" fill="#505963">cart_id → carts</text>
-<text x="724" y="180" font-size="14" fill="#505963">Всего полей: 13 · полный словарь в .md</text>
+<text x="724" y="180" font-size="14" fill="#505963">Всего полей: 12 · полный словарь в .md</text>
 </g>
 <g><rect x="704" y="352" width="536" height="160" rx="6" fill="#fafbfc" stroke="#bec5cb"/>
 <text x="724" y="388" font-size="20" font-weight="600">order_items</text>
@@ -242,7 +242,7 @@
 <text x="60" y="420" font-size="14" fill="#505963">PK id</text>
 <text x="60" y="444" font-size="14" fill="#505963">Всего полей: 5 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
 <section><h2>Учет купона</h2><div class="scroll"><svg viewBox="0 0 1280 640" font-family="Arial, Helvetica, sans-serif" role="img" aria-labelledby="data-er-8-title data-er-8-desc"><title id="data-er-8-title">Учет купона</title><desc id="data-er-8-desc">Выбранные сущности и внешние ключи подсистемы; полный состав приведен в словаре данных.</desc><rect width="1280" height="640" fill="#f1f2f3"/>
 <path d="M 704 120 H 576" fill="none" stroke="#78848e" stroke-width="1.5"/>
 <rect x="672" y="93" width="28" height="18" fill="#f1f2f3"/><text x="686" y="106" text-anchor="middle" font-size="13">?1</text>
@@ -263,7 +263,7 @@
 <text x="60" y="108" font-size="14" fill="#505963">PK id</text>
 <text x="60" y="132" font-size="14" fill="#505963">user_id → users</text>
 <text x="60" y="156" font-size="14" fill="#505963">cart_id → carts</text>
-<text x="60" y="180" font-size="14" fill="#505963">Всего полей: 13 · полный словарь в .md</text>
+<text x="60" y="180" font-size="14" fill="#505963">Всего полей: 12 · полный словарь в .md</text>
 </g>
 <g><rect x="704" y="352" width="536" height="160" rx="6" fill="#fafbfc" stroke="#bec5cb"/>
 <text x="724" y="388" font-size="20" font-weight="600">carts</text>
@@ -277,5 +277,5 @@
 <text x="60" y="420" font-size="14" fill="#505963">PK id</text>
 <text x="60" y="444" font-size="14" fill="#505963">Всего полей: 5 · полный словарь в .md</text>
 </g>
-<text x="40" y="592" font-size="14" fill="#505963">1 — ровно один; ?1 — ноль или один; N — ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
+<text x="40" y="592" font-size="14" fill="#505963">1 - ровно один; ?1 - ноль или один; N - ноль или более. Связи выбранные, не полный граф.</text></svg></div><p>Пропущенные связи и столбцы доступны в DBML и SQL; это выбранный фрагмент, а не полный граф базы.</p></section>
 </html>
