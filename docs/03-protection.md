@@ -43,7 +43,7 @@ Gateway формирует одну итоговую access-запись на з
 
 ## Сценарный трафик из control
 
-Генератор исполняется внутри lab-control, но все бизнес-запросы проходят через Gateway. ScenarioHttpClient выбирает только Gateway текущего режима. X-Request-Id связывает HTTP, attempts, логи и incidents; каждый retry получает новый UUID. runId задаётся Runtime API, X-Lab-заголовки не используются. Gateway проверяет OPEN и listener; клиентские Host/query/headers не выбирают backend. После CLOSED admission не открывается снова для того же runId.
+Генератор исполняется внутри lab-control, но все бизнес-запросы проходят через Gateway. HTTP-клиент генератора выбирает только Gateway текущего режима. X-Request-Id связывает HTTP, attempts, логи и incidents; каждый retry получает новый UUID. runId задаётся Runtime API, X-Lab-заголовки не используются. Gateway проверяет OPEN и listener; клиентские Host/query/headers не выбирают backend. После CLOSED admission не открывается снова для того же runId.
 
 Сценарный модуль не получает admin-клиент или SQL datasource через свои интерфейсы. Однако у общей JVM control такие полномочия есть: изоляция модуля проверяется архитектурными тестами, а не обещается сетевым sandbox. Внешний egress закрыт для всего контейнера control.
 

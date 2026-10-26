@@ -1,13 +1,13 @@
 # Реализация и приёмка
 
-Сейчас готовы [контракты](../contracts/README.md), Java-порты и генерация HTTP-интерфейсов/DTO. Ниже описан план реализации и приёмки, а не уже пройденные проверки.
+Сейчас готовы каркас четырёх приложений, Docker Compose/health-checks, [контракты](../contracts/README.md) и генерация HTTP-интерфейсов/DTO. Ниже описан план реализации и приёмки, а не уже пройденные проверки.
 
 ## Порядок разработки
 
 | Этап | Работа | Критерий выхода |
 |---|---|---|
 | 0. Контракты | Wire schemas, API/errors, версии зависимостей; spikes validator, локальный limiter, SQL grants | Примеры валидны, зависимости собираются, используемые OpenAPI keywords проверены |
-| 1. Skeleton | Maven modules, Compose, БД и роли, keys, health, logs/traces, служебные interfaces | Запрос через gateway; ScenarioHttpClient допускает только gateway, внешний egress control закрыт, detector не читает labels |
+| 1. Skeleton | Maven modules, Compose, БД и роли, keys, health, logs/traces, служебные interfaces | Запрос через gateway; HTTP-клиент генератора допускает только gateway, внешний egress control закрыт, detector не читает labels |
 | 2. Вертикальный BOLA | Fixture/users/orders, BO-01 и benign, access-log writer и доставка Detector, одно правило, oracle, UI/report | Доказана утечка vulnerable, protected сохраняет owner; есть обнаружение при 200 и JSON-отчёт |
 | 3. API и защита | Полный API, catalog canary, checkout/idempotency/coupon, schema/rate policies | Общие benign contract tests двух режимов; согласованные фикстуры и атомарный checkout |
 | 4. Все угрозы | CS/BO/RP/IJ/BL со всеми subcases, benign episodes, windows/incidents | Для каждого случая есть effect criterion, oracle, evidence и результат |
@@ -18,7 +18,7 @@
 
 ## Первая интеграция четырёх участников
 
-Р1 делает собственный/чужой order, данные Fixture, две стратегии owner-check, access-log writer и readonly данные для oracle. Р2 делает два listener, JWT, единые errors, access-log writer и сетевые проверки. Р3 делает BO-01/benign plans, Java prepare/start/cancel и AttemptSink, HTTP execution и step results. Р4 соединяет control states, приём логов Detector, правило, evaluator и минимальный UI/report.
+Р1 делает собственный/чужой order, данные Fixture, две стратегии owner-check, access-log writer и readonly данные для oracle. Р2 делает два listener, JWT, единые errors, access-log writer и сетевые проверки. Р3 делает BO-01/benign plans, подготовку, запуск и отмену сценариев, HTTP execution и сохранение результатов. Р4 соединяет control states, приём логов Detector, правило, evaluator и минимальный UI/report.
 
 Общие контракты имеют owner и совместное ревью: API - Р1+Р2; policy/access-log - Р2+Р4; plan/steps - Р3+Р4; oracle - Р1+Р3+Р4. Р4 не должен самостоятельно реализовывать все интеграционные адаптеры: fixture/oracle data предоставляет Р1, Runtime/lastSequence - Р2, модуль исполнения и cancellation - Р3.
 
@@ -37,11 +37,11 @@
 | Orchestration | Client timeout при продолжающемся SQL, deadline/cancellation и смена instanceId, missing sequence/attempt, finish ниже принятого sequence → 409, запрет reset до quiescence |
 | Исполнение/UI | Один активный trial; UI/cancel доступны при максимальном бюджете runner; отдельные executors; bounded results; остановка без новых retry после cancel/deadline |
 | Метрики/UI | N/A при нуле, incomplete не FN, ошибка family не меняет TP; detection согласован с IncidentAssessment и всеми cases episode, несколько incidents на episode, benign retry, escaping/явный Operator Bearer и отсутствие секретов |
-| Runtime | Внешний egress control закрыт; ScenarioHttpClient отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
+| Runtime | Внешний egress control закрыт; HTTP-клиент генератора отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
 
 SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для setQuantity/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
-Планируемый pipeline `./mvnw verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия - `./mvnw -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Это план будущего pipeline; сейчас CI проверяет генерацию через `./mvnw clean generate-sources`, а `./mvnw compile` собирает код; после появления реализации они должны совпадать с её фактическими Maven profiles.
+Планируемый pipeline внутри Maven-контейнера `mvn verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия - `mvn -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Это план будущего pipeline; текущие команды генерации и компиляции приведены в [README](../README.md#генерация-кода-из-openapi). CI проверяет воспроизводимость генерации; после появления реализации pipeline должен соответствовать её фактическим Maven profiles.
 
 Regression падает при нарушении обещанного protected-инварианта, неподтверждённом vulnerable baseline, несовместимых snapshots, потере обязательного evidence, нарушении изоляции или утечке секрета. Гонки проверяются серией; отсутствие воспроизведения в серии не выдаётся за успешную демонстрацию. CS-02 и другие объявленные остаточные риски оцениваются по их реальной гарантии.
 
@@ -80,8 +80,10 @@ Regression падает при нарушении обещанного protected
 
 Результат сдачи: исходный код в публичном репозитории, воспроизводимые команды, актуальные схемы и документация, тестовые отчёты, видео либо сценарий демонстрации и фактический вклад каждого участника. До выполнения проверок проектная спецификация не считается доказательством готового стенда.
 
-Проверки упрощённого checkout: новый key для оформленной revision возвращает CART_ALREADY_CHECKED_OUT; устаревшая неоформленная revision - CART_CHANGED. Успешный retry после очистки корзины и истечения купона возвращает прежний Order. Два разных key одной revision создают один заказ; vulnerable replay той же версии создаёт повторный эффект. Изменение замороженного каталога/условий купона приводит к INCONCLUSIVE, а не к корректному результату ASR.
+Проверки упрощённого checkout: новый key для оформленной revision возвращает CONFLICT; устаревшая неоформленная revision - CONFLICT. Успешный retry после очистки корзины и истечения купона возвращает прежний Order. Два разных key одной revision создают один заказ; vulnerable replay той же версии создаёт повторный эффект. Изменение замороженного каталога/условий купона приводит к INCONCLUSIVE, а не к корректному результату ASR.
 
 Минимальный контракт магазина содержит 9 операций. Проверить создание позиции через PUT, замену количества без инкремента и no-op без повышения revision; protected отклоняет quantity=0, vulnerable допускает учебный BL-02; общая генерация Shop API не запускает Bean Validation до выбора режима. Сценарии получают ID своих/чужих ресурсов из приватного manifest, подтверждают login чтением профиля по ID и не требуют регистрации или истории заказов. Исключённые маршруты дают 404, а неподдерживаемый метод существующего маршрута - 405.
 
-Регистрация: проверить 201 User и пустую Cart с revision=0, отсутствие password/hash в ответе и логах, вход созданного пользователя, 400 для невалидных полей и 409 LOGIN_TAKEN/EMAIL_TAKEN после нормализации. Гонка одинаковых регистраций создаёт ровно одного пользователя и одну корзину; ошибка создания корзины откатывает пользователя. Проверки одинаковы для vulnerable и protected.
+Регистрация: проверить 201 User и пустую Cart с revision=0, отсутствие password/hash в ответе и логах, вход созданного пользователя, 400 для невалидных полей и 409 CONFLICT после нормализации. Гонка одинаковых регистраций создаёт ровно одного пользователя и одну корзину; ошибка создания корзины откатывает пользователя. Проверки одинаковы для vulnerable и protected.
+
+Spring Boot подключает Bean Validation provider; у Shop API автоматический @Valid отключён для учебных режимов, Runtime/Control/Detector сохраняют валидацию.

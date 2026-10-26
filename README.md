@@ -15,8 +15,7 @@ curl --fail http://127.0.0.1:8080/health
 ```
 
 Сначала build создаёт общий образ shop для обоих контейнеров. Maven и JDK работают
-только в build-stage Dockerfile, тесты выполняются при сборке. Локальные Maven/JDK
-и Maven Wrapper не нужны. `pom.xml` остаются конфигурацией сборки внутри Docker.
+в build-stage Dockerfile, тесты выполняются при сборке. Локальные Maven/JDK не нужны. `pom.xml` остаются конфигурацией сборки внутри Docker.
 Образ сборки - [Maven 3.9.11 / Temurin 25](https://hub.docker.com/_/maven).
 Runtime всех сервисов - `eclipse-temurin:25-jre-alpine`; `curl` для healthcheck устанавливается через `apk`.
 
@@ -45,7 +44,7 @@ docker compose down
 
 ```text
 lab.shop
-├── api           общие контроллеры и DTO
+├── api           общие контроллеры; DTO из lab.contracts.shop.model
 ├── application   интерфейсы операций
 ├── secured       защищённые реализации
 └── vulnerable    намеренно уязвимые реализации
@@ -53,7 +52,7 @@ lab.shop
 
 Без профиля магазина или с обоими профилями запуск завершается ошибкой.
 Дополнительные профили, например `test`, допустимы. Клиент не выбирает реализацию.
-Контроллеры зависят от интерфейсов application; secured/vulnerable не вызывают друг друга.
+HTTP-контроллеры реализуют lab.contracts.shop.api.DefaultApi и делегируют операции в application; secured/vulnerable не вызывают друг друга.
 Проверки владельца, SQL, checkout и идемпотентность реализуются отдельно в каждом варианте.
 Сейчас созданы структура, выбор варианта и проверки запуска; бизнес-операций ещё нет.
 `ShopImplementation.mode()` обозначает вариант, а не наличие работающей защиты.
@@ -61,10 +60,12 @@ lab.shop
 
 ## Генерация кода из OpenAPI
 
-Java 25. Сгенерировать Java-интерфейсы API и DTO:
+[Единые спецификации](contracts/README.md) используются при Docker-сборке и в CI. Сгенерировать Java-интерфейсы API и DTO из корня проекта в том же образе Maven:
 
 ```sh
-./mvnw clean generate-sources
+docker run --rm -v "$PWD:/workspace" -w /workspace \
+  maven:3.9.11-eclipse-temurin-25 \
+  mvn --batch-mode --no-transfer-progress clean generate-sources
 ```
 
 Код генерируется в `target/generated-sources/<контракт>/src/main/java` соответствующего модуля:
@@ -78,14 +79,10 @@ Java 25. Сгенерировать Java-интерфейсы API и DTO:
 
 Пакеты `lab.contracts.<контракт>.api` содержат интерфейсы API с HTTP-аннотациями, `lab.contracts.<контракт>.model` - DTO и enum.
 
-У Shop API отключена генерация Bean Validation: ограничения спецификации применяются реализацией с учётом режима. Protected отклоняет нарушения, vulnerable допускает учебные quantity/quotedTotal. Runtime и остальные API сохраняют Bean Validation. [Внутренние порты Control](contracts/modules.md) написаны на Java отдельно от HTTP-генерации.
+У Shop API отключена генерация Bean Validation: ограничения спецификации применяются реализацией с учётом режима. Protected отклоняет нарушения, vulnerable допускает учебные quantity/quotedTotal. Runtime и остальные API сохраняют Bean Validation.
 
-Скомпилировать сгенерированный код:
-
-```sh
-./mvnw compile
-```
+Для компиляции замените `clean generate-sources` на `compile`.
 
 Правки вносятся в [спецификации](contracts/README.md), код пересоздаётся при сборке и не редактируется вручную. Общие настройки OpenAPI Generator находятся в [корневом pom.xml](pom.xml), спецификации для каждого модуля - в его `pom.xml`.
 
-Сгенерированные Java-файлы хранятся в Git. После изменения спецификаций или настроек генератора выполните `./mvnw clean generate-sources` и добавьте обновлённые файлы в коммит. [CI](.github/workflows/generated-code.yml) повторяет генерацию на push и pull request и завершается ошибкой при расхождении.
+Сгенерированные Java-файлы хранятся в Git. После изменения спецификаций или настроек генератора повторите генерацию и добавьте обновлённые файлы в коммит. [CI](.github/workflows/generated-code.yml) повторяет генерацию на push и pull request и завершается ошибкой при расхождении.

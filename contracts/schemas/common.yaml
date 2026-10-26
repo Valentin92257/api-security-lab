@@ -11,8 +11,25 @@ $defs:
     additionalProperties: false
     required: [type, title, status, code, requestId]
     properties:
-      type: {type: string, format: uri}
+      type: {type: string, const: 'urn:lab:problem:http-error'}
       title: {type: string, maxLength: 240, minLength: 1}
       status: {type: integer, minimum: 400, maximum: 599}
-      code: {type: string, pattern: '^[A-Z][A-Z0-9_]*$', maxLength: 80, minLength: 1}
+      code: {type: string, enum: [INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, INTERNAL_ERROR, UNAVAILABLE]}
       requestId: {$ref: '#/$defs/Uuid'}
+    allOf:
+    - if: {properties: {code: {const: INVALID_REQUEST}}}
+      then: {properties: {status: {enum: [400, 405, 413, 415]}}}
+    - if: {properties: {code: {const: UNAUTHORIZED}}}
+      then: {properties: {status: {const: 401}}}
+    - if: {properties: {code: {const: FORBIDDEN}}}
+      then: {properties: {status: {const: 403}}}
+    - if: {properties: {code: {const: NOT_FOUND}}}
+      then: {properties: {status: {const: 404}}}
+    - if: {properties: {code: {const: CONFLICT}}}
+      then: {properties: {status: {const: 409}}}
+    - if: {properties: {code: {const: RATE_LIMITED}}}
+      then: {properties: {status: {const: 429}}}
+    - if: {properties: {code: {const: INTERNAL_ERROR}}}
+      then: {properties: {status: {const: 500}}}
+    - if: {properties: {code: {const: UNAVAILABLE}}}
+      then: {properties: {status: {const: 503}}}

@@ -8,7 +8,7 @@
 
 ## API Control
 
-Дашборд работает с trial целиком: POST /trials создаёт и сразу запускает оба режима, GET /trials/{trialId} возвращает общий прогресс и cleanupSafe, GET /trials/{trialId}/report - результаты обоих режимов и оценённые инциденты. После отмены/ошибки отчёт содержит доступные результаты; отсутствующий второй run не считается выполненным. До сохранения отчёта возвращается 409. Счётчики атак и инцидентов вычисляются из cases/incidents. Страницы списков содержат items и total; limit/offset остаются параметрами запроса. Ошибки фоновых операций передаются необязательным текстом error, HTTP-ошибки - общим Problem. runId задан URL и не дублируется в состояниях и инцидентах.
+Дашборд работает с trial целиком: POST /trials создаёт и сразу запускает оба режима, GET /trials/{trialId} возвращает общий прогресс и cleanupSafe, GET /trials/{trialId}/report - результаты обоих режимов и оценённые инциденты. После отмены/ошибки отчёт содержит доступные результаты; отсутствующий второй run не считается выполненным. До сохранения отчёта возвращается 409. Счётчики атак и инцидентов вычисляются из cases/incidents. Страницы Control/Detector содержат items и total; limit/offset остаются параметрами запроса. Ошибки фоновых операций передаются необязательным текстом error, HTTP-ошибки - общим Problem. runId задан URL и не дублируется в состояниях и инцидентах.
 
 Operator Bearer отделён от JWT магазина и служебных токенов. Control публикуется на loopback, UI передаёт Authorization явно; cookie-аутентификации нет. Ответы Control и отчёт имеют Cache-Control: no-store. Отчёт не содержит credentials, JWT и исходных тел запросов.
 
@@ -49,7 +49,7 @@ Control независимо оценивает эффект case и верно�
 
 CaseResult содержит effect и detection. episodeId объединяет проверки одной кампании: family, label и detection у них одинаковы. У CS-01 три проверки доступа имеют один episodeId, поэтому ASR считает три case, а recall - одну кампанию. Отдельного массива episodes в отчёте нет.
 
-detection не задаётся независимо от incidents: Control рассчитывает его один раз для episodeId и копирует во все его cases. matchedEpisodeIds содержит только существующие episodeId с доказанной связью через evidenceSteps/requestIds; совпадения IP, family или подготовительного запроса недостаточно. TRUE_POSITIVE обязан включать хотя бы один ATTACK episode; в смешанном инциденте benign episodes тоже сохраняются в matchedEpisodeIds. FALSE_POSITIVE содержит только BENIGN episodes (список может быть пуст, если известен лишь фоновый benign-трафик); UNASSESSED не подтверждает ни один episode.
+detection не задаётся независимо от incidents: Control рассчитывает его один раз для episodeId и копирует во все его cases. matchedEpisodeIds содержит только существующие episodeId с доказанной связью через requestId проверяемых действий; совпадения IP, family или подготовительного запроса недостаточно. TRUE_POSITIVE обязан включать хотя бы один ATTACK episode; в смешанном инциденте benign episodes тоже сохраняются в matchedEpisodeIds. FALSE_POSITIVE содержит только BENIGN episodes (список может быть пуст, если известен лишь фоновый benign-трафик); UNASSESSED не подтверждает ни один episode.
 
 | Условие для episode | ATTACK detection | BENIGN detection |
 |---|---|---|

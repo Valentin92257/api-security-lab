@@ -62,13 +62,11 @@ paths:
     - {$ref: '#/components/parameters/XForwardedFor'}
     get:
       operationId: searchProducts
-      description: Буквальный поиск q; только published, порядок id по возрастанию.
+      description: Буквальный поиск q; только published, порядок id по возрастанию. Массив до 100 товаров, без пагинации.
       parameters:
       - {$ref: '#/components/parameters/q'}
-      - {$ref: '#/components/parameters/limit'}
-      - {$ref: '#/components/parameters/offset'}
       responses:
-        '200': {$ref: '#/components/responses/ProductPage'}
+        '200': {$ref: '#/components/responses/Products'}
         default: {$ref: '#/components/responses/Error'}
   /cart:
     parameters:
@@ -153,10 +151,14 @@ components:
         application/json:
           schema: {$ref: ./schemas/shop.yaml#/$defs/LoginResult}
       description: OK
-    ProductPage:
+    Products:
       content:
         application/json:
-          schema: {$ref: ./schemas/shop.yaml#/$defs/ProductPage}
+          schema:
+            type: array
+            items: {$ref: ./schemas/shop.yaml#/$defs/Product}
+            minItems: 0
+            maxItems: 100
       description: OK
     Cart:
       content:
@@ -201,14 +203,6 @@ components:
       name: q
       in: query
       schema: {type: string, default: '', maxLength: 120}
-    limit:
-      name: limit
-      in: query
-      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
-    offset:
-      name: offset
-      in: query
-      schema: {type: integer, minimum: 0, maximum: 10000, default: 0}
     productId:
       name: productId
       in: path

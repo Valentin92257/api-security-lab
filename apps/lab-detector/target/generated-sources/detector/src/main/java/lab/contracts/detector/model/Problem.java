@@ -4,7 +4,7 @@ import java.net.URI;
 import java.util.Objects;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
-import java.net.URI;
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.UUID;
 import org.springframework.lang.Nullable;
 import java.time.OffsetDateTime;
@@ -22,13 +22,93 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class Problem {
 
-  private URI type;
+  /**
+   * Gets or Sets type
+   */
+  public enum TypeEnum {
+    URN_LAB_PROBLEM_HTTP_ERROR("urn:lab:problem:http-error");
+
+    private final String value;
+
+    TypeEnum(String value) {
+      this.value = value;
+    }
+
+    @JsonValue
+    public String getValue() {
+      return value;
+    }
+
+    @Override
+    public String toString() {
+      return String.valueOf(value);
+    }
+
+    @JsonCreator
+    public static TypeEnum fromValue(String value) {
+      for (TypeEnum b : TypeEnum.values()) {
+        if (b.value.equals(value)) {
+          return b;
+        }
+      }
+      throw new IllegalArgumentException("Unexpected value '" + value + "'");
+    }
+  }
+
+  private TypeEnum type;
 
   private String title;
 
   private Integer status;
 
-  private String code;
+  /**
+   * Gets or Sets code
+   */
+  public enum CodeEnum {
+    INVALID_REQUEST("INVALID_REQUEST"),
+    
+    UNAUTHORIZED("UNAUTHORIZED"),
+    
+    FORBIDDEN("FORBIDDEN"),
+    
+    NOT_FOUND("NOT_FOUND"),
+    
+    CONFLICT("CONFLICT"),
+    
+    RATE_LIMITED("RATE_LIMITED"),
+    
+    INTERNAL_ERROR("INTERNAL_ERROR"),
+    
+    UNAVAILABLE("UNAVAILABLE");
+
+    private final String value;
+
+    CodeEnum(String value) {
+      this.value = value;
+    }
+
+    @JsonValue
+    public String getValue() {
+      return value;
+    }
+
+    @Override
+    public String toString() {
+      return String.valueOf(value);
+    }
+
+    @JsonCreator
+    public static CodeEnum fromValue(String value) {
+      for (CodeEnum b : CodeEnum.values()) {
+        if (b.value.equals(value)) {
+          return b;
+        }
+      }
+      throw new IllegalArgumentException("Unexpected value '" + value + "'");
+    }
+  }
+
+  private CodeEnum code;
 
   private UUID requestId;
 
@@ -39,7 +119,7 @@ public class Problem {
   /**
    * Constructor with only required parameters
    */
-  public Problem(URI type, String title, Integer status, String code, UUID requestId) {
+  public Problem(TypeEnum type, String title, Integer status, CodeEnum code, UUID requestId) {
     this.type = type;
     this.title = title;
     this.status = status;
@@ -47,7 +127,7 @@ public class Problem {
     this.requestId = requestId;
   }
 
-  public Problem type(URI type) {
+  public Problem type(TypeEnum type) {
     this.type = type;
     return this;
   }
@@ -56,14 +136,14 @@ public class Problem {
    * Get type
    * @return type
    */
-  @NotNull @Valid 
+  @NotNull 
   @JsonProperty("type")
-  public URI getType() {
+  public TypeEnum getType() {
     return type;
   }
 
   @JsonProperty("type")
-  public void setType(URI type) {
+  public void setType(TypeEnum type) {
     this.type = type;
   }
 
@@ -109,7 +189,7 @@ public class Problem {
     this.status = status;
   }
 
-  public Problem code(String code) {
+  public Problem code(CodeEnum code) {
     this.code = code;
     return this;
   }
@@ -118,14 +198,14 @@ public class Problem {
    * Get code
    * @return code
    */
-  @NotNull @Pattern(regexp = "^[A-Z][A-Z0-9_]*$") @Size(min = 1, max = 80) 
+  @NotNull 
   @JsonProperty("code")
-  public String getCode() {
+  public CodeEnum getCode() {
     return code;
   }
 
   @JsonProperty("code")
-  public void setCode(String code) {
+  public void setCode(CodeEnum code) {
     this.code = code;
   }
 

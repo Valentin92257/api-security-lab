@@ -16,7 +16,7 @@
 | BL-01 | Expired/exhausted/repeated coupon даёт незаконную скидку или превышает лимит | Проверка срока/остатка в commit; допустимый купон и equality boundary expiry |
 | BL-02 | Quantity 0/отрицательное/выше границы сохраняется или влияет на заказ | Schema/domain/constraints; quantity 1 и 99 |
 | BL-03 | Cart race создаёт два order на одну revision; coupon race превышает остаток | Locks/unique/conditional update; два независимых допустимых заказа |
-| BL-04 | Заниженный quotedTotal принят как цена заказа | Серверный расчёт/PRICE_CHANGED; корректная цена |
+| BL-04 | Заниженный quotedTotal принят как цена заказа | Серверный расчёт/CONFLICT; корректная цена |
 
 BL-01 имеет отдельные expired/exhausted/repeated-apply subcases; BL-03 - cart race и shared-coupon race разных пользователей. Каждый получает собственный результат. Injection включает один реальный изолированный SQL-кейс; NoSQL/command-подобные строки проверяются как отрицательный ввод, без отдельных runtime-движков.
 
@@ -50,13 +50,13 @@ Scenario definition задаёт id/version/family/subcase, actors, fixture requ
 }
 ```
 
-Выбирается от одного до пяти известных families или все пять; seed необязателен. Оба режима запускаются автоматически, сначала vulnerable, затем protected. Остальные настройки фиксируются конфигурацией стенда. Неизвестные поля и превышение бюджета - 400. BaseUrl, внешний callback, SQL assertions и executable expressions не принимаются. Objects/actors разрешаются по FixtureData; labels и ожидаемые эффекты не выводятся из ответа Detector.
+Выбирается от одного до пяти известных families или все пять; seed необязателен. Оба режима запускаются автоматически, сначала vulnerable, затем protected. Остальные настройки фиксируются конфигурацией стенда. Неизвестные поля и превышение бюджета - 400. BaseUrl, внешний callback, SQL assertions и executable expressions не принимаются. Objects/actors разрешаются по подготовленным исходным данным; labels и ожидаемые эффекты не выводятся из ответа Detector.
 
 ## Встроенный runner и контракты управления
 
-Runner - библиотека `modules/scenario-runner`, подключённая к lab-control. PlanExecutor/StepExecutor используют отдельный executor, Java HttpClient с фиксированными gateway targets, semaphore и конечные бюджеты. Один активный trial с двумя последовательными runs в MVP. Cancellation token/deadline проверяются перед каждой новой попыткой/retry и ожиданием barrier. Сценарии поставляются доверенным кодом; пользовательский Java/shell/SQL не исполняется.
+Runner - пакет `lab.control.runner` внутри lab-control. PlanExecutor/StepExecutor используют отдельный executor, Java HttpClient с фиксированными gateway targets, semaphore и конечные бюджеты. Один активный trial с двумя последовательными runs в MVP. Cancellation token/deadline проверяются перед каждой новой попыткой/retry и ожиданием barrier. Сценарии поставляются доверенным кодом; пользовательский Java/shell/SQL не исполняется.
 
-Orchestrator вызывает Runner.prepare(runId, mode, families, seed, fixture, deadlineAt), получает PreparedRun с plan(), затем вызывает start(http, attemptSink). CompletionStage завершается после сохранения всех начатых attempts; cancel() прекращает новые действия. Потеря UI-вкладки не прекращает серверное управление run. Прерванный процесс не возобновляет выполнение. Точные Java-сигнатуры заданы в [modules.md](../contracts/modules.md), внутренние таблицы не являются HTTP-контрактом.
+Control подготавливает и запускает сценарии внутри процесса; завершение подтверждается после сохранения результатов всех начатых запросов. Отмена прекращает новые действия. Потеря UI-вкладки не прекращает серверное управление run. Прерванный процесс не возобновляет выполнение. Внутренние Java-интерфейсы определяются при реализации.
 
 | Интерфейс | Контракт |
 |---|---|
@@ -66,16 +66,14 @@ Orchestrator вызывает Runner.prepare(runId, mode, families, seed, fixtur
 | Operator: `GET /control/v1/trials/{trialId}` | Состояние, общий прогресс, cleanupSafe и необязательный error |
 | Operator: `POST /control/v1/trials/{trialId}/cancel` | 202 Trial; окончание определяется состоянием |
 | Operator: `GET /control/v1/trials/{trialId}/report` | TrialReport; до готовности 409 |
-| Orchestrator → Runner: Java | prepare → PreparedRun.plan/start/cancel, CompletionStage |
-| Runner → AttemptSink: Java | append(runId, Attempt), подтверждение сохранения до completion |
 | Control → Gateway/Shop: Runtime API | PUT /runs/{runId}, GET status, POST open/close; без HTTP подготовки/reset БД |
 | Control → Detector: HTTP API | prepare/status/finish/incidents; Shop/Gateway отправляют log-batches |
 
 Между Runner и Control нет HTTP endpoints, worker listener, heartbeat или lease. POST trials требует Idempotency-Key: одинаковый ключ/body возвращает прежний trial, другой body - 409. Управляющие prepare/open/close/finish допускают безопасный идентичный повтор; изменённые контекст или границы дают 409. HTTP 202 означает принятие, не завершение. Operator/service credentials отделены от пользовательского JWT; runId берётся из Runtime-контекста, без X-Lab-заголовков.
 
-Attempt содержит caseId, stepId, requestId, businessTime, transportOutcome RESPONSE/TIMEOUT/TRANSPORT_ERROR, nullable status и безопасный responseFacts. UUID создаётся до отправки, передаётся в X-Request-Id и сохраняется Gateway/Shop. Retry получает новый UUID. В responseFacts JWT заменяется признаком tokenReceived, credentials не сохраняются. Повтор requestId с другим содержимым - ошибка.
+Control сохраняет результат каждой отправки и её связь с проверкой. UUID создаётся до отправки, передаётся в X-Request-Id и сохраняется Gateway/Shop. Retry получает новый UUID. Пароли и JWT в сохраняемые результаты не попадают; потеря результата даёт INCONCLUSIVE.
 
-AttemptSink - порт persistence adapter Control. Ошибка сохранения или переполнение запрещают новые шаги и дают INCONCLUSIVE при неполноте. Сценарные классы не получают datasource/admin/evaluator interfaces. Это граница доверенного Java-кода, не sandbox: процесс Control имеет соответствующие сети и credentials. ScenarioHttpClient запрещает любой origin кроме Gateway и служебные routes; запрет внешнего egress проверяется отдельно на контейнере. Fixtures устанавливает отдельный модуль Control напрямую в БД, не сценарный HTTP-клиент.
+Результаты запросов сохраняет Control. Ошибка сохранения или переполнение запрещают новые шаги и дают INCONCLUSIVE при неполноте. Сценарные классы не получают datasource/admin/evaluator interfaces. Это граница доверенного Java-кода, не sandbox: процесс Control имеет соответствующие сети и credentials. HTTP-клиент генератора запрещает любой origin кроме Gateway и служебные routes; запрет внешнего egress проверяется отдельно на контейнере. Fixtures устанавливает отдельный модуль Control напрямую в БД, не сценарный HTTP-клиент.
 
 ## Жизненный цикл и завершение
 

@@ -8,7 +8,6 @@
 | Control / Shop / Gateway → Detector | [Detector API](detector-api.openapi.yaml) |
 | Control → Shop/Gateway | [Runtime API](runtime-api.openapi.yaml) |
 | Дашборд → Control | [Control API](control-api.openapi.yaml) |
-| Внутренние модули Control | [Входы и выходы](modules.md) |
 
 - Control запускает выбранные семейства атак сначала в vulnerable, затем в protected с одинаковыми seed и исходными данными. Одновременно активно одно испытание; сброс БД допустим только после безопасного завершения предыдущего.
 - Генератор и подготовка БД - модули Control. Служебный Runtime API задаёт активный runId; бизнес-запросы передают X-Request-Id и IP виртуального клиента в доверенном X-Forwarded-For.
@@ -38,6 +37,8 @@ POST запуска требует Idempotency-Key: тот же ключ и body
 - Detector: состояние анализа, границы логов для завершения и инцидент.
 - Runtime: настройки прогона и состояние процесса.
 - Логи: одна access-запись и пачка. Успешный приём - 204 без отдельного DTO.
-- Страницы списков: только items и total. Внутренние планы, фикстуры и результаты Runner заданы [Java-портами](modules.md), без отдельных JSON-схем API.
+- Страницы Control/Detector: только items и total.
 
-Общие типы: [schemas/](schemas/). [Правила взаимодействия](semantics.md), [примеры](examples/). Генерация Java: `./mvnw generate-sources`; [модули и пути кода](../README.md).
+Общие типы: [schemas/](schemas/). [Правила взаимодействия](semantics.md), [примеры](examples/). [Генерация Java, модули и пути кода](../README.md#генерация-кода-из-openapi).
+
+Каталог Shop и публичные ошибки описаны в [API и модели данных](../docs/02-api-and-data.md).

@@ -55,18 +55,6 @@ $defs:
       description: {type: string, maxLength: 4000}
       price: {$ref: '#/$defs/Price'}
       currency: {type: string, const: RUB}
-  ProductPage:
-    title: ProductPage
-    type: object
-    additionalProperties: false
-    required: [items, total]
-    properties:
-      items:
-        type: array
-        items: {$ref: '#/$defs/Product'}
-        minItems: 0
-        maxItems: 100
-      total: {type: integer, format: int64, minimum: 0, maximum: 9007199254740991}
   LineItem:
     title: LineItem
     type: object

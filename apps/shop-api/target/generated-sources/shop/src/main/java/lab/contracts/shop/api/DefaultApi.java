@@ -12,7 +12,7 @@ import lab.contracts.shop.model.LoginResult;
 import org.springframework.lang.Nullable;
 import lab.contracts.shop.model.Order;
 import lab.contracts.shop.model.Problem;
-import lab.contracts.shop.model.ProductPage;
+import lab.contracts.shop.model.Product;
 import lab.contracts.shop.model.RegisterRequest;
 import lab.contracts.shop.model.SelectCouponRequest;
 import lab.contracts.shop.model.SetQuantityRequest;
@@ -182,12 +182,10 @@ public interface DefaultApi {
     String PATH_SEARCH_PRODUCTS = "/products";
     /**
      * GET /products
-     * Буквальный поиск q; только published, порядок id по возрастанию.
+     * Буквальный поиск q; только published, порядок id по возрастанию. Массив до 100 товаров, без пагинации.
      *
      * @param xRequestId  (required)
      * @param q  (optional, default to )
-     * @param limit  (optional, default to 20)
-     * @param offset  (optional, default to 0)
      * @param xForwardedFor Один IPv4/IPv6 виртуального клиента; только от доверенного отправителя. (optional)
      * @return OK (status code 200)
      *         or Ошибка (status code 200)
@@ -197,11 +195,9 @@ public interface DefaultApi {
         value = DefaultApi.PATH_SEARCH_PRODUCTS,
         produces = { "application/json", "application/problem+json" }
     )
-    ResponseEntity<ProductPage> searchProducts(
+    ResponseEntity<List<Product>> searchProducts(
          @RequestHeader(value = "X-Request-Id", required = true) UUID xRequestId,
          @RequestParam(value = "q", required = false, defaultValue = "") String q,
-         @RequestParam(value = "limit", required = false, defaultValue = "20") Integer limit,
-         @RequestParam(value = "offset", required = false, defaultValue = "0") Integer offset,
          @RequestHeader(value = "X-Forwarded-For", required = false) @Nullable String xForwardedFor
     );
 

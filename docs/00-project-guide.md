@@ -1,6 +1,6 @@
 # API Security Lab: проект от идеи до реализации
 
-Версия 1.3, 25 октября 2026 года. Документ объясняет весь проект последовательно и не требует предварительного контекста. Описаны принятые решения для будущей реализации; реализация сервисов, испытания и измерения ещё предстоят. HTTP-контракты и генерация Java-интерфейсов/DTO уже находятся в репозитории; актуальные спецификации собраны в [contracts](../contracts/README.md). Названия внутренних Java-классов ниже задают предлагаемое разделение обязанностей, а не обозначают уже существующие классы.
+Версия 1.3, 25 октября 2026 года. Документ объясняет весь проект последовательно и не требует предварительного контекста. Описаны принятые решения для будущей реализации; бизнес-логика, испытания защиты и измерения ещё предстоят. В main уже есть запускаемые приложения, health-checks и выбор профиля Shop. HTTP-контракты и генерация Java-интерфейсов/DTO уже находятся в репозитории; актуальные спецификации собраны в [contracts](../contracts/README.md). Названия внутренних Java-классов ниже задают предлагаемое разделение обязанностей, а не обозначают уже существующие классы.
 
 ## 1. Что мы строим и какой результат получаем
 
@@ -80,7 +80,7 @@ Control не проксирует каждую покупку через себ�
 
 | Решение | Зачем оно нужно | Что приходится учитывать |
 |---|---|---|
-| Java 25, Maven Wrapper | Один язык команды, воспроизводимая сборка; virtual threads для HTTP-исполнения | Потоки не заменяют бюджеты, таймауты и ограничения соединений |
+| Java 25, Maven внутри Docker | Один язык команды, воспроизводимая сборка; virtual threads для HTTP-исполнения | Потоки не заменяют бюджеты, таймауты и ограничения соединений |
 | Spring Boot 4.0.x | Конфигурация приложений, HTTP, security, lifecycle и интеграция с БД | Patch-версии фиксируются после проверки сборки |
 | Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x | Gateway в совместимой servlet-линии | Проверяется работа фильтров, двух входов и чтения body |
 | Spring JDBC/JdbcClient, PostgreSQL 17 | SQL, locks и транзакции видны явно | Нужно самостоятельно аккуратно проектировать запросы и границы транзакций |
@@ -97,7 +97,7 @@ Control не проксирует каждую покупку через себ�
 
 ## 6. Как организован Java-проект
 
-Репозиторий - Maven monorepo с отдельным собираемым приложением для каждого процесса. Корневой pom фиксирует общие версии и порядок сборки; Maven Wrapper обеспечивает одинаковый запуск у участников и в CI.
+Репозиторий - Maven monorepo с отдельным собираемым приложением для каждого процесса. Корневой pom фиксирует общие версии и порядок сборки; Docker build-stage обеспечивает запуск без локальных Maven/JDK.
 
 ```text
 apps/
@@ -105,8 +105,7 @@ apps/
   lab-gateway/       # listeners, routing, policies, admission, access logs
   lab-detector/      # ingestion, rules, windows, incidents, HTTP ingestion
   lab-control/       # orchestration, fixtures, evaluator, ui, reports
-modules/
-  scenario-runner/   # plan, scenarios, executor, cancellation, result ports; без Boot main
+  lab-control/src/main/java/lab/control/runner/ # plan, scenarios, executor; часть Control
 libs/
   lab-contracts/     # возможная общая библиотека; HTTP DTO пока генерируются в apps
   lab-observability/ # trace propagation, redaction, соглашения метрик
@@ -120,11 +119,11 @@ contracts/
 config/{policies,rules,scenarios}/
 db/{shop/common,shop/protected}/
 fixtures/
-infra/compose.yaml
+compose.yaml
 tests/acceptance/
 ```
 
-Дерево показывает предлагаемую организацию будущей реализации; сейчас существуют четыре apps с генерацией HTTP-кода и [Java-порты Control](../contracts/modules.md).
+Дерево показывает предлагаемую организацию будущей реализации; сейчас существуют четыре apps с генерацией HTTP-кода.
 
 Внутри приложения код группируется по предметной функции. Например, в shop пакет checkout содержит входные команды, прикладной сценарий оформления, правила и SQL-адаптеры этого сценария. Не нужно складывать все контроллеры всех областей в одну гигантскую папку и делить бизнес-логику только по техническим аннотациям.
 
@@ -155,7 +154,7 @@ Protected owner query использует id объекта и authenticated us
 | `POST /auth/register` | login/password/name/email; атомарно создаёт User и пустую корзину, возвращает 201; токен через login |
 | `POST /auth/login` | login/password; возвращает accessToken, tokenType, expiresIn |
 | `GET /users/{userId}` | Собственный профиль; отдельная поверхность BOLA |
-| `GET /products` | Поиск q, limit/offset; сортировка по id; только опубликованные товары |
+| `GET /products` | Поиск q; массив до 100 товаров, сортировка по id; только опубликованные товары |
 | `GET /cart` | Корзина, revision, позиции, купон и текущие суммы |
 | `PUT /cart/items/{productId}` | quantity; создаёт позицию или устанавливает абсолютное количество |
 | `PUT /cart/coupon` | code; выбирает один купон без расходования лимита |
@@ -182,11 +181,11 @@ Protected дополняет PK/FK бизнес-ограничениями: до
 
 Клиент читает Cart и передаёт cartRevision/quotedTotal в POST /orders с Idempotency-Key. Revision меняется после реального изменения корзины; no-op её не повышает. Заказ хранит исходные cart_id/cart_revision, hash ключа, fingerprint тела и успешный response_body.
 
-Пример: корзина revision 7 стоит 3000 рублей, купон 10% даёт итог 2700. Запрос с revision=7, quotedTotal=2700 и key K создаёт Order 50. Если ответ потерялся, тот же K/body возвращает Order 50. Новый K2 с revision=7 даёт CART_ALREADY_CHECKED_OUT; прежний K с иным телом - IDEMPOTENCY_CONFLICT.
+Пример: корзина revision 7 стоит 3000 рублей, купон 10% даёт итог 2700. Запрос с revision=7, quotedTotal=2700 и key K создаёт Order 50. Если ответ потерялся, тот же K/body возвращает Order 50. Новый K2 с revision=7 даёт CONFLICT; прежний K с иным телом - CONFLICT.
 
 Protected берёт locks в порядке key → cart → coupon. Сначала ищет успешный key; затем под row lock корзины проверяет ранее оформленную revision, актуальность revision, состав, серверную цену и купон. Order/items, расход купона, сохранённый ответ, очистка позиций/купона корзины и повышение revision фиксируются одним commit. UNIQUE(user_id,key hash) и UNIQUE(cart_id,cart_revision) страхуют от гонок. Итоговый access-лог формируется после commit/rollback и обработки HTTP-ошибки.
 
-Fingerprint - SHA-256 канонических типизированных значений тела, маршрута и версии контракта; JWT/requestId/trace не входят. Успешный retry возвращает кеш до проверки изменённой корзины и истёкшего купона. Ошибки не кешируются; ожидание key lock ограничено и может дать OPERATION_IN_PROGRESS.
+Fingerprint - SHA-256 канонических типизированных значений тела, маршрута и версии контракта; JWT/requestId/trace не входят. Успешный retry возвращает кеш до проверки изменённой корзины и истёкшего купона. Ошибки не кешируются; ожидание key lock ограничено и может дать CONFLICT.
 
 Vulnerable пропускает lookup/уникальность key и проверку оформленной revision. Для replay он намеренно сохраняет корзину, её купон и revision после checkout; повтор создаёт второй order. Protected очищает её и повышает revision. Обычные mutations повышают revision в обоих режимах.
 
@@ -225,17 +224,17 @@ State namespace включает runId, policy version и mode, поэтому t
 
 ## 10. Как работает встроенный генератор сценариев
 
-Scenario-runner - библиотека внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один trial с двумя последовательными runs выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
+Scenario-runner - пакет внутри lab-control, а не отдельное приложение или контейнер. Р3 реализует планирование/сценарии/HTTP-исполнение; Р4 подключает модуль к orchestration, хранению и UI. Один trial с двумя последовательными runs выполняется в MVP; control атомарно резервирует слот перед PREPARING, конкурентному start отвечает 409; последовательные paired runs сохраняют сопоставимость нагрузки.
 
-`PlanExecutor` управляет порядком, barriers и конечными циклами; `StepExecutor` превращает типизированный шаг в запрос; `ScenarioHttpClient` выбирает фиксированный gateway origin; `AttemptSink` передаёт результат адаптеру control. Модуль не импортирует JDBC, evaluator, log-reader или admin-клиенты. Отдельный Maven-модуль и ArchUnit проверяют эти зависимости. Это доверенный код, не песочница для произвольных программ.
+`PlanExecutor` управляет порядком, barriers и конечными циклами; `StepExecutor` превращает типизированный шаг в запрос; HTTP-клиент выбирает фиксированный gateway origin; результаты сохраняет Control. Модуль не импортирует JDBC, evaluator, log-reader или admin-клиенты. Пакетные границы и архитектурные тесты проверяют эти зависимости. Это доверенный код, не песочница для произвольных программ.
 
-Orchestrator вызывает Runner.prepare(runId, mode, families, seed, fixture, deadlineAt), получает PreparedRun с plan(), затем запускает start(http, attemptSink). CompletionStage завершается после сохранения всех начатых attempts. cancel() запрещает новые steps/retries. Точные сигнатуры заданы в [ControlPorts.java](../apps/lab-control/src/main/java/lab/control/ControlPorts.java). HTTP-протокола runner↔control, heartbeat и lease нет; конкретные таблицы хранения не являются контрактом между модулями.
+Control подготавливает и запускает сценарии внутри процесса. Завершение подтверждается после сохранения результатов всех начатых запросов; отмена прекращает новые шаги и повторы. HTTP-протокола runner↔control, heartbeat и lease нет; внутренние Java-интерфейсы определяются при реализации.
 
 У runner отдельный executor; HTTP I/O может использовать virtual threads с semaphore. Ограничены concurrency, attempts, body/response, очередь результатов и длительность. UI и orchestration не используют этот executor или common ForkJoinPool. Общие JVM/heap/CPU всё равно остаются общей областью отказа: resource limits и отмена обязательны, OOM не изолирован от UI.
 
-requestId - UUID, создаваемый Runner до отправки в X-Request-Id и сохраняемый Gateway/Shop. Retry получает новый requestId, но сохраняет cartRevision/key повторяемой бизнес-операции. Пароли/JWT живут только в памяти; AttemptSink сохраняет безопасные результаты. Completion подтверждается после их записи; потеря результата даёт INCONCLUSIVE.
+requestId - UUID, создаваемый Runner до отправки в X-Request-Id и сохраняемый Gateway/Shop. Retry получает новый requestId, но сохраняет cartRevision/key повторяемой бизнес-операции. Пароли/JWT живут только в памяти; Control сохраняет безопасные результаты. Completion подтверждается после их записи; потеря результата даёт INCONCLUSIVE.
 
-Сценарии принимают target enum и версионированные routes, не произвольный baseUrl. ScenarioHttpClient запрещает redirects, proxy, absolute URL override, смену origin и management routes. Query/body могут содержать учебный ввод, но не менять адрес назначения. Fixtures подготавливает orchestration через собственный admin adapter. У процесса control есть права на admin/SQL; встроенный runner технически разделяет их. Программные ограничения здесь нельзя описывать как сетевой запрет доступа модуля к ресурсам control. Внешний egress запрещён для всего контейнера.
+Сценарии принимают target enum и версионированные routes, не произвольный baseUrl. HTTP-клиент генератора запрещает redirects, proxy, absolute URL override, смену origin и management routes. Query/body могут содержать учебный ввод, но не менять адрес назначения. Fixtures подготавливает orchestration через собственный admin adapter. У процесса control есть права на admin/SQL; встроенный runner технически разделяет их. Программные ограничения здесь нельзя описывать как сетевой запрет доступа модуля к ресурсам control. Внешний egress запрещён для всего контейнера.
 
 Run deadline и cancellation token проверяются перед каждой отправкой, retry и ожиданием barrier. Ошибка сохранения/переполнение очереди останавливают новые действия. Отмена клиентского Future или timeout не означают rollback в магазине: FINALIZING отдельно ждёт его in-flight и логи. После падения control старый run INCONCLUSIVE и не возобновляется.
 
@@ -329,7 +328,7 @@ Operator Bearer, escaping и пагинация входят в минималь
 
 Через `/control/v1` доступны GET /scenarios, POST /trials, GET /trials, GET /trials/{trialId}, POST /trials/{trialId}/cancel и GET /trials/{trialId}/report. Создание сразу запускает оба режима. Idempotency-Key обязателен: тот же ключ/body возвращает прежний trial, изменённый body - 409. Отдельного start нет.
 
-Control вызывает внутренние Fixture/Runner/Evaluator через Java-порты, управляет Shop/Gateway через Runtime API prepare/open/close и Detector через prepare/status/log-batches/finish/incidents. Подготовка БД - прямой административный доступ Fixture, без HTTP RESET. Повторы одинаковых управляющих запросов безопасны; изменённые контекст или границы дают 409. HTTP 202 означает принятие, окончание подтверждается состоянием.
+Control управляет Shop/Gateway через Runtime API prepare/open/close и анализом Detector через prepare/status/finish/incidents. Shop/Gateway отправляют log-batches напрямую в Detector. Подготовка БД - прямой административный доступ модуля Control, без HTTP RESET. Повторы одинаковых управляющих запросов безопасны; изменённые контекст или границы дают 409. HTTP 202 означает принятие, окончание подтверждается состоянием.
 
 Нормальные состояния Trial:
 
@@ -404,13 +403,13 @@ False block rate, detection delay и performance требуют отдельны
 | `lab-logs` | Shop/gateway/control и detector: Detector API |
 | `lab-observe` | Control/detector/gateway/shop и LGTM: наблюдаемость |
 
-Control имеет доступ к shop-admin и lab-data, а его встроенный runner разделяет сетевые права процесса. Ограничения ScenarioHttpClient и запрет зависимостей от admin/SQL - программные, не контейнерные. Внешний egress запрещён сетевыми средствами; внутренние endpoints дополнительно защищены binding и credentials. Пользовательский Java/shell не исполняется.
+Control имеет доступ к shop-admin и lab-data, а его встроенный runner разделяет сетевые права процесса. Ограничения HTTP-клиента генератора и запрет зависимостей от admin/SQL - программные, не контейнерные. Внешний egress запрещён сетевыми средствами; внутренние endpoints дополнительно защищены binding и credentials. Пользовательский Java/shell не исполняется.
 
 На host по умолчанию публикуются только UI и Grafana через loopback. Для ручной демонстрации API допустим отдельный profile с loopback-входами gateway; прямой shop не публикуется. В runtime нет Docker socket, host network, privileged-контейнеров и внешнего proxy. Запрет egress проверяется настоящими запросами, включая внешний IP/hostname, host gateway, DNS/redirect и служебные endpoints.
 
 ### Инициализация и эксплуатация
 
-Планируемая команда `docker compose -f infra/compose.yaml up --build` запускает локальную генерацию keys/credentials, миграции, seed и readiness. Health означает готовность работать с зависимостями, а не только поднятый JVM. В git входят versioned config и `.env.example` с placeholders; рабочие ключи лежат в локальном хранилище.
+Текущий `docker compose up --build` запускает каркас из пяти Java-контейнеров с health-checks. Генерация keys/credentials, PostgreSQL/LGTM, миграции, seed и readiness зависимостей добавятся вместе с бизнес-логикой. Health означает готовность работать с зависимостями, а не только поднятый JVM. В git входят versioned config и `.env.example` с placeholders; рабочие ключи лежат в локальном хранилище.
 
 Fixture generator создаёт 24 синтетических пользователя с корзинами, 12 опубликованных товаров и draft canary, пять купонных состояний и согласованную историю заказов. Seed, бизнес-время, owners, counts и snapshots фиксируются. Пустые password hashes запрещены; реальные credentials не используются.
 
@@ -459,7 +458,7 @@ Fixture generator создаёт 24 синтетических пользова�
 |---|---|---|
 | Р1: API и данные | Shop в двух режимах, API/DTO, миграции, fixtures, transactions и access logging | Readonly данные и адаптеры независимого oracle |
 | Р2: защита | Gateway, политики, JWT, limiter, access logs | Compose/сети, Runtime/lastSequence, базовая наблюдаемость |
-| Р3: генератор | Сценарии/benign, seed/планы, concurrency, HTTP execution | Java prepare/start/cancel, ограниченный HTTP-клиент и AttemptSink |
+| Р3: генератор | Сценарии/benign, seed/планы, concurrency, HTTP execution | Подготовка, запуск и отмена сценариев, ограниченный HTTP-клиент и сохранение результатов |
 | Р4: detector/dashboard | Rules/windows/incidents, control/evaluator, UI и reports | Общая семантика эксперимента и окончательных метрик |
 
 API-контракт ревьюят Р1+Р2, access-логи/политики - Р2+Р4, plan/steps - Р3+Р4. Oracle проверяют Р1+Р3+Р4, чтобы ошибка production-логики не попала в независимый эталон. Вклад фиксируется по фактически выполненным модулям, тестам и демонстрациям.
@@ -478,7 +477,7 @@ Unit tests проверяют чистые политики/parser/calculator. C
 
 Integration suite включает JWT claims/signature, BOLA profile/order, все варианты повторов checkout, expiry equality, server-price и canary injection. Logging tests проверяют одну итоговую access-запись после commit/rollback/ошибки, отсутствие секретов, identical retry/conflict, sequence gaps и INCONCLUSIVE при неполноте. Detector tests проверяют поздние/out-of-order пачки, отсутствие повторного вклада, границы finish и неизменность итоговых incidents. Сетевые проверки подтверждают отсутствие обхода Gateway, а secret scans/escaping tests - отсутствие утечки или интерпретации входа в UI.
 
-Планируемые команды: `./mvnw verify` для основной сборки/unit/integration/smoke и `./mvnw -Pacceptance verify` для полной серии с фиксированными seeds/budgets и reports. Это план будущей приёмки. Сейчас `./mvnw clean generate-sources` генерирует HTTP-код, `./mvnw compile` проверяет его сборку; CI проверяет воспроизводимость генерации. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
+Планируемые команды внутри Maven-контейнера: `mvn verify` для основной сборки/unit/integration/smoke и `mvn -Pacceptance verify` для полной серии с фиксированными seeds/budgets и reports. Это план будущей приёмки. Текущие команды генерации и компиляции приведены в [README](../README.md#генерация-кода-из-openapi); CI проверяет воспроизводимость генерации. Protected-инвариант, нарушенная изоляция, утрата обязательного evidence или невоспроизведённый vulnerable baseline не дают успешную приёмку. Объявленный остаточный риск, например первая корректная пара, оценивается по фактической гарантии.
 
 ### Результат сдачи
 
@@ -493,3 +492,5 @@ Shop хранит 7 таблиц: users, products, coupons, carts, cart_items, o
 Control и Detector хранят собственные данные; фиксированной общей lab-схемы в текущих контрактах нет. Прежние 12 lab-таблиц, SQL jobs и audit-проекция сохранены в [архиве](data/legacy-lab/README.md) как история проектирования, а не текущие миграции. Case/episode/assessment входят в итоговый TrialReport, отдельные HTTP-сущности для них не требуются.
 
 Полный словарь shop-полей и решения о транзакциях приведены в документе 02. Начальные DDL, независимые SQL-проверки, DBML и ER-исходники находятся в docs/data. Источником физической модели магазина служит SQL; изменение таблицы должно сопровождаться обновлением DBML/ER и словаря полей. Документ 04 описывает HTTP-контракт access-логов и инцидентов. Обзорные схемы показывают концепции и последовательности; внутреннее хранение Control/Detector определяется реализацией. OpenAPI находится в contracts, подготовка данных - в модуле Fixture.
+
+Код Shop разделён на lab.shop.api (контроллеры), application (интерфейсы), secured и vulnerable (реализации). Профиль protected выбирает secured, профиль vulnerable - vulnerable; требуется ровно один профиль. HTTP-интерфейсы и DTO генерируются в lab.contracts.shop; бизнес-обработчиков пока нет.
