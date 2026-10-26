@@ -16,6 +16,7 @@ jobs:
       - name: Check generated API code
         shell: bash
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           generated=':(glob)apps/*/target/generated-sources/*/src/main/java/**/*.java'
           if ! git diff --exit-code -- "$generated" ||
              [ -n "$(git ls-files --others --exclude-standard -- "$generated")" ]; then
