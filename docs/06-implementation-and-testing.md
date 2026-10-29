@@ -18,7 +18,7 @@
 
 ## Первая интеграция четырёх участников
 
-Р1 делает собственный/чужой order, данные Fixture, две стратегии owner-check, access-log writer и readonly данные для oracle. Р2 делает два listener, JWT, единые errors, access-log writer и сетевые проверки. Р3 делает BO-01/benign plans, подготовку, запуск и отмену сценариев, HTTP execution и сохранение результатов. Р4 соединяет control states, приём логов Detector, правило, evaluator и минимальный UI/report.
+Р1 делает собственный/чужой order, данные Fixture, две стратегии owner-check, access-log writer и readonly данные для oracle. Р2 делает gateway-прокси с двумя listener, JWT/защитные валидаторы внутри Shop совместно с Р1, единые errors, access-log writer и сетевые проверки. Р3 делает BO-01/benign plans, подготовку, запуск и отмену сценариев, HTTP execution и сохранение результатов. Р4 соединяет control states, приём логов Detector, правило, evaluator и минимальный UI/report.
 
 Общие контракты имеют owner и совместное ревью: API - Р1+Р2; policy/access-log - Р2+Р4; plan/steps - Р3+Р4; oracle - Р1+Р3+Р4. Р4 не должен самостоятельно реализовывать все интеграционные адаптеры: fixture/oracle data предоставляет Р1, Runtime/lastSequence - Р2, модуль исполнения и cancellation - Р3.
 
@@ -27,8 +27,9 @@
 | Область | Обязательная проверка |
 |---|---|
 | API/schema | Один spec для обоих режимов; positive examples, unknown/duplicate fields, types/bounds/nullability/query, body forwarding |
+| Gateway | Передача метода/path/query/body/Authorization/Idempotency-Key/requestId и ответа; отсутствие JWT/schema/rate enforcement в proxy; 502/504; отсутствие автоматических retries; user=null в логе |
 | JWT/BOLA | Неверные alg/signature/iss/aud/exp/nbf; valid token многократен; чужие profile/order и отсутствующие дают 404, свои доступны |
-| Login limits | Параллельный consume/backoff; OBSERVE/ENFORCE/run isolation; безопасный TTL; overflow 503 + INCONCLUSIVE; старый callback не меняет новый run; restart не продолжает опыт |
+| Login limits | Параллельный consume/backoff; ограничение только в protected Shop и run isolation; безопасный TTL; overflow 503 + INCONCLUSIVE; старый callback не меняет новый run; restart не продолжает опыт |
 | Replay | Same key/body, altered body, оформленная cart revision/new key, параллельные key, expiry купона, cart revision, retry после потери ответа/commit |
 | Бизнес-транзакция | Реальные cart/coupon races, rollback на критичных шагах, один эффект, expiry equality, серверная цена и независимый пересчёт |
 | Injection | Реальный canary leakage vulnerable, отсутствие leakage protected, literal punctuation/search и фиксированный порядок по id |
@@ -37,7 +38,8 @@
 | Orchestration | Client timeout при продолжающемся SQL, deadline/cancellation и смена instanceId, missing sequence/attempt, finish ниже принятого sequence → 409, запрет reset до quiescence |
 | Исполнение/UI | Один активный trial; UI/cancel доступны при максимальном бюджете runner; отдельные executors; bounded results; остановка без новых retry после cancel/deadline |
 | Метрики/UI | N/A при нуле, incomplete не FN, ошибка family не меняет TP; detection согласован с IncidentAssessment и всеми cases episode, несколько incidents на episode, benign retry, escaping/явный Operator Bearer и отсутствие секретов |
-| Runtime | Внешний egress control закрыт; HTTP-клиент генератора отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
+| Runtime | Shop отклоняет mode, не совпадающий с профилем; mode не переключает реализацию |
+| Изоляция | Внешний egress control закрыт; HTTP-клиент генератора отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
 
 SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для setQuantity/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
@@ -55,9 +57,9 @@ Regression падает при нарушении обещанного protected
 | FR-4-FR-9 (сокращённый scope) | Поиск каталога, GET cart, PUT количества/купона, checkout и заказ по ID; карточка товара, история и удаления исключены; один контракт двух режимов |
 | FR-10-FR-16 | Активы/угрозы/меры/остаточные риски; credential stuffing, BOLA profile/order, replay, injection, четыре business subcases; отдельный критерий эффекта и инвариант |
 | FR-17-FR-20 | Создание trial с families/seed; автоматические vulnerable/protected runs; подготовка/шаги/результаты; безопасный reset модулем Control |
-| FR-21-FR-22 | Обязательный gateway; JWT claims/signature и одноразовость бизнес-операции при многократном access JWT |
+| FR-21-FR-22 | Обязательный gateway-прокси; JWT claims/signature внутри Shop и одноразовость бизнес-операции при многократном access JWT |
 | FR-23-FR-28 | Schema и неизвестные поля; owner-check; source/account limits/backoff; SQL-параметризация; серверная цена/idempotency/atomic coupon; итоговые access-логи; причины решений - во внутренней диагностике |
-| FR-29 | Два фиксированных набора: vulnerable/OBSERVE и protected/ENFORCE; обязательные эксплуатационные проверки не отключаются |
+| FR-29 | Два фиксированных приложения: vulnerable с учебными слабостями и protected со всеми защитами; Gateway одинаковый нейтральный прокси |
 | FR-30-FR-35 | AccessLog; независимый Detector и итоговые incidents; UI/progress/cases/reasons; TP/FP/FN; сравнение эффектов/детекции/FP; JSON-отчёт |
 | FR-36-FR-39 | Benign workload для FP; централизованные structured logs; trace runner→gateway→shop→detector; redaction секретов |
 

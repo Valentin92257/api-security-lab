@@ -2,7 +2,8 @@ openapi: 3.1.0
 info: {title: Shop, version: 1.0.0, description: Общий API vulnerable/protected; JWT кроме register/login.
     X-Request-Id возвращается в ответах. Ограничения схем обязательны в PROTECTED;
     в VULNERABLE учебные нарушения quantity/quotedTotal наблюдаются без блокировки.
-    Общие DTO не включают Bean Validation; проверки режима выполняет реализация.}
+    Общие DTO не включают Bean Validation; проверки режима выполняет реализация.
+    Gateway только проксирует; JWT проверяют оба Shop, schema/login и бизнес-защиту применяет protected.}
 servers:
 - {url: 'http://lab-gateway:8081/api/v1', description: VULNERABLE}
 - {url: 'http://lab-gateway:8082/api/v1', description: PROTECTED}
@@ -32,7 +33,7 @@ paths:
     - {$ref: '#/components/parameters/XForwardedFor'}
     post:
       operationId: loginUser
-      description: Неверные credentials - 401; ограничение Gateway - 429.
+      description: Неверные credentials - 401; ограничение входа в protected Shop - 429.
       security: []
       requestBody:
         required: true

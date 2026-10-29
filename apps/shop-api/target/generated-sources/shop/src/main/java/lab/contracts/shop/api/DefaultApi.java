@@ -131,7 +131,7 @@ public interface DefaultApi {
     String PATH_LOGIN_USER = "/auth/login";
     /**
      * POST /auth/login
-     * Неверные credentials - 401; ограничение Gateway - 429.
+     * Неверные credentials - 401; ограничение входа в protected Shop - 429.
      *
      * @param xRequestId  (required)
      * @param loginRequest  (required)

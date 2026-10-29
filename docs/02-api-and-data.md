@@ -112,13 +112,13 @@ Lookup успешного key выполняется после auth/schema vali
 |---|---|---|
 | 400 | INVALID_REQUEST | JSON, поля, типы, query, ограничения ввода/корзины |
 | 401 | UNAUTHORIZED | Неуспешный login или недействительный/отсутствующий JWT; WWW-Authenticate |
-| 403 | FORBIDDEN | Отказ политики gateway; чужие объекты shop всегда 404 |
+| 403 | FORBIDDEN | Отказ политики protected Shop; чужие объекты shop всегда 404 |
 | 404 | NOT_FOUND | Неизвестный или недоступный объект/маршрут |
 | 405 / 413 / 415 | INVALID_REQUEST | Метод (с Allow), размер тела или Content-Type |
 | 409 | CONFLICT | Занятый login/email, корзина, купон, сумма, key/body или ожидание key lock |
 | 429 | RATE_LIMITED | Ограничение запросов; Retry-After в секундах |
 | 500 | INTERNAL_ERROR | Неожиданная ошибка |
-| 503 | UNAVAILABLE | Зависимость/технический timeout/закрытый admission |
+| 502 / 503 / 504 | UNAVAILABLE | Зависимость/технический timeout/закрытый admission |
 
 Всего восемь публичных code. Отдельные коды для каждого вида 409 не требуются. Детальный `reasonCode` остаётся во внутренней диагностике Shop/Gateway; он не входит в публичный Problem и AccessLog Detector. Effect и инциденты Control проверяет по плану, ответам и БД. Для идемпотентности, cart revision, цены и купона сохраняются все проверки, описанные выше. У ручек OpenAPI перечислены характерные ответы; общие технические ошибки представлены через `default`.
 
@@ -368,3 +368,5 @@ PK: `order_id, product_id`.
 Дополнительные индексы: `(product_id)`.
 
 <!-- END DATA DICTIONARY -->
+
+Gateway не выполняет проверки JWT/schema/login: он передаёт Authorization и запрос выбранному Shop. Оба Shop проверяют JWT; protected применяет ограничения схемы и login limiter до бизнес-операций. Ошибка подключения upstream даёт 502/UNAVAILABLE, таймаут — 504/UNAVAILABLE. Эти ответы не доказывают предотвращение атаки; итог оценивается по доступным доказательствам. Автоматических повторов proxy нет.
