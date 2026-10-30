@@ -52,7 +52,7 @@ API и Gateway записывают итоговые HTTP-наблюдения: 
 | Компонент | Что делает | Почему выделен |
 |---|---|---|
 | `shop-api` × 2 | Пользователи, каталог, корзина, заказ, предметная защита и access-логи | Два независимых режима одного контракта для сравнения |
-| `lab-gateway` | Принимает сценарный HTTP, проверяет токен/схему/лимиты, выбирает backend | Общая точка входа и место универсальных защит |
+| `lab-gateway` | Принимает сценарный HTTP, выбирает backend, передаёт requestId | Общая точка входа без защитных политик |
 | `lab-detector` | Принимает и хранит access-логи, применяет правила, создаёт incidents | Изоляция от ответов эксперимента и независимая логика обнаружения |
 | `lab-control` | Управляет опытом, исполняет сценарии отдельным модулем, готовит данные, оценивает эффект, показывает UI и отчёт | Одна точка управления всем жизненным циклом |
 | PostgreSQL | Бизнес-состояние и внутреннее хранение Control/Detector | Долговечные данные и транзакционные гарантии |
@@ -85,7 +85,7 @@ Control не проксирует каждую покупку через себ�
 | Spring Cloud 2025.1.x, Gateway Server Web MVC 5.0.x | Gateway в совместимой servlet-линии | Проверяется работа фильтров, двух входов и чтения body |
 | Spring JDBC/JdbcClient, PostgreSQL 17 | SQL, locks и транзакции видны явно | Нужно самостоятельно аккуратно проектировать запросы и границы транзакций |
 | Flyway | Общие и protected-миграции применяются воспроизводимо | Миграционная роль отделена от runtime |
-| Bucket4j in-memory | Готовый limiter внутри единственного gateway | Ограниченные ключи/TTL, раздельные run/mode, сброс на PREPARE; restart прерывает опыт |
+| Bucket4j in-memory | Готовый limiter внутри protected Shop | Ограниченные ключи/TTL, раздельные run/mode, сброс на PREPARE; restart прерывает опыт |
 | OpenAPI 3.1.0, JSON Schema | Проверяемые HTTP-контракты и схемы access-логов | Validator должен реально поддерживать использованные keywords |
 | Thymeleaf | Формы, таблицы, фильтры и экспорт в одном control-приложении | Сложная SPA не нужна для результатов стенда |
 | OpenTelemetry + LGTM | Связь запросов, логов, метрик и async-обработки | Телеметрия может теряться отдельно от доказательных access-логов |
@@ -102,7 +102,7 @@ Control не проксирует каждую покупку через себ�
 ```text
 apps/
   shop-api/          # auth, catalog, cart, checkout, orders, runtime, access logs
-  lab-gateway/       # listeners, routing, policies, admission, access logs
+  lab-gateway/       # listeners, routing, Runtime admission, access logs
   lab-detector/      # ingestion, rules, windows, incidents, HTTP ingestion
   lab-control/       # orchestration, fixtures, evaluator, ui, reports
   lab-control/src/main/java/lab/control/runner/ # plan, scenarios, executor; часть Control
@@ -191,36 +191,17 @@ Vulnerable пропускает lookup/уникальность key и пров�
 
 Каталог и условия купонов заморожены до отчёта. Поэтому достаточно unit_price позиции и полного response_body заказа; отдельных исторических полей и версий каталога нет. Приватный fixture manifest служит независимым эталоном evaluator. Срок купона проверяется по бизнес-часам строго now < expiresAt, JWT - по реальным часам. JWT многократен: защита от повторного эффекта не запрещает новые допустимые операции обладателю украденного bearer.
 
-## 9. Как реализуется gateway и применение политик
+## 9. Gateway и защита внутри Shop
 
-Gateway имеет два бизнес-входа и отдельный служебный интерфейс. Маршрут определяется доверенным входным listener, а не значением Host или заголовком клиента. runId берётся из активного Runtime-контекста. Генератор создаёт X-Request-Id до каждой отправки; Gateway передаёт его в Shop и возвращает в ответе. Для виртуального IP используется один X-Forwarded-For: Gateway доверяет ему только от генератора, Shop - только от Gateway. Role/owner headers клиента не определяют права; Shop самостоятельно проверяет access JWT.
+Gateway — нейтральный HTTP-прокси. Порт 8081 ведёт в shop-vulnerable, 8082 — в shop-protected. Host, query и пользовательские заголовки не переключают backend. Он передаёт метод, путь/query, тело, Authorization, Idempotency-Key, X-Request-Id и ответ upstream. Автоматических повторов бизнес-запросов нет. Ошибки соединения дают 502, таймауты — 504; это инфраструктурные исходы, а не предотвращение атаки.
 
-Внутренние обязанности разделены между admission, routing, PolicyChain, access-log writer и proxy. Admission отвечает, можно ли принимать новые requests этого run. Routing знает фиксированные backend. Политики вычисляют решение, а chain определяет фактическое продолжение или отказ.
+JWT, OpenAPI validation, login limits и backoff выполняются внутри Shop. Оба Shop проверяют JWT для bearer-маршрутов; register/login публичны. Protected дополнительно применяет схему, ограничения входа, owner-check, параметризованный SQL, серверный расчёт цены и транзакционную идемпотентность. Vulnerable не блокирует выбранные учебные нарушения и не применяет login limiter. Общие DTO остаются без Bean Validation; проверки protected выполняются до бизнес-операции в его реализации. Автоматического OBSERVE-режима и shadow counters в MVP нет.
 
-```java
-interface GatewayPolicy {
-    String id();
-    int order();
-    boolean appliesTo(RequestContext request);
-    PolicyEvaluation evaluate(RequestContext request, PolicySnapshot snapshot);
-}
-```
+Общий контроллер lab.shop.api реализует сгенерированный интерфейс и вызывает application. Реализацию выбирает Spring-профиль secured/vulnerable при старте, а не заголовок или Runtime mode. Shop отклоняет несовпадение mode с профилем. Gateway использует mode только для соответствия фиксированному listener/upstream.
 
-Результат содержит policyId/version, evaluationStatus, wouldDecision, reasonCode, duration и безопасные facts. В OFF проверка не выполняется. В OBSERVE вычисляется решение и обновляется отдельное shadow-state, но запрос продолжается. В ENFORCE BLOCK останавливает запрос. FLAG означает продолжение с отметкой и не создаёт incident автоматически.
+Runtime admission OPEN/CLOSED, таймауты, конечные транспортные бюджеты, изоляция и ServiceBearer служебного API сохраняются как инфраструктура стенда. Они не являются экспериментальными защитами. Gateway не проверяет пользовательский JWT, не валидирует бизнес-схему и не принимает решения о login limits. Его access-log user=null; подтверждённый userId пишет Shop. X-Request-Id и trace context передаются сквозным образом; это разные идентификаторы. Виртуальный IP принимается только от доверенного Runner и передаётся Shop.
 
-Нужно хранить обе стороны: `wouldDecision=ALLOW/BLOCK/FLAG` и `enforcedAction=CONTINUE/REJECT/INFRA_REJECT`. Для пропуска/ошибки wouldDecision=null. EvaluationStatus различает EVALUATED, SKIPPED, NOT_APPLICABLE, NOT_REACHED, MISSING_CONTEXT, ERROR. Например, wouldDecision=BLOCK при OBSERVE не увеличивает число реальных блокировок.
-
-Порядок обработки: обязательный admission/ресурсные пределы → обязательный JWT для закрытых endpoints → OpenAPI validation → login/rate policy → дополнительные признаки ввода → разрешённый proxy и итоговая access-запись. После первого отказа остальные экспериментальные проверки имеют NOT_REACHED. Access-логирование является внешней обязательной обвязкой и выполняется даже при раннем 400/401/413/429.
-
-JWT проверяется по фиксированным alg, подписи, issuer, audience, exp и nbf. Начальный TTL access token - 15 минут, clock skew - 5 секунд. Отдельный target имеет свою ожидаемую конфигурацию ключа/claims. Успешная аутентификация устанавливает личность; право прочитать Order по-прежнему проверяет shop.
-
-Rate policy использует Bucket4j in-memory и два бюджета: источник и HMAC нормализованного login. Результат проверки пароля приходит от доверенного shop. На нём строятся backoff/временная блокировка; очереди, задержки и concurrency ограничены. Источник - IP виртуального клиента из доверенного X-Forwarded-For; недоверенный заголовок игнорируется.
-
-State namespace включает runId, policy version и mode, поэтому target/run не наследует чужую блокировку. Переполнение бюджета ключей или внутренняя ошибка limiter закрывают admission, дают 503/INFRA_REJECT и INCONCLUSIVE независимо от mode; это инфраструктурный отказ, а не решение rate policy. Ошибка сохранения обязательного access-лога делает run INCONCLUSIVE; подтверждённый commit не отменяется. Ошибка после downstream требует проверки результата, а не заявления «защита сработала».
-
-Обычная paired-конфигурация: vulnerable с OBSERVE gateway-политик и учебными shop-стратегиями; protected с ENFORCE и защищёнными стратегиями. Общие границы безопасности и access-логирование включены в обоих режимах. Текущий API предоставляет только эти два фиксированных набора; OFF и отдельное исследование стоимости политики не входят в интерфейс запуска.
-
-Локальные buckets и backoff потокобезопасны; один gateway без реплик. PREPARE создаёт чистый run namespace после завершения старых запросов. Бюджет - начальные 10000 ключей на run, фиксируемые в snapshot. TTL не удаляет активный backoff или невосстановленный bucket; cleanup и callback проверяют runId. При restart локальное состояние теряется, run INCONCLUSIVE без продолжения. Новому run задаются чистые данные и политики.
+Bucket4j и backoff принадлежат protected Shop. PREPARE создаёт чистое состояние run после завершения старых работ. Начальный бюджет — 10000 ключей, ограниченный TTL; активные ограничения не вытесняются. Состояние потокобезопасно, callback проверяет runId. Перезапуск или потеря состояния дают INCONCLUSIVE. Р1 отвечает за API/данные, Р2 — за защиту в приложении и gateway-прокси; отдельный сервис защиты не нужен.
 
 ## 10. Как работает встроенный генератор сценариев
 
@@ -457,7 +438,7 @@ Fixture generator создаёт 24 синтетических пользова�
 | Роль | Основной результат | Помощь общей интеграции |
 |---|---|---|
 | Р1: API и данные | Shop в двух режимах, API/DTO, миграции, fixtures, transactions и access logging | Readonly данные и адаптеры независимого oracle |
-| Р2: защита | Gateway, политики, JWT, limiter, access logs | Compose/сети, Runtime/lastSequence, базовая наблюдаемость |
+| Р2: защита | Gateway-прокси; политики, JWT и limiter в Shop; access logs | Compose/сети, Runtime/lastSequence, базовая наблюдаемость |
 | Р3: генератор | Сценарии/benign, seed/планы, concurrency, HTTP execution | Подготовка, запуск и отмена сценариев, ограниченный HTTP-клиент и сохранение результатов |
 | Р4: detector/dashboard | Rules/windows/incidents, control/evaluator, UI и reports | Общая семантика эксперимента и окончательных метрик |
 

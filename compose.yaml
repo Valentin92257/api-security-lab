@@ -30,6 +30,10 @@ services:
     environment:
       SERVER_PORT: "8081"
       GATEWAY_ADDITIONAL_PORT: "8082"
+      SHOP_PROTECTED_URL: "${SHOP_PROTECTED_URL:-http://shop-protected:8080}"
+      GATEWAY_CONNECT_TIMEOUT: "${GATEWAY_CONNECT_TIMEOUT:-2s}"
+      GATEWAY_UPSTREAM_TIMEOUT: "${GATEWAY_UPSTREAM_TIMEOUT:-5s}"
+      GATEWAY_MAX_BODY_BYTES: "${GATEWAY_MAX_BODY_BYTES:-8388608}"
     expose: ["8081", "8082"]
     networks: [lab-traffic, shop-backend, shop-admin, lab-observe]
 
