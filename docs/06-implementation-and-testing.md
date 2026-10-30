@@ -94,6 +94,6 @@ Spring Boot подключает Bean Validation provider; у Shop API авто�
 
 1. Прокси protected: фиксированный listener 8082, конфигурируемый upstream, сохранение HTTP, отключение retries/redirects, конечные таймауты и Problem 502/504.
 2. Корреляция: обязательный X-Request-Id; единый trace_id в MDC, итоговый JSON-лог в Gateway и обоих Shop. Для некорректного ID — 400 и один новый ID отказа. Без бизнес-политик и production-заглушек.
-3. Интеграция и проверки: Compose/environment, health обоих портов, тестовый upstream и HTTP-тесты Shop, smoke на запущенных контейнерах. Тесты и smoke подготовлены; выполнение Docker-сборки и совместной проверки ещё требуется.
+3. Интеграция и проверки: Compose/environment, health обоих портов, тестовый upstream и HTTP-тесты Shop; ручная проверка запросами на запущенных контейнерах.
 
 Минимальный лог каркаса содержит service/trace_id/method/path/status/duration_ms, без query, тел и credentials. Это диагностическая корреляция, не готовый контракт Detector: sequence/runId/user/req_hash и LogBatch будут отдельной задачей. Runtime admission и vulnerable-маршрут также ещё не реализованы. Команды и настройки приведены в корневом README.
