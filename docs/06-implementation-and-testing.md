@@ -89,3 +89,11 @@ Regression падает при нарушении обещанного protected
 Регистрация: проверить 201 User и пустую Cart с revision=0, отсутствие password/hash в ответе и логах, вход созданного пользователя, 400 для невалидных полей и 409 CONFLICT после нормализации. Гонка одинаковых регистраций создаёт ровно одного пользователя и одну корзину; ошибка создания корзины откатывает пользователя. Проверки одинаковы для vulnerable и protected.
 
 Spring Boot подключает Bean Validation provider; у Shop API автоматический @Valid отключён для учебных режимов, Runtime/Control/Detector сохраняют валидацию.
+
+## План и границы SECURITYLAB-13
+
+1. Прокси protected: фиксированный listener 8082, конфигурируемый upstream, сохранение HTTP, отключение retries/redirects, конечные таймауты и Problem 502/504.
+2. Корреляция: обязательный X-Request-Id; единый trace_id в MDC, итоговый JSON-лог в Gateway и обоих Shop. Для некорректного ID — 400 и один новый ID отказа. Без бизнес-политик и production-заглушек.
+3. Интеграция и проверки: Compose/environment, health обоих портов, тестовый upstream и HTTP-тесты Shop, smoke на запущенных контейнерах. Тесты и smoke подготовлены; выполнение Docker-сборки и совместной проверки ещё требуется.
+
+Минимальный лог каркаса содержит service/trace_id/method/path/status/duration_ms, без query, тел и credentials. Это диагностическая корреляция, не готовый контракт Detector: sequence/runId/user/req_hash и LogBatch будут отдельной задачей. Runtime admission и vulnerable-маршрут также ещё не реализованы. Команды и настройки приведены в корневом README.
