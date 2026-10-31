@@ -17,6 +17,7 @@
     <java.version>25</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <openapi-generator.version>7.26.0</openapi-generator.version>
+    <spoltess.version>3.10.4</spoltess.version>
   </properties>
   <modules>
     <module>apps/shop-api</module>
@@ -65,5 +66,30 @@
         </plugin>
       </plugins>
     </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>${spoltess.version}</version>
+        <configuration>
+          <java>
+            <removeUnusedImports/>
+            <lineEndings>WINDOWS</lineEndings>
+            <includes>
+              <include>target/generated-sources/**/*.java</include>
+            </includes>
+          </java>
+        </configuration>
+        <executions>
+          <execution>
+            <id>spotless-format</id>
+            <phase>process-sources</phase>
+            <goals>
+              <goal>apply</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
   </build>
 </project>
