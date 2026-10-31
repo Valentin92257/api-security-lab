@@ -1,0 +1,13 @@
+spring:
+  config:
+    import: "optional:file:src/main/resources/application.yaml"
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+  flyway:
+    enabled: false
+management:
+  health:
+    db:
+      enabled: false
