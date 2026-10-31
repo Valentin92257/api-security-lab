@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("protected")
 public final class SecuredShopImplementation implements ShopImplementation {
+
     @Override
     public ShopMode mode() {
         return ShopMode.PROTECTED;

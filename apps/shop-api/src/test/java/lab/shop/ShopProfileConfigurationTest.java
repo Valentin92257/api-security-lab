@@ -10,6 +10,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ShopProfileConfigurationTest {
+
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(ShopProfileConfiguration.class,
                     SecuredShopImplementation.class, VulnerableShopImplementation.class);
