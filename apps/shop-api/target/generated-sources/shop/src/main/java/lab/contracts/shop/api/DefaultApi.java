@@ -11,6 +11,7 @@ import lab.contracts.shop.model.LoginRequest;
 import lab.contracts.shop.model.LoginResult;
 import org.springframework.lang.Nullable;
 import lab.contracts.shop.model.Order;
+import lab.contracts.shop.model.Problem;
 import lab.contracts.shop.model.Product;
 import lab.contracts.shop.model.RegisterRequest;
 import lab.contracts.shop.model.SelectCouponRequest;
@@ -20,8 +21,11 @@ import lab.contracts.shop.model.User;
 import org.springframework.http.ResponseEntity;
 
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import jakarta.annotation.Generated;
 
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")

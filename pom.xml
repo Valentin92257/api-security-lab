@@ -73,7 +73,6 @@
         <version>${spoltess.version}</version>
         <configuration>
           <java>
-            <removeUnusedImports/>
             <lineEndings>WINDOWS</lineEndings>
             <includes>
               <include>target/generated-sources/**/*.java</include>
