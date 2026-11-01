@@ -7,7 +7,6 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 
 import lab.control.trial.TrialRepository;
-import lab.control.trial.TrialService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -22,9 +21,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 class HealthEndpointTest {
     @MockitoBean
     private TrialRepository repository;
-
-    @MockitoBean
-    private TrialService trials;
 
     @LocalServerPort
     private int port;

@@ -152,4 +152,4 @@ MVP измеряет защиту при непрерывной работе п�
 
 Один образ shop-api запускается с профилями protected/vulnerable. Они выбирают lab.shop.secured и lab.shop.vulnerable соответственно; без профиля или с обоими запуск отклоняется. ShopImplementation.mode() обозначает выбранный вариант, не готовую бизнес-логику. Actuator предоставляет /health; существующие тесты проверяют оба режима и неверные конфигурации.
 
-HTTP-контроллеры Shop при реализации используют lab.contracts.shop.api.DefaultApi и DTO lab.contracts.shop.model, делегируя бизнес-операции в application. Runtime, Detector и Control аналогично используют свои сгенерированные интерфейсы. Сейчас бизнес-контроллеров нет; Spring Boot-сборка уже генерирует, компилирует и включает эти классы в app.jar.
+HTTP-контроллеры Shop при реализации используют lab.contracts.shop.api.DefaultApi и DTO lab.contracts.shop.model, делегируя бизнес-операции в application. Runtime, Detector и Control аналогично используют свои сгенерированные интерфейсы. Сборка генерирует, компилирует и включает эти классы в app.jar.

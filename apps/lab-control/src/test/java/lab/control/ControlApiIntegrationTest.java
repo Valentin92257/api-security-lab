@@ -76,7 +76,7 @@ class ControlApiIntegrationTest {
     }
 
     @Test
-    void createsReadsAndListsTrialWithoutPretendingToRunScenarios() throws Exception {
+    void createsReadsAndListsTrial() throws Exception {
         var response = post(UUID.randomUUID(), BODY);
         assertThat(response.statusCode()).isEqualTo(202);
         assertThat(response.headers().firstValue("cache-control")).contains("no-store");
@@ -108,7 +108,8 @@ class ControlApiIntegrationTest {
         assertThat(repeated.statusCode()).isEqualTo(200);
         assertThat(body(repeated)).isEqualTo(first);
         assertThat(first.get("seed").asInt()).isNotNegative();
-        assertThat(post(key, BODY).statusCode()).isEqualTo(409);
+        assertThat(post(key, "{\"families\":[\"BOLA\",\"REPLAY\"],\"seed\":" + first.get("seed").asInt() + "}")
+                .statusCode()).isEqualTo(409);
         assertThat(post(UUID.randomUUID(), original).statusCode()).isEqualTo(409);
         assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isEqualTo(1);
     }
@@ -249,6 +250,25 @@ class ControlApiIntegrationTest {
                 .header("Content-Type", "text/plain").header("Idempotency-Key", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.ofString(BODY)).build();
         assertProblem(HTTP.send(request, HttpResponse.BodyHandlers.ofString()), 415, "INVALID_REQUEST");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "application/problem+json", "text/plain",
+            "application/json;q=0,*/*;q=1", "application/*;q=0,*/*;q=1"
+    })
+    void rejectsUnsupportedAcceptBeforeCreatingTrial(String accept) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/control/v1/trials"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer integration-token")
+                .header("Content-Type", "application/json")
+                .header("Accept", accept)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .POST(HttpRequest.BodyPublishers.ofString(BODY)).build();
+        assertProblem(HTTP.send(request, HttpResponse.BodyHandlers.ofString()), 406, "INVALID_REQUEST");
+        assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
+        assertThat(admin.sql("SELECT trial_id IS NULL FROM control.execution_slot WHERE id = 1")
+                .query(Boolean.class).single()).isTrue();
     }
 
     @Test
