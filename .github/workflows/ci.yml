@@ -41,6 +41,7 @@ jobs:
     needs: build-and-test
     steps:
       - uses: actions/checkout@v7
+      - run: cp .env.example .env
       - name: Build images
         run: docker compose build
       - name: Start stack
