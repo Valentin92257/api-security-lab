@@ -1,4 +1,4 @@
-package lab.shop.vulnerable;
+package lab.shop.secured;
 
 import lab.shop.PostgreSQLIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
@@ -10,8 +10,8 @@ import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@ActiveProfiles("vulnerable")
-class VulnerableFlywayMigrationIT extends PostgreSQLIntegrationTest {
+@ActiveProfiles("protected")
+class ProtectedFlywayMigrationIntegrationTest extends PostgreSQLIntegrationTest {
 
     @Autowired
     private JdbcClient jdbcClient;
@@ -46,8 +46,8 @@ class VulnerableFlywayMigrationIT extends PostgreSQLIntegrationTest {
             "orders_cart_revision_once",
             "orders_idempotency_scope_once"
     })
-    @DisplayName("В уязвимом профиле отсутствуют защитные констрейнты")
-    void shouldNotContainProtectedConstraints(String constraintName) {
+    @DisplayName("В защищенном профиле присутствуют защитные констрейнты")
+    void shouldContainProtectedConstraints(String constraintName) {
         Integer count = jdbcClient.sql(
                         "SELECT count(*) FROM information_schema.table_constraints " +
                                 "WHERE table_schema = 'public' AND constraint_name = ?"
@@ -58,6 +58,6 @@ class VulnerableFlywayMigrationIT extends PostgreSQLIntegrationTest {
 
         assertThat(count)
                 .as("Защитный констрейнт '%s' должен отсутствовать в уязвимом профиле", constraintName)
-                .isZero();
+                .isOne();
     }
 }
