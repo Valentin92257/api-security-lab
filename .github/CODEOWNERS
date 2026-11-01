@@ -1,0 +1,3 @@
+# Остальное проверяет ревьюер, которого назначает auto-reviewer.yml
+/.github/     @valentin92257 @pestrikovmihail
+/contracts/   @pestrikovmihail @valentin92257
