@@ -65,7 +65,6 @@ public class TrialController implements DefaultApi {
     void requireJsonResponse(NativeWebRequest request) throws HttpMediaTypeNotAcceptableException {
         var accepted = new HeaderContentNegotiationStrategy().resolveMediaTypes(request).stream()
                 .filter(type -> type.includes(MediaType.APPLICATION_JSON))
-                // A specific q=0 excludes JSON even when a wildcard permits it.
                 .reduce((first, next) -> next.removeQualityValue().isMoreSpecific(first.removeQualityValue())
                         ? next : first);
         if (accepted.isEmpty() || accepted.get().getQualityValue() == 0) {

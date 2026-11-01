@@ -21,10 +21,10 @@ docker compose up -d --wait
 docker compose exec lab-control curl --fail http://127.0.0.1:8080/health
 ```
 
-Сначала build создаёт общий образ shop для обоих контейнеров. Maven и JDK работают
-в build-stage Dockerfile, тесты выполняются при сборке. Локальные Maven/JDK не нужны. `pom.xml` остаются конфигурацией сборки внутри Docker.
-Образ сборки - [Maven 3.9.11 / Temurin 25](https://hub.docker.com/_/maven).
-Runtime Java-приложений - `eclipse-temurin:25-jre-alpine`; `curl` для healthcheck устанавливается через `apk`.
+Docker собирает общий образ shop для обоих контейнеров. Сборка и тесты выполняются
+в [Maven 3.9.11 / Temurin 25](https://hub.docker.com/_/maven); локальные Maven и JDK не нужны.
+Java-приложения работают на `eclipse-temurin:25-jre-alpine`.
+`curl` для healthcheck устанавливается через `apk`.
 
 ```sh
 docker compose ps
@@ -33,48 +33,47 @@ docker compose exec lab-detector curl --fail http://127.0.0.1:8080/health
 docker compose down
 ```
 
-Только для control настроена публикация на `127.0.0.1:8080`; порт задаётся через `LAB_CONTROL_PORT`
-(пример `.env.example`). Остальные сервисы доступны в Docker-сетях. У каждого сервиса
-есть `/health` и Docker healthcheck; gateway слушает 8081 и 8082.
+Control опубликован на `127.0.0.1:8080`; порт задаётся через `LAB_CONTROL_PORT`
+в `.env`. Остальные сервисы доступны внутри Docker-сетей.
+У Java-приложений есть `/health` и Docker healthcheck; Gateway слушает 8081 и 8082.
 
 На Docker Engine 29.5.2 порт контейнера, подключённого только к `internal`-сетям,
-может быть недоступен с host. Поэтому команды здесь выполняются через
+может быть недоступен с хоста. Поэтому команды здесь выполняются через
 `docker compose exec`. Подробнее: [Moby #53256](https://github.com/moby/moby/discussions/53256).
 
-Control создаёт и читает эксперименты в PostgreSQL; его health проверяет БД.
-Shop/Gateway/Detector пока предоставляют каркас и health. Маршрутизация, защита,
+Control создаёт и читает эксперименты; его health проверяет PostgreSQL.
+В Shop/Gateway/Detector пока есть только каркас и health. Маршрутизация, защита,
 исполнение атак, UI, анализ Detector, LGTM и бизнес-миграции Shop ещё не подключены.
 Java-контейнеры работают без root; файловая система read-only, временные файлы - в `/tmp`.
 
-Один сервис `db` с PostgreSQL 17 хранит БД `lab_control`, `vulnerable` и `protected`
-в существующем volume `control-data`. БД магазина подготовлены для его миграций.
-Обычный `docker compose down`
-сохраняет данные, `docker compose down --volumes` удаляет их. PostgreSQL доступен
-только внутри Docker-сети.
+PostgreSQL 17 работает в сервисе `db`. БД `lab_control`, `vulnerable` и `protected`
+хранятся в volume `control-data`; две последние подготовлены под миграции Shop.
+`docker compose down` сохраняет данные, `docker compose down --volumes` удаляет их.
+PostgreSQL доступен только внутри Docker-сети.
 
 При переходе с прежнего сервиса `postgres` сначала выполни
 `docker compose down --remove-orphans`, затем `docker compose up --build -d --wait`.
-Это останавливает старый сервер перед подключением того же volume к `db` и сохраняет данные.
+Старый сервер остановится, `db` подключит тот же volume. Данные сохранятся.
 
-В БД две таблицы: `trials` с параметрами, состоянием и ключом создания эксперимента
-и `execution_slot` с единственным слотом. Они сохраняют историю и идемпотентность
-после рестарта, а транзакция не позволяет двум запросам одновременно занять слот.
+В БД Control две таблицы: `trials` хранит параметры, состояние и ключ создания,
+`execution_slot` - единственный слот. Создание trial и занятие слота выполняются
+в одной транзакции; история и ключи сохраняются после рестарта.
 
-`db-init` после готовности PostgreSQL создаёт отсутствующие БД и роль `control_app`.
-Он безопасен для повторного запуска и работает с уже заполненным volume.
-Он напрямую запускает `psql` с `db/init/bootstrap.sql`; общая подготовка роли
-находится в `db/control/role.sql` и используется также интеграционными тестами.
-Затем `lab-control-migrate` запускает официальный образ Flyway перед Control и завершается.
-Flyway создаёт схему `control` и применяет SQL из `db/control/migrations`.
-HTTP-приложение использует роль `control_app` с DML-правами на свои таблицы,
-без DDL и доступа к истории Flyway. Административный пароль ему не передаётся.
-Общие ограничения контейнеров находятся в `compose.common.yaml`; credentials передаются
-сервисам явно. `POSTGRES_USER` по умолчанию равен `lab_admin` и должен совпадать
-с администратором существующего volume. Изменение `.env` не меняет уже созданные роли и пароли.
+После готовности PostgreSQL `db-init` запускает `db/init/bootstrap.sql` через `psql`:
+создаёт отсутствующие БД и роль `control_app`. Роль описана в `db/control/role.sql`,
+который используют и интеграционные тесты. Повторный запуск безопасен для заполненного volume.
+Затем `lab-control-migrate` запускает Flyway: создаёт схему `control` и применяет
+SQL из `db/control/migrations`. Control стартует после миграций и использует
+`control_app` с DML-правами, без DDL и доступа к истории Flyway. Административного пароля у приложения нет.
 
-Начальные таблицы находятся в `V1__trials.sql`, права runtime-роли - в `V2__runtime_permissions.sql`.
-Для следующего изменения БД добавь `V3__name.sql`, затем `V4__name.sql` и так далее.
-Таблицы, индексы и права меняются в миграциях. Уже применённые файлы не редактируются.
+Общие ограничения контейнеров находятся в `compose.common.yaml`.
+Секреты передаются только нужным сервисам. `POSTGRES_USER` по умолчанию равен `lab_admin`
+и должен совпадать с администратором существующего volume.
+Изменение `.env` не меняет уже созданные роли и пароли.
+
+`V1__trials.sql` создаёт таблицы, `V2__runtime_permissions.sql` задаёт права роли.
+Для изменения таблиц, индексов и прав добавляй следующие миграции: `V3__name.sql`,
+`V4__name.sql` и далее. Применённые файлы не редактируй.
 Обновить существующую БД без удаления данных:
 
 ```sh
@@ -86,11 +85,11 @@ docker compose up -d --wait lab-control
 
 ## Создание эксперимента
 
-[ADR runner](docs/adr/0001-runner-inside-control.md).
+Решение по runner - в [ADR](docs/adr/0001-runner-inside-control.md).
 Реализованы `GET /control/v1/scenarios`, `POST /control/v1/trials`,
 `GET /control/v1/trials` и `GET /control/v1/trials/{trialId}`.
 Для доступа нужен Operator Bearer из `LAB_OPERATOR_TOKEN`.
-Пример выполняется в shell контейнера Control, где эта переменная уже задана.
+Пример запускается в shell контейнера Control, где задана эта переменная:
 
 ```sh
 docker compose exec lab-control sh
@@ -105,19 +104,18 @@ curl --fail-with-body http://127.0.0.1:8080/control/v1/trials \
 exit
 ```
 
-Новый trial возвращает 202 и PREPARING. Повтор с тем же ключом и параметрами - 200
-с тем же trial. Другие параметры с прежним ключом или новый ключ при занятом слоте
-дают 409. Порядок families и JSON-полей не влияет на повтор. Если seed не передан,
-Control выбирает его один раз. Отсутствие seed и явное значение считаются разными запросами.
+Первый запрос возвращает 202 и trial в PREPARING. Повтор с тем же ключом и параметрами -
+200 с тем же trial. Другие параметры с прежним ключом или новый ключ при занятом слоте дают 409.
+Порядок families и JSON-полей не влияет на повтор. Если seed не передан, Control выбирает
+его один раз. Отсутствие seed и явное значение считаются разными запросами.
 
 Ошибки возвращаются как `application/problem+json`. Тело запроса ограничено 8 KiB.
 Неизвестные и повторные поля, дубликаты families, неверные типы и `seed: null` дают 400.
 Целый seed можно записать как `42`, `42.0` или `4.2e1`.
 
-Пока реализовано только создание: trial остаётся PREPARING с нулевыми счётчиками
+Пока trial остаётся PREPARING с нулевыми счётчиками
 и `cleanupSafe=false`. После рестарта Control он становится INCONCLUSIVE.
-История и ключ сохраняются, слот остаётся занят. Освобождение слота появится вместе
-с безопасной финализацией; сейчас можно проверить один trial и его повторы.
+Ключ сохраняется, слот остаётся занят. Освобождение слота появится с безопасной финализацией.
 Отмена известного trial возвращает 503, чтение отчёта - 409, неизвестный trial - 404.
 
 Для интеграционных тестов нужны Java 25, Maven и Docker. Тесты запускают
@@ -127,15 +125,16 @@ PostgreSQL 17 через Testcontainers:
 mvn --batch-mode --no-transfer-progress -pl apps/lab-control -am verify
 ```
 
-Общая конвенция имён — `*IntegrationTest`: Surefire исключает их, Failsafe запускает
-на фазах `integration-test` и `verify`. Отдельный профиль не нужен. Docker-сборка
-выполняет `package`, поэтому запускает health-тесты и не требует Docker daemon внутри build.
-Они проверяют создание и чтение trial, валидацию, идемпотентность, конкурирующие
-запросы, rollback, восстановление прерванного trial при реальном перезапуске Control
-и права runtime-роли. Контейнером PostgreSQL управляет JUnit; роль и миграции
-читаются из test classpath, приложение подключается как `control_app`.
+Тесты `*IntegrationTest` исключены из Surefire и запускаются Failsafe на фазах
+`integration-test` и `verify`, без отдельного профиля. Они проверяют создание и чтение trial,
+валидацию, идемпотентность, конкурирующие запросы, rollback, реальный перезапуск Control
+и права `control_app`. Контейнером PostgreSQL управляет JUnit; роль и миграции берутся
+из test classpath, приложение подключается как `control_app`.
 
-[Документация](docs/README.md) · [Архитектура](docs/01-architecture.md)
+Docker-сборка выполняет `package` с модульными тестами, включая health.
+Интеграционные тесты на этой фазе не запускаются, Docker daemon внутри сборки не нужен.
+
+[Документация](docs/README.md) | [Архитектура](docs/01-architecture.md)
 
 ## Реализации магазина
 
@@ -145,10 +144,10 @@ mvn --batch-mode --no-transfer-progress -pl apps/lab-control -am verify
 
 ```text
 lab.shop
-├── api           общие контроллеры; DTO из lab.contracts.shop.model
-├── application   интерфейсы операций
-├── secured       защищённые реализации
-└── vulnerable    намеренно уязвимые реализации
++-- api           общие контроллеры; DTO из lab.contracts.shop.model
++-- application   интерфейсы операций
++-- secured       защищённые реализации
++-- vulnerable    намеренно уязвимые реализации
 ```
 
 Без профиля магазина или с обоими профилями запуск завершается ошибкой.

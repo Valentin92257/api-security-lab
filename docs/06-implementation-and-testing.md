@@ -1,11 +1,11 @@
 # Реализация и приёмка
 
-Сейчас готовы каркас четырёх приложений, Compose/health-checks, [контракты](../contracts/README.md)
-и генерация HTTP-интерфейсов/DTO. В Control реализованы создание и чтение trial,
-хранение в PostgreSQL, миграции Flyway и интеграционные тесты через `mvn verify`.
-Runner, отмена и финализация ещё не подключены. Команды и ограничения - в
+Готовы каркас четырёх приложений, Compose, health-checks, [контракты](../contracts/README.md)
+и генерация HTTP-интерфейсов/DTO. Control создаёт и читает trial в PostgreSQL.
+Миграции выполняет Flyway, тесты запускаются через `mvn verify`.
+Runner, отмена и финализация ещё не подключены. Запуск и ограничения - в
 [README](../README.md#создание-эксперимента), решение по runner - в
-[ADR-0001](adr/0001-runner-inside-control.md). Ниже - общий план разработки и приёмки.
+[ADR-0001](adr/0001-runner-inside-control.md). Далее - план разработки и приёмки.
 
 ## Порядок разработки
 
@@ -39,14 +39,14 @@ Runner, отмена и финализация ещё не подключены.
 | Injection | Реальный canary leakage vulnerable, отсутствие leakage protected, literal punctuation/search и фиксированный порядок по id |
 | Security logs | AccessLog/schema/redaction; один реальный status после commit/rollback/ошибки; sequence 1..N; identical duplicate/conflict; oversized record; отсутствие sampling/drop |
 | Detector | Изоляция от Shop/Control, YAML whitelist AccessLog, out-of-order/ties, отсутствие двойного вклада; FINISHING в границах N, COMPLETED/FAILED только identical retries; конфликт отклоняет всю пачку |
-| Orchestration | Client timeout при продолжающемся SQL, deadline/cancellation и смена instanceId, missing sequence/attempt, finish ниже принятого sequence → 409, запрет reset до quiescence |
+| Orchestration | Client timeout при продолжающемся SQL, deadline/cancellation и смена instanceId, missing sequence/attempt, finish ниже принятого sequence -> 409, запрет reset до quiescence |
 | Исполнение/UI | Один активный trial; UI/cancel доступны при максимальном бюджете runner; отдельные executors; bounded results; остановка без новых retry после cancel/deadline |
 | Метрики/UI | N/A при нуле, incomplete не FN, ошибка family не меняет TP; detection согласован с IncidentAssessment и всеми cases episode, несколько incidents на episode, benign retry, escaping/явный Operator Bearer и отсутствие секретов |
 | Runtime | Внешний egress control закрыт; HTTP-клиент генератора отвергает host/direct backend/management; ArchUnit проверяет зависимости модулей; scoped credentials, INCONCLUSIVE без resume после restart detector/control, measured startup/resource limits |
 
 SQL locks/grants/concurrency проверяются Testcontainers с PostgreSQL, не H2. Unit tests подходят parser/policies и чистым функциям. Независимая state model для setQuantity/coupon/checkout/retry проверяется jqwik; production calculator не используется как expected model. Конкурентные interleavings дополнительно задаются barriers.
 
-Планируемый pipeline внутри Maven-контейнера `mvn verify`: compile → unit/schema/contract → PostgreSQL integration → компактный security smoke. Полная приёмочная серия - `mvn -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Это план будущего pipeline; текущие команды генерации и компиляции приведены в [README](../README.md#генерация-кода-из-openapi). CI проверяет воспроизводимость генерации; после появления реализации pipeline должен соответствовать её фактическим Maven profiles.
+Планируемый pipeline внутри Maven-контейнера `mvn verify`: compile -> unit/schema/contract -> PostgreSQL integration -> компактный security smoke. Полная приёмочная серия - `mvn -Pacceptance verify` с фиксированными seed/budget/config и сохранёнными reports. Это план будущего pipeline; текущие команды генерации и компиляции приведены в [README](../README.md#генерация-кода-из-openapi). CI проверяет воспроизводимость генерации; после появления реализации pipeline должен соответствовать её фактическим Maven profiles.
 
 Regression падает при нарушении обещанного protected-инварианта, неподтверждённом vulnerable baseline, несовместимых snapshots, потере обязательного evidence, нарушении изоляции или утечке секрета. Гонки проверяются серией; отсутствие воспроизведения в серии не выдаётся за успешную демонстрацию. CS-02 и другие объявленные остаточные риски оцениваются по их реальной гарантии.
 
@@ -64,14 +64,14 @@ Regression падает при нарушении обещанного protected
 | FR-23-FR-28 | Schema и неизвестные поля; owner-check; source/account limits/backoff; SQL-параметризация; серверная цена/idempotency/atomic coupon; итоговые access-логи; причины решений - во внутренней диагностике |
 | FR-29 | Два фиксированных набора: vulnerable/OBSERVE и protected/ENFORCE; обязательные эксплуатационные проверки не отключаются |
 | FR-30-FR-35 | AccessLog; независимый Detector и итоговые incidents; UI/progress/cases/reasons; TP/FP/FN; сравнение эффектов/детекции/FP; JSON-отчёт |
-| FR-36-FR-39 | Benign workload для FP; централизованные structured logs; trace runner→gateway→shop→detector; redaction секретов |
+| FR-36-FR-39 | Benign workload для FP; централизованные structured logs; trace runner->gateway->shop->detector; redaction секретов |
 
 ## Нефункциональная приёмка
 
 | Код | Условие готовности |
 |---|---|
 | NFR-1 | Внешний egress control закрыт сетевыми тестами; сценарный HTTP-клиент отвергает внутренние цели кроме gateway. Внутри общей JVM нет отдельной сетевой изоляции runner |
-| NFR-2 | Одна Compose-команда на чистой описанной машине; cold readiness ≤10 минут, downloads учтены, warm time отдельно |
+| NFR-2 | Одна Compose-команда на чистой описанной машине; cold readiness <=10 минут, downloads учтены, warm time отдельно |
 | NFR-3 | Только synthetic data, локальная генерация keys, safe env example и отсутствие реальных секретов |
 | NFR-5 | API отправляет access-логи напрямую Detector без участия Control; отставание обработки допустимо до deadline. Restart/отказ процесса делает run INCONCLUSIVE, восстановления run нет |
 | NFR-6 | Java modules, typed contracts и versioned config, а не несвязанные скрипты |
