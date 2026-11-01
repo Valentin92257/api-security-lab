@@ -1,63 +1,90 @@
 name: api-security-lab
 
-x-java-service: &java-service
-  init: true
-  read_only: true
-  tmpfs:
-    - /tmp:rw,noexec,nosuid,size=128m,mode=1777
-  cap_drop:
-    - ALL
-  security_opt:
-    - no-new-privileges:true
-  stop_grace_period: 30s
-  restart: "no"
-
 services:
   lab-control:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-control/Dockerfile
     ports:
       - "127.0.0.1:${LAB_CONTROL_PORT:-8080}:8080"
-    networks: [lab-traffic, shop-admin, lab-data, lab-observe]
+    networks: [ lab-traffic, shop-admin, lab-data, lab-observe ]
 
   lab-gateway:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-gateway/Dockerfile
     environment:
       SERVER_PORT: "8081"
       GATEWAY_ADDITIONAL_PORT: "8082"
-    expose: ["8081", "8082"]
-    networks: [lab-traffic, shop-backend, shop-admin, lab-observe]
+    expose: [ "8081", "8082" ]
+    networks: [ lab-traffic, shop-backend, shop-admin, lab-observe ]
 
   shop-vulnerable:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: api-security-lab/shop-api:dev
     build:
       context: .
       dockerfile: apps/shop-api/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: vulnerable
-    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   shop-protected:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: api-security-lab/shop-api:dev
     environment:
       SPRING_PROFILES_ACTIVE: protected
-    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   lab-detector:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-detector/Dockerfile
-    networks: [lab-data, lab-observe]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ lab-data, lab-observe ]
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_MULTIPLE_DATABASES: "vulnerable,protected"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [ lab-edge, lab-data ]
 
 networks:
+  lab-edge: { }
   lab-traffic:
     internal: true
   shop-backend:
@@ -68,3 +95,6 @@ networks:
     internal: true
   lab-observe:
     internal: true
+
+volumes:
+  postgres_data: { }
