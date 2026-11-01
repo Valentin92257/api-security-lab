@@ -6,18 +6,25 @@ Shop запускается в двух контейнерах с профиля
 
 ## Запуск
 
-Нужен только Docker с Compose. Из корня проекта:
+Нужен только Docker с Compose. Из корня проекта создай `.env`:
+
+```sh
+cp .env.example .env
+```
+
+Замени три значения `replace-with-*` на случайные секреты.
+Каждый можно получить командой `openssl rand -hex 32`. Затем запусти стенд:
 
 ```sh
 docker compose build
 docker compose up -d --wait
-curl --fail http://127.0.0.1:8080/health
+docker compose exec lab-control curl --fail http://127.0.0.1:8080/health
 ```
 
 Сначала build создаёт общий образ shop для обоих контейнеров. Maven и JDK работают
 в build-stage Dockerfile, тесты выполняются при сборке. Локальные Maven/JDK не нужны. `pom.xml` остаются конфигурацией сборки внутри Docker.
 Образ сборки - [Maven 3.9.11 / Temurin 25](https://hub.docker.com/_/maven).
-Runtime всех сервисов - `eclipse-temurin:25-jre-alpine`; `curl` для healthcheck устанавливается через `apk`.
+Runtime Java-приложений - `eclipse-temurin:25-jre-alpine`; `curl` для healthcheck устанавливается через `apk`.
 
 ```sh
 docker compose ps
@@ -26,13 +33,92 @@ docker compose exec lab-detector curl --fail http://127.0.0.1:8080/health
 docker compose down
 ```
 
-Только control опубликован на `127.0.0.1:8080`; порт задаётся через `LAB_CONTROL_PORT`
+Только для control настроена публикация на `127.0.0.1:8080`; порт задаётся через `LAB_CONTROL_PORT`
 (пример `.env.example`). Остальные сервисы доступны в Docker-сетях. У каждого сервиса
 есть `/health` и Docker healthcheck; gateway слушает 8081 и 8082.
 
-Это каркас: health проверяет процесс, бизнес-ручек, маршрутизации, защиты, UI и detector
-пока нет. PostgreSQL/LGTM добавятся с реализацией соответствующих компонентов.
-Контейнеры работают без root; файловая система read-only, временные файлы - в `/tmp`.
+На Docker Engine 29.5.2 порт контейнера, подключённого только к `internal`-сетям,
+может быть недоступен с host. Поэтому команды здесь выполняются через
+`docker compose exec`. Подробнее: [Moby #53256](https://github.com/moby/moby/discussions/53256).
+
+Control создаёт и читает эксперименты в PostgreSQL; его health проверяет БД.
+Shop/Gateway/Detector пока предоставляют каркас и health. Маршрутизация, защита,
+исполнение атак, UI, анализ Detector, LGTM и бизнес-БД Shop ещё не подключены.
+Java-контейнеры работают без root; файловая система read-only, временные файлы - в `/tmp`.
+
+БД `lab_control` хранится в volume `control-data`. Обычный `docker compose down`
+сохраняет данные, `docker compose down --volumes` удаляет их. PostgreSQL доступен
+только внутри Docker-сети.
+
+В БД две таблицы: `trials` с параметрами, состоянием и ключом создания эксперимента
+и `execution_slot` с единственным слотом. Они сохраняют историю и идемпотентность
+после рестарта, а транзакция не позволяет двум запросам одновременно занять слот.
+
+`lab-control-migrate` запускает официальный образ Flyway перед Control и завершается.
+Flyway создаёт схему `control` и применяет SQL из `db/control/migrations`.
+HTTP-приложение использует роль `control_app` с DML-правами на свои таблицы,
+без DDL и доступа к истории Flyway. Административный пароль ему не передаётся.
+Стартовый скрипт PostgreSQL создаёт только роль с паролем при первом запуске с пустым volume;
+изменение `.env` не меняет пароль уже созданной роли.
+
+Начальные таблицы находятся в `V1__trials.sql`, права runtime-роли - в `V2__runtime_permissions.sql`.
+Для следующего изменения БД добавь `V3__name.sql`, затем `V4__name.sql` и так далее.
+Таблицы, индексы и права меняются в миграциях. Уже применённые файлы не редактируются.
+Обновить существующую БД без удаления данных:
+
+```sh
+docker compose stop lab-control
+docker compose run --rm lab-control-migrate
+docker compose up -d --wait lab-control
+```
+
+## Создание эксперимента
+
+[План задачи #21](docs/plans/21-lab-control.md) и [ADR runner](docs/adr/0001-runner-inside-control.md).
+Реализованы `GET /control/v1/scenarios`, `POST /control/v1/trials`,
+`GET /control/v1/trials` и `GET /control/v1/trials/{trialId}`.
+Для доступа нужен Operator Bearer из `LAB_OPERATOR_TOKEN`.
+Пример выполняется в shell контейнера Control, где эта переменная уже задана.
+
+```sh
+docker compose exec lab-control sh
+trial_key=$(cat /proc/sys/kernel/random/uuid)
+curl --fail-with-body -i http://127.0.0.1:8080/control/v1/trials \
+  -H "Authorization: Bearer $LAB_OPERATOR_TOKEN" \
+  -H "Idempotency-Key: $trial_key" \
+  -H 'Content-Type: application/json' \
+  --data '{"families":["BOLA","REPLAY"],"seed":42}'
+curl --fail-with-body http://127.0.0.1:8080/control/v1/trials \
+  -H "Authorization: Bearer $LAB_OPERATOR_TOKEN"
+exit
+```
+
+Новый trial возвращает 202 и PREPARING. Повтор с тем же ключом и параметрами - 200
+с тем же trial. Другие параметры с прежним ключом или новый ключ при занятом слоте
+дают 409. Порядок families и JSON-полей не влияет на повтор. Если seed не передан,
+Control выбирает его один раз. Отсутствие seed и явное значение считаются разными запросами.
+
+Ошибки возвращаются как `application/problem+json`. Тело запроса ограничено 8 KiB.
+Неизвестные и повторные поля, дубликаты families, неверные типы и `seed: null` дают 400.
+Целый seed можно записать как `42`, `42.0` или `4.2e1`.
+
+Пока реализовано только создание: trial остаётся PREPARING с нулевыми счётчиками
+и `cleanupSafe=false`. После рестарта Control он становится INCONCLUSIVE.
+История и ключ сохраняются, слот остаётся занят. Освобождение слота появится вместе
+с безопасной финализацией; сейчас можно проверить один trial и его повторы.
+Отмена известного trial возвращает 503, чтение отчёта - 409, неизвестный trial - 404.
+
+Для интеграционных тестов нужны Java 25, Maven и Docker. Тесты запускают
+PostgreSQL 17 через Testcontainers:
+
+```sh
+mvn --batch-mode --no-transfer-progress -pl apps/lab-control -am -Ppostgres-tests verify
+```
+
+Обычная Docker-сборка запускает health-тесты. Интеграционные тесты включаются
+профилем `postgres-tests`: во время `docker build` Docker daemon недоступен.
+Они проверяют создание и чтение trial, валидацию, идемпотентность, конкурирующие
+запросы, rollback, обработку прерванного trial и права runtime-роли.
 
 [Документация](docs/README.md) · [Архитектура](docs/01-architecture.md)
 

@@ -1,0 +1,3 @@
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE lab_control TO control_app;
+GRANT USAGE ON SCHEMA control TO control_app;

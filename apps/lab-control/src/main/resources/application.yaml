@@ -1,6 +1,13 @@
 spring:
   application:
     name: lab-control
+  datasource:
+    url: ${LAB_CONTROL_DB_URL:jdbc:postgresql://postgres:5432/lab_control}
+    username: control_app
+    password: ${LAB_CONTROL_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 4
+      connection-timeout: 5000
   threads:
     virtual:
       enabled: true
@@ -16,3 +23,6 @@ management:
   endpoint:
     health:
       show-details: never
+lab:
+  control:
+    operator-token: ${LAB_OPERATOR_TOKEN:}
