@@ -1,9 +1,5 @@
 package lab.control.http;
 
-import java.beans.PropertyEditorSupport;
-import java.util.Set;
-import java.util.UUID;
-
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lab.control.trial.TrialException;
@@ -15,10 +11,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.TransactionException;
-import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.InitBinder;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
@@ -27,31 +20,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 class ControlExceptionHandler extends ResponseEntityExceptionHandler {
-    @ModelAttribute
-    void validateQuery(HttpServletRequest request) {
-        Set<String> allowed = request.getMethod().equals("GET") && request.getServletPath().endsWith("/trials")
-                ? Set.of("limit", "offset") : Set.of();
-        request.getParameterMap().forEach((name, values) -> {
-            if (!allowed.contains(name) || values.length != 1 || !values[0].matches("[0-9]+")) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Некорректные query-параметры");
-            }
-        });
-    }
-
-    @InitBinder
-    void strictUuid(WebDataBinder binder) {
-        binder.registerCustomEditor(UUID.class, new PropertyEditorSupport() {
-            @Override
-            public void setAsText(String input) {
-                UUID id = UUID.fromString(input);
-                if (!id.toString().equalsIgnoreCase(input)) {
-                    throw new IllegalArgumentException("Expected a full UUID");
-                }
-                setValue(id);
-            }
-        });
-    }
-
     @ExceptionHandler(TrialException.class)
     ResponseEntity<Object> trialError(TrialException error, HttpServletRequest request) {
         HttpStatus status = switch (error.reason()) {
@@ -81,9 +49,6 @@ class ControlExceptionHandler extends ResponseEntityExceptionHandler {
     protected ResponseEntity<Object> handleExceptionInternal(Exception error, Object body, HttpHeaders headers,
                                                               HttpStatusCode status, WebRequest request) {
         HttpStatus resolved = HttpStatus.resolve(status.value());
-        if (resolved == HttpStatus.NOT_ACCEPTABLE) {
-            resolved = HttpStatus.BAD_REQUEST;
-        }
         String title = error instanceof ResponseStatusException response && response.getReason() != null
                 ? response.getReason() : "HTTP-запрос не может быть обработан";
         return problem(resolved != null ? resolved : HttpStatus.INTERNAL_SERVER_ERROR,

@@ -14,7 +14,7 @@ final class ControlProblems {
 
     static Problem create(HttpStatus status, String title, HttpServletRequest request) {
         var code = switch (status) {
-            case BAD_REQUEST, METHOD_NOT_ALLOWED, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE -> Problem.CodeEnum.INVALID_REQUEST;
+            case BAD_REQUEST, METHOD_NOT_ALLOWED, NOT_ACCEPTABLE, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE -> Problem.CodeEnum.INVALID_REQUEST;
             case UNAUTHORIZED -> Problem.CodeEnum.UNAUTHORIZED;
             case FORBIDDEN -> Problem.CodeEnum.FORBIDDEN;
             case NOT_FOUND -> Problem.CodeEnum.NOT_FOUND;

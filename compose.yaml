@@ -1,20 +1,10 @@
 name: api-security-lab
 
-x-java-service: &java-service
-  init: true
-  read_only: true
-  tmpfs:
-    - /tmp:rw,noexec,nosuid,size=128m,mode=1777
-  cap_drop:
-    - ALL
-  security_opt:
-    - no-new-privileges:true
-  stop_grace_period: 30s
-  restart: "no"
-
 services:
   lab-control:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-control/Dockerfile
@@ -26,79 +16,122 @@ services:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:${LAB_CONTROL_PORT:-8080}:8080"
-    networks: [lab-traffic, shop-admin, lab-data, lab-observe]
+    networks: [ lab-traffic, shop-admin, lab-data, lab-observe ]
 
   lab-control-migrate:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: flyway/flyway:11.14.1-alpine
     user: "10001:10001"
     command: migrate
     environment:
-      FLYWAY_URL: jdbc:postgresql://postgres:5432/lab_control
-      FLYWAY_USER: lab_admin
+      FLYWAY_URL: jdbc:postgresql://db:5432/lab_control
+      FLYWAY_USER: ${POSTGRES_USER:-lab_admin}
       FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       FLYWAY_DEFAULT_SCHEMA: control
       FLYWAY_LOCATIONS: filesystem:/flyway/sql
     volumes:
       - ./db/control/migrations:/flyway/sql:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     healthcheck:
       disable: true
-    networks: [lab-data]
+    networks: [ lab-data ]
 
-  postgres:
+  db-init:
+    extends:
+      file: compose.common.yaml
+      service: java-service
+    image: postgres:17-alpine
+    user: "10001:10001"
+    entrypoint: [ "psql" ]
+    command: [ "-X", "-v", "ON_ERROR_STOP=1", "-f", "/bootstrap/init/bootstrap.sql" ]
+    environment:
+      PGHOST: db
+      PGDATABASE: postgres
+      PGUSER: ${POSTGRES_USER:-lab_admin}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
+    volumes:
+      - ./db:/bootstrap:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ lab-data ]
+
+  db:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: lab_control
-      POSTGRES_USER: lab_admin
+      POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
     volumes:
       - control-data:/var/lib/postgresql/data
-      - ./db/control/init-role.sh:/docker-entrypoint-initdb.d/10-control.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U lab_admin -d lab_control"]
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d postgres" ]
       interval: 5s
       timeout: 5s
       retries: 10
-    networks: [lab-data]
+    networks: [ lab-data ]
 
   lab-gateway:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-gateway/Dockerfile
     environment:
       SERVER_PORT: "8081"
       GATEWAY_ADDITIONAL_PORT: "8082"
-    expose: ["8081", "8082"]
-    networks: [lab-traffic, shop-backend, shop-admin, lab-observe]
+    expose: [ "8081", "8082" ]
+    networks: [ lab-traffic, shop-backend, shop-admin, lab-observe ]
 
   shop-vulnerable:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: api-security-lab/shop-api:dev
     build:
       context: .
       dockerfile: apps/shop-api/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: vulnerable
-    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   shop-protected:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: api-security-lab/shop-api:dev
     environment:
       SPRING_PROFILES_ACTIVE: protected
-    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   lab-detector:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-detector/Dockerfile
-    networks: [lab-data, lab-observe]
+    networks: [ lab-data, lab-observe ]
 
 networks:
   lab-traffic:

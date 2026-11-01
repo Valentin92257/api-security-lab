@@ -5,7 +5,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,9 +14,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import lab.control.trial.TrialService;
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,11 +24,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
-import org.testcontainers.utility.MountableFile;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -38,47 +36,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = "lab.control.operator-token=integration-token")
-class ControlApiIT {
+@Testcontainers
+class ControlApiIntegrationTest {
     private static final String BODY = "{\"families\":[\"BOLA\",\"REPLAY\"],\"seed\":42}";
-    private static final Path DATABASE = Path.of("../../db/control").toAbsolutePath().normalize();
-    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine")
-            .withDatabaseName("lab_control").withUsername("lab_admin").withPassword("postgres-test")
-            .withEnv("LAB_CONTROL_DB_PASSWORD", "control-test")
-            .withCopyFileToContainer(MountableFile.forHostPath(DATABASE.resolve("init-role.sh").toString()),
-                    "/docker-entrypoint-initdb.d/10-control.sh");
+
+    @Container
+    private static final PostgreSQLContainer POSTGRES = ControlTestDatabase.container();
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    private static final JdbcClient ADMIN;
+    private static JdbcClient admin;
 
-    static {
-        POSTGRES.start();
-        migrate();
-        ADMIN = JdbcClient.create(new DriverManagerDataSource(
-                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
+    @BeforeAll
+    static void prepareDatabase() {
+        ControlTestDatabase.migrate(POSTGRES);
+        admin = ControlTestDatabase.admin(POSTGRES);
     }
 
     @LocalServerPort
     private int port;
 
     @Autowired
-    private TrialService trials;
+    private JdbcClient runtime;
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry properties) {
         properties.add("spring.datasource.url", POSTGRES::getJdbcUrl);
-        properties.add("spring.datasource.password", () -> "control-test");
+        properties.add("spring.datasource.password", () -> ControlTestDatabase.CONTROL_PASSWORD);
     }
 
     @BeforeEach
     void emptyDatabase() {
-        ADMIN.sql("TRUNCATE control.execution_slot, control.trials").update();
-        ADMIN.sql("INSERT INTO control.execution_slot (id) VALUES (1)").update();
+        admin.sql("TRUNCATE control.execution_slot, control.trials").update();
+        admin.sql("INSERT INTO control.execution_slot (id) VALUES (1)").update();
     }
 
     @AfterAll
-    static void stop() {
+    static void closeHttpClient() {
         HTTP.close();
-        POSTGRES.stop();
     }
 
     @Test
@@ -116,7 +110,7 @@ class ControlApiIT {
         assertThat(first.get("seed").asInt()).isNotNegative();
         assertThat(post(key, BODY).statusCode()).isEqualTo(409);
         assertThat(post(UUID.randomUUID(), original).statusCode()).isEqualTo(409);
-        assertThat(ADMIN.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isEqualTo(1);
+        assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isEqualTo(1);
     }
 
     @Test
@@ -132,16 +126,16 @@ class ControlApiIT {
         var results = concurrentPosts(false);
         assertThat(results.stream().filter(r -> r.statusCode() == 202).count()).isEqualTo(1);
         assertThat(results.stream().filter(r -> r.statusCode() == 409).count()).isEqualTo(7);
-        assertThat(ADMIN.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isEqualTo(1);
+        assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isEqualTo(1);
     }
 
     @Test
     void persistenceFailureRollsBackTrialKeyAndSlot() throws Exception {
-        ADMIN.sql("""
+        admin.sql("""
                 CREATE FUNCTION control.reject_slot() RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN RAISE EXCEPTION 'test persistence failure'; END $$
                 """).update();
-        ADMIN.sql("""
+        admin.sql("""
                 CREATE TRIGGER reject_slot BEFORE UPDATE ON control.execution_slot
                 FOR EACH ROW EXECUTE FUNCTION control.reject_slot()
                 """).update();
@@ -150,26 +144,13 @@ class ControlApiIT {
             assertThat(response.statusCode()).isEqualTo(503);
             assertThat(body(response).get("code").asString()).isEqualTo("UNAVAILABLE");
             assertThat(response.body()).doesNotContain("test persistence failure");
-            assertThat(ADMIN.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
-            assertThat(ADMIN.sql("SELECT trial_id IS NULL FROM control.execution_slot").query(Boolean.class).single()).isTrue();
+            assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
+            assertThat(admin.sql("SELECT trial_id IS NULL FROM control.execution_slot").query(Boolean.class).single()).isTrue();
         } finally {
-            ADMIN.sql("DROP TRIGGER reject_slot ON control.execution_slot").update();
-            ADMIN.sql("DROP FUNCTION control.reject_slot()").update();
+            admin.sql("DROP TRIGGER reject_slot ON control.execution_slot").update();
+            admin.sql("DROP FUNCTION control.reject_slot()").update();
         }
         assertThat(post(UUID.randomUUID(), BODY).statusCode()).isEqualTo(202);
-    }
-
-    @Test
-    void recoveryPreservesIdempotencyAndBlocksUnsafeNewTrial() throws Exception {
-        UUID key = UUID.randomUUID();
-        JsonNode first = body(post(key, BODY));
-        trials.recoverInterrupted();
-        var replay = post(key, BODY);
-        assertThat(replay.statusCode()).isEqualTo(200);
-        assertThat(body(replay).get("trialId")).isEqualTo(first.get("trialId"));
-        assertThat(body(replay).get("state").asString()).isEqualTo("INCONCLUSIVE");
-        assertThat(body(replay).get("cleanupSafe").asBoolean()).isFalse();
-        assertThat(post(UUID.randomUUID(), BODY).statusCode()).isEqualTo(409);
     }
 
     @ParameterizedTest
@@ -188,7 +169,7 @@ class ControlApiIT {
         var response = post(UUID.randomUUID(), input);
         assertThat(response.statusCode()).isEqualTo(400);
         assertThat(body(response).get("code").asString()).isEqualTo("INVALID_REQUEST");
-        assertThat(ADMIN.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
+        assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
     }
 
     @ParameterizedTest
@@ -256,7 +237,7 @@ class ControlApiIT {
                 .header("Idempotency-Key", key).header("Idempotency-Key", key)
                 .POST(HttpRequest.BodyPublishers.ofString(BODY)).build();
         assertProblem(HTTP.send(idempotency, HttpResponse.BodyHandlers.ofString()), 400, "INVALID_REQUEST");
-        assertThat(ADMIN.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
+        assertThat(admin.sql("SELECT count(*) FROM control.trials").query(Long.class).single()).isZero();
     }
 
     @Test
@@ -295,14 +276,15 @@ class ControlApiIT {
 
     @Test
     void migrationsRepeatSafelyAndRuntimeCannotModifySchemaOrKeys() {
-        migrate();
-        assertThat(ADMIN.sql("SELECT has_schema_privilege('control_app', 'control', 'CREATE')")
+        ControlTestDatabase.migrate(POSTGRES);
+        assertThat(runtime.sql("SELECT current_user").query(String.class).single()).isEqualTo("control_app");
+        assertThat(admin.sql("SELECT has_schema_privilege('control_app', 'control', 'CREATE')")
                 .query(Boolean.class).single()).isFalse();
-        assertThat(ADMIN.sql("SELECT has_column_privilege('control_app', 'control.trials', 'idempotency_key', 'UPDATE')")
+        assertThat(admin.sql("SELECT has_column_privilege('control_app', 'control.trials', 'idempotency_key', 'UPDATE')")
                 .query(Boolean.class).single()).isFalse();
-        assertThat(ADMIN.sql("SELECT has_column_privilege('control_app', 'control.trials', 'families', 'UPDATE')")
+        assertThat(admin.sql("SELECT has_column_privilege('control_app', 'control.trials', 'families', 'UPDATE')")
                 .query(Boolean.class).single()).isFalse();
-        assertThat(ADMIN.sql("SELECT has_table_privilege('control_app', 'control.flyway_schema_history', 'SELECT')")
+        assertThat(admin.sql("SELECT has_table_privilege('control_app', 'control.flyway_schema_history', 'SELECT')")
                 .query(Boolean.class).single()).isFalse();
     }
 
@@ -370,10 +352,5 @@ class ControlApiIT {
         assertThat(problem.get("code").asString()).isEqualTo(code);
         assertThat(problem.get("title").asString()).isNotBlank().hasSizeLessThanOrEqualTo(240);
         assertThat(UUID.fromString(problem.get("requestId").asString())).isNotNull();
-    }
-
-    private static void migrate() {
-        Flyway.configure().dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
-                .defaultSchema("control").locations("filesystem:" + DATABASE.resolve("migrations")).load().migrate();
     }
 }

@@ -2,7 +2,7 @@
 
 Сейчас готовы каркас четырёх приложений, Compose/health-checks, [контракты](../contracts/README.md)
 и генерация HTTP-интерфейсов/DTO. В Control реализованы создание и чтение trial,
-хранение в PostgreSQL, миграции Flyway и интеграционные тесты `-Ppostgres-tests`.
+хранение в PostgreSQL, миграции Flyway и интеграционные тесты через `mvn verify`.
 Runner, отмена и финализация ещё не подключены. Команды и ограничения - в
 [README](../README.md#создание-эксперимента), решение по runner - в
 [ADR-0001](adr/0001-runner-inside-control.md). Ниже - общий план разработки и приёмки.

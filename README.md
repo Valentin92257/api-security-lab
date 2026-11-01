@@ -43,23 +43,34 @@ docker compose down
 
 Control создаёт и читает эксперименты в PostgreSQL; его health проверяет БД.
 Shop/Gateway/Detector пока предоставляют каркас и health. Маршрутизация, защита,
-исполнение атак, UI, анализ Detector, LGTM и бизнес-БД Shop ещё не подключены.
+исполнение атак, UI, анализ Detector, LGTM и бизнес-миграции Shop ещё не подключены.
 Java-контейнеры работают без root; файловая система read-only, временные файлы - в `/tmp`.
 
-БД `lab_control` хранится в volume `control-data`. Обычный `docker compose down`
+Один сервис `db` с PostgreSQL 17 хранит БД `lab_control`, `vulnerable` и `protected`
+в существующем volume `control-data`. БД магазина подготовлены для его миграций.
+Обычный `docker compose down`
 сохраняет данные, `docker compose down --volumes` удаляет их. PostgreSQL доступен
 только внутри Docker-сети.
+
+При переходе с прежнего сервиса `postgres` сначала выполни
+`docker compose down --remove-orphans`, затем `docker compose up --build -d --wait`.
+Это останавливает старый сервер перед подключением того же volume к `db` и сохраняет данные.
 
 В БД две таблицы: `trials` с параметрами, состоянием и ключом создания эксперимента
 и `execution_slot` с единственным слотом. Они сохраняют историю и идемпотентность
 после рестарта, а транзакция не позволяет двум запросам одновременно занять слот.
 
-`lab-control-migrate` запускает официальный образ Flyway перед Control и завершается.
+`db-init` после готовности PostgreSQL создаёт отсутствующие БД и роль `control_app`.
+Он безопасен для повторного запуска и работает с уже заполненным volume.
+Он напрямую запускает `psql` с `db/init/bootstrap.sql`; общая подготовка роли
+находится в `db/control/role.sql` и используется также интеграционными тестами.
+Затем `lab-control-migrate` запускает официальный образ Flyway перед Control и завершается.
 Flyway создаёт схему `control` и применяет SQL из `db/control/migrations`.
 HTTP-приложение использует роль `control_app` с DML-правами на свои таблицы,
 без DDL и доступа к истории Flyway. Административный пароль ему не передаётся.
-Стартовый скрипт PostgreSQL создаёт только роль с паролем при первом запуске с пустым volume;
-изменение `.env` не меняет пароль уже созданной роли.
+Общие ограничения контейнеров находятся в `compose.common.yaml`; credentials передаются
+сервисам явно. `POSTGRES_USER` по умолчанию равен `lab_admin` и должен совпадать
+с администратором существующего volume. Изменение `.env` не меняет уже созданные роли и пароли.
 
 Начальные таблицы находятся в `V1__trials.sql`, права runtime-роли - в `V2__runtime_permissions.sql`.
 Для следующего изменения БД добавь `V3__name.sql`, затем `V4__name.sql` и так далее.
@@ -68,13 +79,14 @@ HTTP-приложение использует роль `control_app` с DML-п�
 
 ```sh
 docker compose stop lab-control
+docker compose run --rm db-init
 docker compose run --rm lab-control-migrate
 docker compose up -d --wait lab-control
 ```
 
 ## Создание эксперимента
 
-[План задачи #21](docs/plans/21-lab-control.md) и [ADR runner](docs/adr/0001-runner-inside-control.md).
+[ADR runner](docs/adr/0001-runner-inside-control.md).
 Реализованы `GET /control/v1/scenarios`, `POST /control/v1/trials`,
 `GET /control/v1/trials` и `GET /control/v1/trials/{trialId}`.
 Для доступа нужен Operator Bearer из `LAB_OPERATOR_TOKEN`.
@@ -112,13 +124,16 @@ Control выбирает его один раз. Отсутствие seed и я
 PostgreSQL 17 через Testcontainers:
 
 ```sh
-mvn --batch-mode --no-transfer-progress -pl apps/lab-control -am -Ppostgres-tests verify
+mvn --batch-mode --no-transfer-progress -pl apps/lab-control -am verify
 ```
 
-Обычная Docker-сборка запускает health-тесты. Интеграционные тесты включаются
-профилем `postgres-tests`: во время `docker build` Docker daemon недоступен.
+Общая конвенция имён — `*IntegrationTest`: Surefire исключает их, Failsafe запускает
+на фазах `integration-test` и `verify`. Отдельный профиль не нужен. Docker-сборка
+выполняет `package`, поэтому запускает health-тесты и не требует Docker daemon внутри build.
 Они проверяют создание и чтение trial, валидацию, идемпотентность, конкурирующие
-запросы, rollback, обработку прерванного trial и права runtime-роли.
+запросы, rollback, восстановление прерванного trial при реальном перезапуске Control
+и права runtime-роли. Контейнером PostgreSQL управляет JUnit; роль и миграции
+читаются из test classpath, приложение подключается как `control_app`.
 
 [Документация](docs/README.md) · [Архитектура](docs/01-architecture.md)
 

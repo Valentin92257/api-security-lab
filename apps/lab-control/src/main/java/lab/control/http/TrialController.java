@@ -1,11 +1,14 @@
 package lab.control.http;
 
+import java.beans.PropertyEditorSupport;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lab.contracts.control.api.DefaultApi;
 import lab.contracts.control.model.CreateTrialRequest;
 import lab.contracts.control.model.Trial;
@@ -16,7 +19,13 @@ import lab.control.trial.TrialSnapshot;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.accept.HeaderContentNegotiationStrategy;
+import org.springframework.web.bind.WebDataBinder;
+import org.springframework.web.bind.annotation.InitBinder;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
@@ -25,6 +34,43 @@ public class TrialController implements DefaultApi {
 
     public TrialController(TrialService trials) {
         this.trials = trials;
+    }
+
+    @ModelAttribute
+    void validateQuery(HttpServletRequest request) {
+        Set<String> allowed = request.getMethod().equals("GET") && request.getServletPath().endsWith("/trials")
+                ? Set.of("limit", "offset") : Set.of();
+        request.getParameterMap().forEach((name, values) -> {
+            if (!allowed.contains(name) || values.length != 1 || !values[0].matches("[0-9]+")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Некорректные query-параметры");
+            }
+        });
+    }
+
+    @InitBinder
+    void strictUuid(WebDataBinder binder) {
+        binder.registerCustomEditor(UUID.class, new PropertyEditorSupport() {
+            @Override
+            public void setAsText(String input) {
+                UUID id = UUID.fromString(input);
+                if (!id.toString().equalsIgnoreCase(input)) {
+                    throw new IllegalArgumentException("Expected a full UUID");
+                }
+                setValue(id);
+            }
+        });
+    }
+
+    @ModelAttribute
+    void requireJsonResponse(NativeWebRequest request) throws HttpMediaTypeNotAcceptableException {
+        var accepted = new HeaderContentNegotiationStrategy().resolveMediaTypes(request).stream()
+                .filter(type -> type.includes(MediaType.APPLICATION_JSON))
+                // A specific q=0 excludes JSON even when a wildcard permits it.
+                .reduce((first, next) -> next.removeQualityValue().isMoreSpecific(first.removeQualityValue())
+                        ? next : first);
+        if (accepted.isEmpty() || accepted.get().getQualityValue() == 0) {
+            throw new HttpMediaTypeNotAcceptableException(List.of(MediaType.APPLICATION_JSON));
+        }
     }
 
     @Override

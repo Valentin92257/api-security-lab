@@ -18,7 +18,7 @@ $defs:
       requestId: {$ref: '#/$defs/Uuid'}
     allOf:
     - if: {properties: {code: {const: INVALID_REQUEST}}}
-      then: {properties: {status: {enum: [400, 405, 413, 415]}}}
+      then: {properties: {status: {enum: [400, 405, 406, 413, 415]}}}
     - if: {properties: {code: {const: UNAUTHORIZED}}}
       then: {properties: {status: {const: 401}}}
     - if: {properties: {code: {const: FORBIDDEN}}}
