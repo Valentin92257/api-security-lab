@@ -10,3 +10,8 @@ services:
       - no-new-privileges:true
     stop_grace_period: 30s
     restart: "no"
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PORT: 5432

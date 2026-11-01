@@ -35,7 +35,6 @@ services:
       dockerfile: apps/shop-api/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: vulnerable
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
@@ -48,7 +47,6 @@ services:
     image: api-security-lab/shop-api:dev
     environment:
       SPRING_PROFILES_ACTIVE: protected
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
