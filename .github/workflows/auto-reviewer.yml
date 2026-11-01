@@ -1,0 +1,30 @@
+name: Auto reviewer
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  assign:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request review by author
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          case "$AUTHOR" in
+            mihailpestrikov)  REVIEWER=Andrey-TZ ;;
+            Space27)    REVIEWER=BrudLord ;;
+            BrudLord) REVIEWER=mihailpestrikov ;;
+            Andrey-TZ) REVIEWER=Space27 ;;
+            Valentin92257)  REVIEWER=Kaladin13 ;;
+            Kaladin13)      REVIEWER=Valentin92257 ;;
+            *) echo "Нет правила для $AUTHOR"; exit 0 ;;
+          esac
+          gh pr edit "$PR_URL" --add-reviewer "$REVIEWER"
