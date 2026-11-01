@@ -46,7 +46,17 @@ jobs:
       - name: Start stack
         run: docker compose up -d --wait
       - name: Health check
-        run: curl --fail http://127.0.0.1:8080/health
+        run: |
+          check() {
+            echo "== $1:$2"
+            docker compose exec -T "$1" curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:$2/health"
+            echo
+          }
+          check lab-control 8080
+          check lab-gateway 8081
+          check shop-vulnerable 8080
+          check shop-protected 8080
+          check lab-detector 8080
       - name: Show logs on failure
         if: failure()
         run: docker compose logs --tail=200
