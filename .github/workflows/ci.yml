@@ -41,6 +41,12 @@ jobs:
     needs: build-and-test
     steps:
       - uses: actions/checkout@v7
+      - name: Prepare local credentials
+        run: |
+          umask 077
+          for secret_name in LAB_OPERATOR_TOKEN POSTGRES_PASSWORD LAB_CONTROL_DB_PASSWORD; do
+            printf '%s=%s\n' "$secret_name" "$(openssl rand -hex 32)"
+          done > .env
       - name: Build images
         run: docker compose build
       - name: Start stack
