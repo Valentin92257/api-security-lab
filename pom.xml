@@ -19,6 +19,7 @@
     <openapi-generator.version>7.26.0</openapi-generator.version>
   </properties>
   <modules>
+    <module>libs/lab-contracts</module>
     <module>apps/shop-api</module>
     <module>apps/lab-gateway</module>
     <module>apps/lab-detector</module>

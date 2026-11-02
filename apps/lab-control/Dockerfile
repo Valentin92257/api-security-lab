@@ -1,6 +1,7 @@
 FROM maven:3.9.11-eclipse-temurin-25 AS build
 WORKDIR /workspace
 COPY pom.xml ./
+COPY libs/ libs/
 COPY apps/ apps/
 COPY contracts/ contracts/
 RUN mvn -B -ntp -pl apps/lab-control -am package

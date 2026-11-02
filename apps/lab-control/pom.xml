@@ -11,6 +11,11 @@
   <artifactId>lab-control</artifactId>
   <dependencies>
     <dependency>
+      <groupId>lab</groupId>
+      <artifactId>lab-contracts</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc</artifactId>
     </dependency>
@@ -45,6 +50,7 @@
               <output>${project.build.directory}/generated-sources/control</output>
               <apiPackage>lab.contracts.control.api</apiPackage>
               <modelPackage>lab.contracts.control.model</modelPackage>
+              <generateModels>false</generateModels>
             </configuration>
           </execution>
         </executions>
