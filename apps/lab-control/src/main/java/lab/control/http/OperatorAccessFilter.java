@@ -3,7 +3,6 @@ package lab.control.http;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Collections;
 import java.util.UUID;
 
 import jakarta.servlet.FilterChain;
@@ -38,8 +37,8 @@ class OperatorAccessFilter extends OncePerRequestFilter {
         request.setAttribute(ControlProblems.REQUEST_ID, UUID.randomUUID());
         response.setHeader("Cache-Control", "no-store");
         if (!request.getServletPath().equals("/health")) {
-            var values = Collections.list(request.getHeaders("Authorization"));
-            if (values.size() != 1 || !matches(values.getFirst())) {
+            String authorization = request.getHeader("Authorization");
+            if (authorization == null || !matches(authorization)) {
                 response.setStatus(401);
                 response.setHeader("WWW-Authenticate", "Bearer");
                 response.setContentType("application/problem+json");

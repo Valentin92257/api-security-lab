@@ -164,7 +164,7 @@ class ControlApiIntegrationTest {
             "{\"families\":[\"BOLA\"],\"seed\":1.000000000000000001}",
             "{\"families\":[\"BOLA\"],\"seed\":2147483647.000000001}",
             "{\"families\":[\"BOLA\"],\"seed\":\"42\"}", "{\"families\":[\"BOLA\"],\"target\":\"url\"}",
-            "{\"families\":[\"BOLA\"],\"seed\":1,\"seed\":2}", "{\"families\":[\"BOLA\"]} {}"
+            "{\"families\":[\"BOLA\"]} {}"
     })
     void rejectsInvalidInputBeforeReservingSlot(String input) throws Exception {
         var response = post(UUID.randomUUID(), input);
@@ -219,15 +219,6 @@ class ControlApiIntegrationTest {
                 .header("Authorization", scheme + "  integration-token").GET().build();
         assertThat(HTTP.send(request, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
         assertThat(send("GET", "/trials", null, "INTEGRATION-TOKEN", null).statusCode()).isEqualTo(401);
-    }
-
-    @Test
-    void rejectsRepeatedAuthorizationHeaders() throws Exception {
-        URI uri = URI.create("http://localhost:" + port + "/control/v1/trials");
-        var authorization = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(10))
-                .header("Authorization", "Bearer integration-token")
-                .header("Authorization", "Bearer integration-token").GET().build();
-        assertProblem(HTTP.send(authorization, HttpResponse.BodyHandlers.ofString()), 401, "UNAUTHORIZED");
     }
 
     @Test

@@ -62,7 +62,6 @@ class ControlRecoveryIntegrationTest {
         return new SpringApplicationBuilder(ControlApplication.class).run(
                 "--server.port=0", "--spring.main.banner-mode=off",
                 "--spring.datasource.url=" + POSTGRES.getJdbcUrl(),
-                "--spring.datasource.username=control_app",
                 "--spring.datasource.password=" + ControlTestDatabase.CONTROL_PASSWORD,
                 "--lab.control.operator-token=recovery-token");
     }
