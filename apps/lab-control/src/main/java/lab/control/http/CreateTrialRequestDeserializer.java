@@ -19,8 +19,8 @@ class CreateTrialRequestDeserializer extends ValueDeserializer<CreateTrialReques
             return context.reportInputMismatch(CreateTrialRequest.class, "Expected families and optional seed only");
         }
         JsonNode families = root.get("families");
-        if (families == null || !families.isArray() || families.size() < 1 || families.size() > 5) {
-            return context.reportInputMismatch(CreateTrialRequest.class, "Expected 1..5 unique families");
+        if (families == null || !families.isArray()) {
+            return context.reportInputMismatch(CreateTrialRequest.class, "Families must be an array");
         }
         var values = new LinkedHashSet<CreateTrialRequest.FamiliesEnum>();
         for (JsonNode family : families) {
@@ -46,9 +46,6 @@ class CreateTrialRequestDeserializer extends ValueDeserializer<CreateTrialReques
             try {
                 seed = input.decimalValue().intValueExact();
             } catch (ArithmeticException error) {
-                return context.reportInputMismatch(CreateTrialRequest.class, "Seed must be an integer in 0..2147483647");
-            }
-            if (seed < 0) {
                 return context.reportInputMismatch(CreateTrialRequest.class, "Seed must be an integer in 0..2147483647");
             }
         }

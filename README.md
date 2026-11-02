@@ -34,7 +34,8 @@ Java-контейнеры работают без root с read-only файлов
 `docker compose down --volumes` удаляет их. Порт PostgreSQL наружу не опубликован.
 При переходе с сервиса `postgres` сначала выполни `docker compose down --remove-orphans`, затем обычный запуск.
 
-`db-init` создаёт отсутствующие БД и роль, затем Flyway применяет `db/control/migrations`.
+PostgreSQL создаёт `control_app` при первой инициализации. `db-init` добавляет отсутствующие БД,
+затем Flyway применяет `db/control/migrations`.
 Control стартует после миграций с DML-ролью `control_app`, без DDL и административного пароля.
 `POSTGRES_USER` по умолчанию равен `lab_admin` и должен совпадать с администратором существующего volume.
 Изменение `.env` не меняет созданные роли и пароли. Применённые миграции не редактируй:

@@ -8,7 +8,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import jakarta.servlet.http.HttpServletRequest;
 import lab.contracts.control.api.DefaultApi;
 import lab.contracts.control.model.CreateTrialRequest;
 import lab.contracts.control.model.Trial;
@@ -34,17 +33,6 @@ public class TrialController implements DefaultApi {
 
     public TrialController(TrialService trials) {
         this.trials = trials;
-    }
-
-    @ModelAttribute
-    void validateQuery(HttpServletRequest request) {
-        Set<String> allowed = request.getMethod().equals("GET") && request.getServletPath().endsWith("/trials")
-                ? Set.of("limit", "offset") : Set.of();
-        request.getParameterMap().forEach((name, values) -> {
-            if (!allowed.contains(name) || values.length != 1 || !values[0].matches("[0-9]+")) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Некорректные query-параметры");
-            }
-        });
     }
 
     @InitBinder

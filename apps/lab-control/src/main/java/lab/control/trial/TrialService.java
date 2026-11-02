@@ -5,9 +5,11 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class TrialService {
@@ -26,12 +28,12 @@ public class TrialService {
             var request = previous.get();
             if (!request.trial().families().equals(normalizedFamilies)
                     || !Objects.equals(request.requestedSeed(), requestedSeed)) {
-                throw new TrialException(TrialException.Reason.CONFLICT, "Idempotency-Key уже использован с другим запросом");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency-Key уже использован с другим запросом");
             }
             return new StartResult(request.trial(), true);
         }
         if (active.isPresent()) {
-            throw new TrialException(TrialException.Reason.CONFLICT, "Слот предыдущего эксперимента ещё занят");
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Слот предыдущего эксперимента ещё занят");
         }
         int seed = requestedSeed != null ? requestedSeed : ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE);
         var trial = repository.insert(UUID.randomUUID(), normalizedFamilies, seed, key, requestedSeed);
@@ -41,7 +43,7 @@ public class TrialService {
     @Transactional(readOnly = true)
     public TrialSnapshot get(UUID id) {
         return repository.find(id)
-                .orElseThrow(() -> new TrialException(TrialException.Reason.NOT_FOUND, "Эксперимент не найден"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Эксперимент не найден"));
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

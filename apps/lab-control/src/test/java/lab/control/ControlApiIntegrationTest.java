@@ -193,9 +193,6 @@ class ControlApiIntegrationTest {
         assertThat(get("/trials?limit=0").statusCode()).isEqualTo(400);
         assertThat(get("/trials?limit=101").statusCode()).isEqualTo(400);
         assertThat(get("/trials?offset=-1").statusCode()).isEqualTo(400);
-        assertThat(get("/trials?limit=1&limit=2").statusCode()).isEqualTo(400);
-        assertThat(get("/trials?limit=").statusCode()).isEqualTo(400);
-        assertThat(get("/trials?unknown=true").statusCode()).isEqualTo(400);
         assertThat(get("/trials/" + UUID.randomUUID()).statusCode()).isEqualTo(404);
         assertThat(post(UUID.randomUUID(), " ".repeat(8193) + BODY).statusCode()).isEqualTo(413);
         assertThat(post(UUID.randomUUID(), "{\"families\":[\"BOLA\"],\"seed\":2147483647}").statusCode()).isEqualTo(202);

@@ -2,9 +2,7 @@ package lab.control.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
-import lab.control.trial.TrialException;
 import org.springframework.dao.DataAccessException;
-import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -20,15 +18,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 class ControlExceptionHandler extends ResponseEntityExceptionHandler {
-    @ExceptionHandler(TrialException.class)
-    ResponseEntity<Object> trialError(TrialException error, HttpServletRequest request) {
-        HttpStatus status = switch (error.reason()) {
-            case CONFLICT -> HttpStatus.CONFLICT;
-            case NOT_FOUND -> HttpStatus.NOT_FOUND;
-        };
-        return problem(status, error.getMessage(), HttpHeaders.EMPTY, request);
-    }
-
     @ExceptionHandler(ConstraintViolationException.class)
     ResponseEntity<Object> validationError(HttpServletRequest request) {
         return problem(HttpStatus.BAD_REQUEST, "Некорректные параметры запроса", HttpHeaders.EMPTY, request);
@@ -58,6 +47,6 @@ class ControlExceptionHandler extends ResponseEntityExceptionHandler {
     private ResponseEntity<Object> problem(HttpStatus status, String title, HttpHeaders headers,
                                             HttpServletRequest request) {
         return ResponseEntity.status(status).headers(headers).contentType(MediaType.APPLICATION_PROBLEM_JSON)
-                .cacheControl(CacheControl.noStore()).body(ControlProblems.create(status, title, request));
+                .body(ControlProblems.create(status, title, request));
     }
 }
