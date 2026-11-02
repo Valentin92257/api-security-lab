@@ -17,7 +17,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 public abstract class PostgreSQLIntegrationTest {
 
     @Container
-    protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:18-alpine")
+    protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine")
             .withDatabaseName("database")
             .withUsername("postgres")
             .withPassword("password");

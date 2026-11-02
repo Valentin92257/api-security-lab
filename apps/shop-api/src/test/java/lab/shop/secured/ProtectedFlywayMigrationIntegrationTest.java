@@ -1,37 +1,16 @@
 package lab.shop.secured;
 
-import lab.shop.PostgreSQLIntegrationTest;
+import lab.shop.BasicFlywayMigrationIntegrationTest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ActiveProfiles("protected")
-class ProtectedFlywayMigrationIntegrationTest extends PostgreSQLIntegrationTest {
+class ProtectedFlywayMigrationIntegrationTest extends BasicFlywayMigrationIntegrationTest {
 
-    @Autowired
-    private JdbcClient jdbcClient;
-
-    @ParameterizedTest(name = "Таблица {0}")
-    @ValueSource(strings = {"users", "products", "carts", "cart_items", "orders", "order_items", "coupons"})
-    @DisplayName("Присутствуют таблицы базовой миграции")
-    void shouldContainBaseTables(String tableName) {
-        Integer count = jdbcClient.sql(
-                        "SELECT count(*) FROM information_schema.tables " +
-                                "WHERE table_schema = 'public' AND table_name = ?"
-                )
-                .param(tableName)
-                .query(Integer.class)
-                .single();
-
-        assertThat(count)
-                .as("Таблица '%s' должна присутствовать в базовой миграции", tableName)
-                .isOne();
-    }
 
     @ParameterizedTest(name = "Констрейнт {0}")
     @ValueSource(strings = {

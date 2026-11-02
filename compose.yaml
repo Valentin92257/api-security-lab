@@ -65,7 +65,7 @@ services:
     networks: [ lab-data, lab-observe ]
 
   db:
-    image: postgres:18-alpine
+    image: postgres:17-alpine
     environment:
       POSTGRES_MULTIPLE_DATABASES: "vulnerable,protected"
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

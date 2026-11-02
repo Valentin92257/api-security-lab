@@ -19,7 +19,6 @@
     <skipUTs>false</skipUTs>
 
     <openapi-generator.version>7.26.0</openapi-generator.version>
-    <spoltess.version>3.10.4</spoltess.version>
 
     <!-- Tests -->
     <testcontainers.version>2.0.5</testcontainers.version>
@@ -78,6 +77,7 @@
               <documentationProvider>none</documentationProvider>
               <hideGenerationTimestamp>true</hideGenerationTimestamp>
               <generateJsonSetterNullsAnnotations>false</generateJsonSetterNullsAnnotations>
+              <generateJsonIncludeAnnotations>false</generateJsonIncludeAnnotations>
             </configOptions>
           </configuration>
         </plugin>
@@ -118,28 +118,6 @@
             <goals>
               <goal>integration-test</goal>
               <goal>verify</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>com.diffplug.spotless</groupId>
-        <artifactId>spotless-maven-plugin</artifactId>
-        <version>${spoltess.version}</version>
-        <configuration>
-          <java>
-            <lineEndings>WINDOWS</lineEndings>
-            <includes>
-              <include>target/generated-sources/**/*.java</include>
-            </includes>
-          </java>
-        </configuration>
-        <executions>
-          <execution>
-            <id>spotless-format</id>
-            <phase>process-sources</phase>
-            <goals>
-              <goal>apply</goal>
             </goals>
           </execution>
         </executions>
