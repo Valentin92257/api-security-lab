@@ -1,8 +1,10 @@
 package lab.control.http;
 
 import java.util.LinkedHashSet;
-import java.util.Set;
+import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 import lab.contracts.control.model.CreateTrialRequest;
 import org.springframework.boot.jackson.JacksonComponent;
 import tools.jackson.core.JsonParser;
@@ -14,41 +16,26 @@ import tools.jackson.databind.ValueDeserializer;
 class CreateTrialRequestDeserializer extends ValueDeserializer<CreateTrialRequest> {
     @Override
     public CreateTrialRequest deserialize(JsonParser parser, DeserializationContext context) {
-        JsonNode root = context.readTree(parser);
-        if (!root.isObject() || !Set.of("families", "seed").containsAll(root.propertyNames())) {
-            return context.reportInputMismatch(CreateTrialRequest.class, "Expected families and optional seed only");
-        }
-        JsonNode families = root.get("families");
-        if (families == null || !families.isArray()) {
-            return context.reportInputMismatch(CreateTrialRequest.class, "Families must be an array");
-        }
-        var values = new LinkedHashSet<CreateTrialRequest.FamiliesEnum>();
-        for (JsonNode family : families) {
-            if (!family.isString()) {
-                return context.reportInputMismatch(CreateTrialRequest.class, "Family must be a string");
-            }
-            CreateTrialRequest.FamiliesEnum value;
-            try {
-                value = CreateTrialRequest.FamiliesEnum.fromValue(family.asString());
-            } catch (IllegalArgumentException error) {
-                return context.reportInputMismatch(CreateTrialRequest.class, "Unknown family");
-            }
-            if (!values.add(value)) {
-                return context.reportInputMismatch(CreateTrialRequest.class, "Repeated family");
-            }
+        Input input = context.readValue(parser, Input.class);
+        var families = input.families() == null ? null : new LinkedHashSet<>(input.families());
+        if (families != null && families.size() != input.families().size()) {
+            return context.reportInputMismatch(CreateTrialRequest.class, "Repeated family");
         }
         Integer seed = null;
-        if (root.has("seed")) {
-            JsonNode input = root.get("seed");
-            if (!input.isNumber()) {
+        if (input.seed() != null) {
+            if (!input.seed().isNumber()) {
                 return context.reportInputMismatch(CreateTrialRequest.class, "Seed must be an integer in 0..2147483647");
             }
             try {
-                seed = input.decimalValue().intValueExact();
+                seed = input.seed().decimalValue().intValueExact();
             } catch (ArithmeticException error) {
                 return context.reportInputMismatch(CreateTrialRequest.class, "Seed must be an integer in 0..2147483647");
             }
         }
-        return new CreateTrialRequest(values).seed(seed);
+        return new CreateTrialRequest(families).seed(seed);
+    }
+
+    private record Input(@JsonSetter(contentNulls = Nulls.FAIL) List<CreateTrialRequest.FamiliesEnum> families,
+                         JsonNode seed) {
     }
 }

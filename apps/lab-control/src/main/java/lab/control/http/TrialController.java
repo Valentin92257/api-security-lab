@@ -1,6 +1,5 @@
 package lab.control.http;
 
-import java.beans.PropertyEditorSupport;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -20,8 +19,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.accept.HeaderContentNegotiationStrategy;
-import org.springframework.web.bind.WebDataBinder;
-import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.request.NativeWebRequest;
@@ -33,20 +30,6 @@ public class TrialController implements DefaultApi {
 
     public TrialController(TrialService trials) {
         this.trials = trials;
-    }
-
-    @InitBinder
-    void strictUuid(WebDataBinder binder) {
-        binder.registerCustomEditor(UUID.class, new PropertyEditorSupport() {
-            @Override
-            public void setAsText(String input) {
-                UUID id = UUID.fromString(input);
-                if (!id.toString().equalsIgnoreCase(input)) {
-                    throw new IllegalArgumentException("Expected a full UUID");
-                }
-                setValue(id);
-            }
-        });
     }
 
     @ModelAttribute

@@ -23,8 +23,7 @@ final class ControlProblems {
             case SERVICE_UNAVAILABLE -> Problem.CodeEnum.UNAVAILABLE;
             default -> Problem.CodeEnum.INTERNAL_ERROR;
         };
-        UUID id = (UUID) request.getAttribute(REQUEST_ID);
         return new Problem(Problem.TypeEnum.URN_LAB_PROBLEM_HTTP_ERROR, title, status.value(), code,
-                id != null ? id : UUID.randomUUID());
+                (UUID) request.getAttribute(REQUEST_ID));
     }
 }

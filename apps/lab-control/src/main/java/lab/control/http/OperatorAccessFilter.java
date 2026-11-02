@@ -52,14 +52,8 @@ class OperatorAccessFilter extends OncePerRequestFilter {
     }
 
     private boolean matches(String authorization) {
-        int separator = authorization.indexOf(' ');
-        if (separator != 6 || !authorization.regionMatches(true, 0, "Bearer", 0, 6)) {
-            return false;
-        }
-        int start = separator + 1;
-        while (start < authorization.length() && authorization.charAt(start) == ' ') {
-            start++;
-        }
-        return MessageDigest.isEqual(expectedToken, authorization.substring(start).getBytes(StandardCharsets.UTF_8));
+        String[] parts = authorization.split(" +", 2);
+        return parts.length == 2 && parts[0].equalsIgnoreCase("Bearer")
+                && MessageDigest.isEqual(expectedToken, parts[1].getBytes(StandardCharsets.UTF_8));
     }
 }

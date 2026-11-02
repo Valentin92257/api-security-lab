@@ -7,7 +7,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -26,11 +25,11 @@ public class TrialService {
         var previous = repository.findRequest(key);
         if (previous.isPresent()) {
             var request = previous.get();
-            if (!request.trial().families().equals(normalizedFamilies)
+            if (!request.families().equals(normalizedFamilies)
                     || !Objects.equals(request.requestedSeed(), requestedSeed)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency-Key уже использован с другим запросом");
             }
-            return new StartResult(request.trial(), true);
+            return new StartResult(request, true);
         }
         if (active.isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Слот предыдущего эксперимента ещё занят");
@@ -46,7 +45,7 @@ public class TrialService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Эксперимент не найден"));
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    @Transactional(readOnly = true)
     public TrialList list(int limit, int offset) {
         return new TrialList(repository.list(limit, offset), repository.count());
     }

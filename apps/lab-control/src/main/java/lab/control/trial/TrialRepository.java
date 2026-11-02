@@ -28,10 +28,9 @@ public class TrialRepository {
                 .query((rs, row) -> Optional.ofNullable(rs.getObject(1, UUID.class))).single();
     }
 
-    public Optional<StoredRequest> findRequest(UUID key) {
+    public Optional<TrialSnapshot> findRequest(UUID key) {
         return jdbc.sql("SELECT * FROM control.trials WHERE idempotency_key = :key").param("key", key)
-                .query((rs, row) -> new StoredRequest(map(rs, row), rs.getObject("requested_seed", Integer.class)))
-                .optional();
+                .query(this::map).optional();
     }
 
     public TrialSnapshot insert(UUID id, List<String> families, int seed, UUID key, Integer requestedSeed) {
@@ -73,11 +72,9 @@ public class TrialRepository {
     private TrialSnapshot map(ResultSet rs, int row) throws SQLException {
         return new TrialSnapshot(rs.getObject("trial_id", UUID.class),
                 Arrays.asList(json.readValue(rs.getString("families"), String[].class)),
-                rs.getInt("seed"), rs.getString("state"), rs.getObject("created_at", OffsetDateTime.class),
+                rs.getInt("seed"), rs.getObject("requested_seed", Integer.class), rs.getString("state"),
+                rs.getObject("created_at", OffsetDateTime.class),
                 rs.getLong("planned_steps"), rs.getLong("finished_steps"),
                 rs.getBoolean("cleanup_safe"), rs.getString("error"));
-    }
-
-    public record StoredRequest(TrialSnapshot trial, Integer requestedSeed) {
     }
 }

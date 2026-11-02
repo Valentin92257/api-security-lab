@@ -1,7 +1,6 @@
 # Архитектура и эксплуатация
 
-Здесь описана целевая архитектура. Текущее состояние и запуск каркаса - в
-[README](../README.md), решение по runner - в [ADR-0001](adr/0001-runner-inside-control.md).
+Здесь описана целевая архитектура. Текущее состояние - в [README](../README.md), решение по runner - в [ADR-0001](adr/0001-runner-inside-control.md).
 
 ## Компоненты
 
@@ -9,7 +8,7 @@
 
 | Приложение | Ответственность | Доступ к данным |
 |---|---|---|
-| `shop-api` x 2 | Auth, каталог, корзина, checkout, предметные проверки, итоговые access-логи | Собственная shop DB; доставка своих логов Detector |
+| `shop-api` × 2 | Auth, каталог, корзина, checkout, предметные проверки, итоговые access-логи | Собственная shop DB; доставка своих логов Detector |
 | `lab-gateway` | Маршрутизация, JWT, политики, допуск запросов, аудит | Локальное состояние лимитов и доставка своих логов Detector |
 | `lab-detector` | Правила, окна, evidence и инциденты | Собственные access-логи, состояние и инциденты |
 | `lab-control` | Эксперименты, scenario-runner, фикстуры, evaluator, UI и отчёты | Приватное хранилище Control, readonly shop state и прямой административный доступ Fixture к БД |
@@ -108,10 +107,7 @@ Console/технические логи и traces могут дополните�
 
 ## Запуск и конфигурация
 
-Compose запускает пять Java-контейнеров, PostgreSQL и две одноразовые задачи:
-подготовку БД и миграции Control. LGTM и данные Shop ещё не подключены.
-Перед первым запуском заполни `.env` по [README](../README.md#запуск).
-Запуск каркаса:
+Целевая конфигурация: пять Java-контейнеров (Control, Gateway, Detector и два Shop), PostgreSQL и LGTM. Подготовка `.env` и текущее состояние - в [README](../README.md#запуск). Запуск каркаса:
 
 ```sh
 docker compose up --build
@@ -129,7 +125,7 @@ MVP измеряет защиту при непрерывной работе п�
 
 ## Завершение и очистка
 
-Штатный порядок: stop runner -> сохранить attempts -> закрыть Gateway и дождаться CLOSED -> закрыть Shop и дождаться CLOSED -> передать оба lastSequence в finishAnalysis -> дождаться COMPLETED Detector -> сверить observedRequestIds и получить incidents -> readonly oracle и отчёт -> reset. Счётчик in-flight уменьшается после фиксации итогового access-лога. instanceId проверяется до/после ожидания: после перезапуска счётчик не используется как доказательство завершения старого run.
+Штатный порядок: stop runner → сохранить attempts → закрыть Gateway и дождаться CLOSED → закрыть Shop и дождаться CLOSED → передать оба lastSequence в finishAnalysis → дождаться COMPLETED Detector → сверить observedRequestIds и получить incidents → readonly oracle и отчёт → reset. Счётчик in-flight уменьшается после фиксации итогового access-лога. instanceId проверяется до/после ожидания: после перезапуска счётчик не используется как доказательство завершения старого run.
 
 До завершения отчёта логи и результаты не удаляются. Ошибка записи, пропуск sequence, смена instanceId, отсутствие COMPLETED или превышение deadline дают INCONCLUSIVE. Нельзя подменять ожидание sleep фиксированной длины. Для недоказанно завершившейся работы cleanupSafe=false; обычный reset запрещён, нужен полный перезапуск стенда и новая фикстура.
 

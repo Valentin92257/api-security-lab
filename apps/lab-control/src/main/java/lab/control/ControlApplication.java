@@ -24,6 +24,7 @@ public class ControlApplication {
     JsonMapperBuilderCustomizer strictControlJson() {
         return builder -> builder.enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     }
 }

@@ -37,10 +37,9 @@ class ControlExceptionHandler extends ResponseEntityExceptionHandler {
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(Exception error, Object body, HttpHeaders headers,
                                                               HttpStatusCode status, WebRequest request) {
-        HttpStatus resolved = HttpStatus.resolve(status.value());
         String title = error instanceof ResponseStatusException response && response.getReason() != null
                 ? response.getReason() : "HTTP-запрос не может быть обработан";
-        return problem(resolved != null ? resolved : HttpStatus.INTERNAL_SERVER_ERROR,
+        return problem(HttpStatus.valueOf(status.value()),
                 title, headers, ((ServletWebRequest) request).getRequest());
     }
 
