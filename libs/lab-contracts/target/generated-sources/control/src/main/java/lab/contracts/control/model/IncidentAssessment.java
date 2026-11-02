@@ -8,7 +8,6 @@ import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
-import lab.contracts.control.model.Incident;
 import org.springframework.lang.Nullable;
 import tools.jackson.databind.annotation.JsonDeserialize;
 import java.time.OffsetDateTime;
@@ -26,7 +25,7 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class IncidentAssessment {
 
-  private Incident incident;
+  private lab.contracts.detector.model.Incident incident;
 
   /**
    * Gets or Sets verdict
@@ -78,14 +77,14 @@ public class IncidentAssessment {
   /**
    * Constructor with only required parameters
    */
-  public IncidentAssessment(Incident incident, VerdictEnum verdict, Set<@Size(min = 1, max = 128)String> matchedEpisodeIds, String reason) {
+  public IncidentAssessment(lab.contracts.detector.model.Incident incident, VerdictEnum verdict, Set<@Size(min = 1, max = 128)String> matchedEpisodeIds, String reason) {
     this.incident = incident;
     this.verdict = verdict;
     this.matchedEpisodeIds = matchedEpisodeIds;
     this.reason = reason;
   }
 
-  public IncidentAssessment incident(Incident incident) {
+  public IncidentAssessment incident(lab.contracts.detector.model.Incident incident) {
     this.incident = incident;
     return this;
   }
@@ -96,12 +95,12 @@ public class IncidentAssessment {
    */
   @NotNull @Valid 
   @JsonProperty("incident")
-  public Incident getIncident() {
+  public lab.contracts.detector.model.Incident getIncident() {
     return incident;
   }
 
   @JsonProperty("incident")
-  public void setIncident(Incident incident) {
+  public void setIncident(lab.contracts.detector.model.Incident incident) {
     this.incident = incident;
   }
 
