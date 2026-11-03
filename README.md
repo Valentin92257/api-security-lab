@@ -18,7 +18,7 @@ docker compose exec lab-control curl --fail http://127.0.0.1:8080/health
 Локальные Maven и JDK не нужны: сборка и модульные тесты выполняются в Docker.
 Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`), остальные сервисы доступны внутри Docker.
 Внутренние сети могут мешать доступу с хоста, поэтому примеры используют `docker compose exec`.
-Health Control проверяет БД; в Shop/Gateway/Detector пока есть только каркас и health.
+Health Control проверяет БД. Shop содержит каркас API и миграции; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
@@ -27,8 +27,7 @@ Java-контейнеры работают без root с read-only файлов
 PostgreSQL 17 хранит `lab_control`, `vulnerable` и `protected` в volume `control-data`.
 `docker compose down` сохраняет данные, `docker compose down --volumes` удаляет их.
 
-Перед запуском Control создаются БД и применяются миграции из `db/control/migrations`.
-Приложение использует DML-роль `control_app`, без DDL и административного пароля.
+db-init создаёт базы данных. При старте Control Flyway применяет миграции из `db/control/migrations`, включённые в JAR, с отдельными административными credentials. Рабочие запросы используют DML-роль `control_app`. Shop также применяет миграции при старте. Отдельного контейнера миграций нет.
 `POSTGRES_USER` по умолчанию равен `lab_admin` и должен совпадать с администратором существующего volume.
 Изменение `.env` не меняет созданные роли и пароли. Применённые миграции не редактируй; следующие добавляй как V3, V4 и далее.
 
@@ -37,7 +36,6 @@ PostgreSQL 17 хранит `lab_control`, `vulnerable` и `protected` в volume 
 ```sh
 docker compose stop lab-control
 docker compose run --rm db-init
-docker compose run --rm lab-control-migrate
 docker compose up -d --wait lab-control
 ```
 
@@ -100,6 +98,10 @@ HTTP-контроллеры реализуют lab.contracts.shop.api.DefaultApi
 Сейчас созданы структура, выбор варианта и проверки запуска; бизнес-операций ещё нет.
 `ShopImplementation.mode()` обозначает вариант, а не наличие работающей защиты.
 `/health` предоставляет Actuator; тесты охватывают оба профиля и неверные конфигурации.
+Настроены `Flyway` миграции в зависимости от активного Spring профиля. Настроены интеграционные тесты с использованием
+`Testcontainers`. Каждый режим API обращается к собственной БД.
+По умолчанию тесты запускаются без DataSource, `PostgreSQLIntegrationTest` позволяет проводить тесты с контейнером
+PostgreSQL и настроенным окружением.
 
 ## Генерация кода из OpenAPI
 
@@ -129,3 +131,24 @@ docker run --rm -v "$PWD:/workspace" -w /workspace \
 Правки вносятся в [спецификации](contracts/README.md), код пересоздаётся при сборке и не редактируется вручную. Общие настройки OpenAPI Generator находятся в [корневом pom.xml](pom.xml), спецификации для каждого модуля - в его `pom.xml`.
 
 Сгенерированные Java-файлы хранятся в Git. После изменения спецификаций или настроек генератора повторите генерацию и добавьте обновлённые файлы в коммит. [CI](.github/workflows/generated-code.yml) повторяет генерацию на push и pull request и завершается ошибкой при расхождении.
+
+## Каркас gateway и корреляция
+
+`/api/v1/**` на listener `8082` проксируется в `SHOP_PROTECTED_URL` (по умолчанию `http://shop-protected:8080`). Listener `8081` пока возвращает 404 для бизнес-запросов; vulnerable-маршрут добавится отдельной задачей. `/health` работает на обоих портах без X-Request-Id и проверяет сам процесс, а не доступность Shop.
+
+Прокси сохраняет метод, исходный path/query, тело и прикладные заголовки, включая Authorization, Content-Type и Idempotency-Key. Ответ магазина передаётся с исходным статусом и телом; сохраняются Retry-After, WWW-Authenticate, Location, Idempotency-Replayed и повторяющиеся заголовки. Hop-by-hop заголовки (включая перечисленные в Connection) удаляются, Host/Content-Length формируются транспортом. Автоматические retries, redirects, cookie storage и распаковка ответа отключены. Gateway не валидирует JWT или бизнес-схему и не применяет login limiter.
+
+Обязателен ровно один `X-Request-Id` в полном UUID-формате. Корректный ID передаётся в Shop и возвращается клиенту. Отсутствующий/неверный/повторяющийся заголовок даёт 400/INVALID_REQUEST без обращения к upstream; для самого отказа создаётся один UUID, общий для ответа и лога. В Shop действует тот же контракт. `/internal/**` не проксируется; служебный Runtime API пока не реализован.
+
+Gateway и оба Shop пишут JSON-логи `http_request`: `service`, `trace_id`, `method`, `path`, `status`, `duration_ms`. Здесь `trace_id` — тот же X-Request-Id в MDC, отдельного ID не генерируется. В `path` нет query; токены, пароли, тела и заголовки не записываются. Это минимальные диагностические логи, ещё не полный AccessLog/LogBatch для Detector. Фильтр работает для синхронных `/api/v1` запросов после допуска HTTP-парсером; ошибки самого парсера до servlet-фильтров сюда не входят.
+
+| Параметр | По умолчанию | Назначение |
+|---|---|---|
+| SHOP_PROTECTED_URL | http://shop-protected:8080 | Фиксированный HTTP origin, без path/query/userinfo |
+| GATEWAY_CONNECT_TIMEOUT | 2s | Установление соединения |
+| GATEWAY_UPSTREAM_TIMEOUT | 5s | Общий deadline обращения к upstream, включая чтение тела и ожидание соединения из пула |
+| GATEWAY_MAX_BODY_BYTES | 8388608 | Максимальный буфер тела запроса/ответа; допустимо до 16 MiB |
+
+Недоступный upstream даёт 502/UNAVAILABLE, таймаут — 504/UNAVAILABLE. Слишком большой запрос — 413/INVALID_REQUEST, ответ upstream сверх бюджета — 502/UNAVAILABLE. Все эти ответы содержат X-Request-Id и Problem.requestId. Таймаут не означает откат заказа, proxy не повторяет операцию. Бюджеты — технические ограничения транспорта, а не экспериментальные политики.
+
+Тесты запускаются при Docker-сборке. Gateway integration tests используют локальный тестовый HTTP upstream: методы, query/body/headers, ID, ответы 429/redirect, disconnect без retry, timeout заголовков/тела, ограничения буфера и listener. Shop HTTP-тесты проверяют тот же ID в ответе/логе обоих профилей, 400/500, отсутствие секретов и восстановление MDC. Тестовые ручки существуют только в `src/test`.

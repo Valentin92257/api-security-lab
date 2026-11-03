@@ -1,0 +1,31 @@
+name: Shop Api Build
+
+on:
+  push:
+    paths: &paths
+      - "apps/shop-api/**"
+      - "contracts/shop-api.openapi.yaml"
+      - "pom.xml"
+      - ".github/workflows/shop-api.yml"
+  pull_request:
+    paths: *paths
+
+jobs:
+  shop-api-tests:
+    runs-on: ubuntu-latest
+    name: Build
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Unit tests
+        run: mvn -B -ntp -pl apps/shop-api -am test
+      - name: Integration tests
+        run: mvn -B -ntp -pl apps/shop-api -am verify -DskipUTs
