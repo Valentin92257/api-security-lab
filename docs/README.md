@@ -14,7 +14,7 @@ API Security Lab - локальный учебный стенд для иссл�
 | `README.md` | Цель, объём и четыре роли |
 | `01-architecture.md` | Компоненты, Java-стек, структура, сети, полномочия, эксплуатация и решения |
 | `02-api-and-data.md` | Полный demo API: запросы, ответы, ошибки, checkout/retry, данные и инварианты |
-| `03-protection.md` | Gateway, PolicyChain, OBSERVE/ENFORCE, rate policy и гарантии |
+| `03-protection.md` | Защита в Shop, нейтральный Gateway, login limits и гарантии |
 | `04-events-and-detection.md` | AccessLog, доставка HTTP/JSON, detector/rules, incidents, UI и отчёт; прежний SQL-словарь отмечен как архив |
 | `05-scenarios-and-experiments.md` | Угрозы, runner, служебный протокол, состояния, независимый эталон и метрики |
 | `06-implementation-and-testing.md` | Этапы, первая интеграция, тестирование, требования приёмки и демонстрация |
@@ -32,13 +32,13 @@ API Security Lab - локальный учебный стенд для иссл�
 | Роль | Ответственность и поставка |
 |---|---|
 | Р1. Разработчик API и данных | Shop в двух режимах, OpenAPI/DTO, миграции/фикстуры, транзакции/owner-check, access logging и readonly данные oracle |
-| Р2. Разработчик защиты | Gateway/политики/JWT, limiter, access logging, Runtime/lastSequence, сети/Compose и базовая наблюдаемость |
+| Р2. Разработчик защиты | Защитные политики/JWT/limiter в Shop совместно с Р1; Gateway-прокси, access logging, Runtime/lastSequence, сети/Compose |
 | Р3. Разработчик атак | Runner, catalog scenarios/benign, seed/планы, concurrency, встроенный executor/cancel и результаты шагов |
 | Р4. Разработчик детектора и дашборда | Detector/rules/incidents; control/orchestration/Fixture/evaluator и интеграция runner, UI, метрики и отчёты |
 
 Четыре роли обслуживают четыре Java-приложения: shop-api, lab-gateway, lab-detector, lab-control. Scenario-runner - пакет lab.control.runner внутри Control с отдельным executor и лимитами; Р3 продолжает отвечать за неё. Shop запускается двумя экземплярами; detector выделен для изоляции данных и независимого обнаружения. Чтобы Р4 не стал узким местом, Р1 поставляет fixture/oracle adapters, Р2 - управление допуском и полнотой access-логов, Р3 - интерфейсы исполнения, отмены и результатов. Независимые проверки совместно ревьюят Р1, Р3 и Р4.
 
-Gateway один, лимиты Bucket4j и backoff хранятся в его памяти. В целевом стенде семь контейнеров: пять Java-процессов, PostgreSQL и LGTM. В текущем Compose пять Java-контейнеров без PostgreSQL/LGTM. Перезапуск прерывает опыт; репликация gateway не входит в MVP.
+Gateway один и не содержит защитных политик. Лимиты Bucket4j и backoff хранятся в памяти protected Shop. В целевом стенде семь контейнеров: пять Java-процессов, PostgreSQL и LGTM. В текущем Compose пять Java-контейнеров без PostgreSQL/LGTM. Перезапуск прерывает опыт; репликация Shop и Gateway не входит в MVP.
 
 ## Объём и границы
 

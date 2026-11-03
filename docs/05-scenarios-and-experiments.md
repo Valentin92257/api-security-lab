@@ -85,7 +85,7 @@ Control сохраняет результат каждой отправки и �
 
 Отрицательный результат защиты может быть достоверным COMPLETED. Любой выход из RUNNING, включая fatal/cancel, проходит FINALIZING; желаемый terminal state хранится отдельно. При cleanupSafe=false даже терминальный run блокирует следующий reset на target.
 
-PREPARING закрывает admission, проверяет отсутствие старых работ, устанавливает фикстуру и проверяет baseline invariants. Control подготавливает Runtime-контексты Shop/Gateway, Runner и анализ Detector, проверяет instanceId и состояние limiter; затем открывает Shop, после него Gateway. Ready означает готовность работать, а не только живой процесс.
+PREPARING закрывает admission, проверяет отсутствие старых работ, устанавливает фикстуру и проверяет baseline invariants. Control подготавливает Runtime-контексты Shop/Gateway, Runner и анализ Detector, проверяет instanceId и чистое состояние limiter protected Shop; затем открывает Shop, после него Gateway. Ready означает готовность работать, а не только живой процесс.
 
 Сравнение состоит из последовательных paired runs с одинаковыми fixture/seed/business-time base, workload, concurrency и ruleset. Target DB и policy state раздельны. Порядок фиксирован: vulnerable, затем protected; concurrency внутри race сохраняется. Текущий API предоставляет два фиксированных набора защит, без переключателей отдельных политик. Seed не фиксирует OS/SQL interleaving: гонки запускаются серией с barrier и публикуемым числом повторов.
 

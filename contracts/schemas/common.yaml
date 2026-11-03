@@ -32,4 +32,4 @@ $defs:
     - if: {properties: {code: {const: INTERNAL_ERROR}}}
       then: {properties: {status: {const: 500}}}
     - if: {properties: {code: {const: UNAVAILABLE}}}
-      then: {properties: {status: {const: 503}}}
+      then: {properties: {status: {enum: [502, 503, 504]}}}

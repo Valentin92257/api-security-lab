@@ -13,5 +13,6 @@ USER 10001:10001
 EXPOSE 8081 8082
 ENV SERVER_PORT=8081
 HEALTHCHECK --interval=10s --timeout=5s --start-period=40s --retries=5 \
-  CMD curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:${SERVER_PORT}/health" > /dev/null
+  CMD curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:${SERVER_PORT}/health" > /dev/null && \
+      curl --fail --silent --show-error --max-time 2 "http://127.0.0.1:${GATEWAY_ADDITIONAL_PORT:-8082}/health" > /dev/null
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

@@ -1,10 +1,19 @@
 spring:
   application:
     name: lab-gateway
+  mvc:
+    dispatch-options-request: true
+    formcontent:
+      filter:
+        enabled: false
+  servlet:
+    multipart:
+      enabled: false
   threads:
     virtual:
       enabled: true
 server:
+  forward-headers-strategy: none
   port: ${SERVER_PORT:8081}
   shutdown: graceful
 management:
@@ -19,3 +28,12 @@ management:
 lab:
   gateway:
     additional-port: ${GATEWAY_ADDITIONAL_PORT:8082}
+    proxy:
+      upstream: ${SHOP_PROTECTED_URL:http://shop-protected:8080}
+      connect-timeout: ${GATEWAY_CONNECT_TIMEOUT:2s}
+      timeout: ${GATEWAY_UPSTREAM_TIMEOUT:5s}
+      max-body-bytes: ${GATEWAY_MAX_BODY_BYTES:8388608}
+logging:
+  structured:
+    format:
+      console: logstash
