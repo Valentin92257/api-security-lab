@@ -61,7 +61,6 @@ Table orders {
   user_id bigint [not null, note: 'Владелец']
   cart_id bigint [not null, note: 'Исходная корзина']
   cart_revision bigint [not null, note: 'Потребленная версия корзины']
-  status varchar(16) [not null, default: `'CREATED'`, note: 'Единственный статус версии 1']
   subtotal bigint [not null, note: 'Стоимость до скидки']
   discount bigint [not null, note: 'Скидка в рублях']
   total bigint [not null, note: 'Итог в рублях']

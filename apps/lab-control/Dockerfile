@@ -2,6 +2,7 @@ FROM maven:3.9.11-eclipse-temurin-25 AS build
 WORKDIR /workspace
 COPY pom.xml ./
 COPY apps/ apps/
+COPY contracts/ contracts/
 RUN mvn -B -ntp -pl apps/lab-control -am package
 
 FROM eclipse-temurin:25-jre-alpine

@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info: {title: Shop, version: 1.0.0, description: Общий API vulnerable/protected; JWT кроме register/login.
+    X-Request-Id возвращается в ответах. Ограничения схем обязательны в PROTECTED;
+    в VULNERABLE учебные нарушения quantity/quotedTotal наблюдаются без блокировки.
+    Общие DTO не включают Bean Validation; проверки режима выполняет реализация.}
+servers:
+- {url: 'http://lab-gateway:8081/api/v1', description: VULNERABLE}
+- {url: 'http://lab-gateway:8082/api/v1', description: PROTECTED}
+security:
+- ShopBearer: []
+paths:
+  /auth/register:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    post:
+      operationId: registerUser
+      description: Создаёт пользователя и пустую корзину; занятые login/email - 409.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/shop.yaml#/$defs/RegisterRequest}
+      responses:
+        '201': {$ref: '#/components/responses/User'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /auth/login:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    post:
+      operationId: loginUser
+      description: Неверные credentials - 401; ограничение Gateway - 429.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/shop.yaml#/$defs/LoginRequest}
+      responses:
+        '200': {$ref: '#/components/responses/LoginResult'}
+        '401': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /users/{userId}:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    - {$ref: '#/components/parameters/userId'}
+    get:
+      operationId: getUser
+      description: Чужой и отсутствующий профиль - одинаковый 404.
+      responses:
+        '200': {$ref: '#/components/responses/User'}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /products:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    get:
+      operationId: searchProducts
+      description: Буквальный поиск q; только published, порядок id по возрастанию. Массив до 100 товаров, без пагинации.
+      parameters:
+      - {$ref: '#/components/parameters/q'}
+      responses:
+        '200': {$ref: '#/components/responses/Products'}
+        default: {$ref: '#/components/responses/Error'}
+  /cart:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    get:
+      operationId: getCart
+      responses:
+        '200': {$ref: '#/components/responses/Cart'}
+        default: {$ref: '#/components/responses/Error'}
+  /cart/items/{productId}:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    - {$ref: '#/components/parameters/productId'}
+    put:
+      operationId: setCartQuantity
+      description: Абсолютное количество; 0 недопустим. Изменение увеличивает revision, no-op сохраняет.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/shop.yaml#/$defs/SetQuantityRequest}
+      responses:
+        '200': {$ref: '#/components/responses/Cart'}
+        default: {$ref: '#/components/responses/Error'}
+  /cart/coupon:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    put:
+      operationId: selectCartCoupon
+      description: Один купон без накопления скидок; расходуется при checkout.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/shop.yaml#/$defs/SelectCouponRequest}
+      responses:
+        '200': {$ref: '#/components/responses/Cart'}
+        default: {$ref: '#/components/responses/Error'}
+  /orders:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    post:
+      operationId: checkoutOrder
+      description: Тот же key/body - прежние 201/Order. Другой body или использованная revision - 409. Цену
+        считает сервер.
+      parameters:
+      - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: ./schemas/shop.yaml#/$defs/CheckoutRequest}
+      responses:
+        '201': {$ref: '#/components/responses/Order'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+  /orders/{orderId}:
+    parameters:
+    - {$ref: '#/components/parameters/XRequestId'}
+    - {$ref: '#/components/parameters/XForwardedFor'}
+    - {$ref: '#/components/parameters/orderId'}
+    get:
+      operationId: getOrder
+      description: Чужой и отсутствующий заказ - одинаковый 404.
+      responses:
+        '200': {$ref: '#/components/responses/Order5'}
+        '404': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  responses:
+    User:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/shop.yaml#/$defs/User}
+      description: OK
+    LoginResult:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/shop.yaml#/$defs/LoginResult}
+      description: OK
+    Products:
+      content:
+        application/json:
+          schema:
+            type: array
+            items: {$ref: ./schemas/shop.yaml#/$defs/Product}
+            minItems: 0
+            maxItems: 100
+      description: OK
+    Cart:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/shop.yaml#/$defs/Cart}
+      description: OK
+    Order:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/shop.yaml#/$defs/Order}
+      headers:
+        Idempotency-Replayed:
+          schema: {type: boolean}
+      description: OK
+    Order5:
+      content:
+        application/json:
+          schema: {$ref: ./schemas/shop.yaml#/$defs/Order}
+      description: OK
+    Error:
+      description: Ошибка
+      content:
+        application/problem+json:
+          schema: {$ref: ./schemas/common.yaml#/$defs/Problem}
+  parameters:
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      schema: {type: string, format: uuid}
+      required: true
+    XForwardedFor:
+      name: X-Forwarded-For
+      in: header
+      description: Один IPv4/IPv6 виртуального клиента; только от доверенного отправителя.
+      schema: {type: string, minLength: 2, maxLength: 45}
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema: {$ref: ./schemas/common.yaml#/$defs/Id}
+    q:
+      name: q
+      in: query
+      schema: {type: string, default: '', maxLength: 120}
+    productId:
+      name: productId
+      in: path
+      required: true
+      schema: {$ref: ./schemas/common.yaml#/$defs/Id}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, pattern: '^[A-Za-z0-9._-]+$', maxLength: 128, minLength: 16}
+    orderId:
+      name: orderId
+      in: path
+      required: true
+      schema: {$ref: ./schemas/common.yaml#/$defs/Id}
+  securitySchemes:
+    ShopBearer: {type: http, scheme: bearer, bearerFormat: JWT}

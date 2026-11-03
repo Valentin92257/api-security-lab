@@ -1,0 +1,35 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Producer: {type: string, enum: [GATEWAY, SHOP]}
+  AccessLog:
+    title: AccessLog
+    type: object
+    properties:
+      sequence: {type: integer, minimum: 1, maximum: 100000}
+      requestId: {type: string, format: uuid}
+      time: {type: string, format: date-time}
+      remote_addr: {type: string, minLength: 2, maxLength: 45}
+      user: {type: [integer, 'null'], format: int64, minimum: 1, maximum: 9007199254740991}
+      method: {type: string, minLength: 1, maxLength: 32, pattern: '^[A-Z][A-Z0-9!#$%&''*+.^_`|~-]*$'}
+      path: {type: string, minLength: 1, maxLength: 8192, pattern: ^/.*$}
+      route: {type: [string, 'null'], minLength: 1, maxLength: 200, pattern: ^/.*$}
+      status: {type: integer, minimum: 100, maximum: 599}
+      bytes: {type: integer, format: int64, minimum: 0}
+      request_time: {type: number, format: double, minimum: 0}
+      user_agent: {type: [string, 'null'], maxLength: 1024}
+      req_hash: {type: [string, 'null'], minLength: 64, maxLength: 64, pattern: '^[0-9a-f]{64}$'}
+    required: [sequence, requestId, time, remote_addr, user, method, path, route, status, bytes, request_time, user_agent,
+      req_hash]
+    additionalProperties: false
+  LogBatch:
+    title: LogBatch
+    type: object
+    properties:
+      producer: {$ref: '#/$defs/Producer'}
+      entries:
+        type: array
+        items: {$ref: '#/$defs/AccessLog'}
+        minItems: 1
+        maxItems: 100
+    required: [producer, entries]
+    additionalProperties: false
