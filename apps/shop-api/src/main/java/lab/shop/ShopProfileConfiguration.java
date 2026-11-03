@@ -1,7 +1,5 @@
 package lab.shop;
 
-import java.util.Arrays;
-
 import lab.shop.application.ShopImplementation;
 import lab.shop.application.ShopMode;
 import org.springframework.beans.factory.InitializingBean;
@@ -10,8 +8,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
+import java.util.Arrays;
+
 @Configuration(proxyBeanMethods = false)
 public class ShopProfileConfiguration {
+
     @Bean
     InitializingBean validateShopProfile(Environment environment, ObjectProvider<ShopImplementation> provider) {
         return () -> {

@@ -12,3 +12,5 @@
 Порядок применения SQL и бизнес-транзакции: [API и данные](../02-api-and-data.md). Данные готовит Fixture-модуль Control напрямую в БД при закрытых runtimes. HTTP-спецификации находятся только в [contracts](../../contracts/README.md).
 
 Физическое хранение Control/Detector не задаётся OpenAPI. [legacy-lab](legacy-lab/README.md) - архив отменённого SQL-протокола, не текущие миграции.
+
+Миграции внутренней БД Control находятся в [`db/control/migrations`](../../db/control/migrations).

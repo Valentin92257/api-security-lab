@@ -191,7 +191,7 @@ UNIQUE: `job_id, step_id, attempt_no`.
 
 | Поле | SQL-тип | NULL | DEFAULT | Назначение / связь |
 |---|---|---|---|---|
-| `request_id` | `uuid` | нет | - | UUID attemptId=requestId, созданный harness до отправки и проверенный gateway |
+| `request_id` | `uuid` | нет | - | UUID attemptId=requestId, созданный harness до отправки и переданный через gateway |
 | `step_id` | `uuid` | нет | - | Step UUID внутри immutable scenario_jobs.plan; логическая ссылка |
 | `attempt_no` | `integer` | нет | - | Номер попытки |
 | `started_at` | `timestamptz` | нет | - | Реальное время |
@@ -386,3 +386,5 @@ UNIQUE: `partition_id, ruleset_hash, rule_id, correlation_key, window_key`.
 Для CHECKOUT обязательны cartKey, cartRevision и idempotencyKeyHash. cartRevision обозначает запрошенную исходную версию, а не revision после очистки. Новый эффект содержит orderId, stateChanged=true и idempotencyOutcome=NEW; возврат сохранённого ответа - тот же orderId, stateChanged=false и REPLAYED. Отказ повторной cartRevision - stateChanged=false и CONFLICT. Detector считает разные orderId одной пары cartKey/cartRevision; повторный лог или cached retry не являются новым эффектом.
 
 <!-- END LEGACY LAB MODEL -->
+
+Gateway не аутентифицирует пользователя магазина: в его AccessLog `user=null`, JWT не декодируется для установления личности. Подтверждённый userId записывает Shop после проверки JWT. Detector объединяет записи по requestId и использует user из Shop; 401/429 из Shop возвращаются через Gateway без изменения. Отсутствие Shop-записи при техническом отказе Gateway не доказывает предотвращение атаки.
