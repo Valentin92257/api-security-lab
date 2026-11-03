@@ -14,31 +14,11 @@ services:
       LAB_OPERATOR_TOKEN: ${LAB_OPERATOR_TOKEN:?Set LAB_OPERATOR_TOKEN in .env}
       LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
     depends_on:
-      db-init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${LAB_CONTROL_PORT:-8080}:8080"
     networks: [ lab-traffic, shop-admin, lab-data, lab-observe ]
-
-  db-init:
-    extends:
-      file: compose.common.yaml
-      service: java-service
-    image: postgres:17-alpine
-    user: "10001:10001"
-    entrypoint: [ "psql" ]
-    command: [ "-X", "-v", "ON_ERROR_STOP=1", "-f", "/bootstrap/init/bootstrap.sql" ]
-    environment:
-      PGHOST: db
-      PGDATABASE: postgres
-      PGUSER: ${POSTGRES_USER:-lab_admin}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    volumes:
-      - ./db:/bootstrap:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    networks: [ lab-data ]
 
   db:
     image: postgres:17-alpine
@@ -49,6 +29,7 @@ services:
       LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
     volumes:
       - control-data:/var/lib/postgresql/data
+      - ./db/init/bootstrap.sql:/docker-entrypoint-initdb.d/20-databases.sql:ro
       - ./db/control/role.sql:/docker-entrypoint-initdb.d/10-control.sql:ro
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d postgres" ]
@@ -89,8 +70,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     depends_on:
-      db-init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   shop-protected:
@@ -105,8 +86,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     depends_on:
-      db-init:
-        condition: service_completed_successfully
+      db:
+        condition: service_healthy
     networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   lab-detector:

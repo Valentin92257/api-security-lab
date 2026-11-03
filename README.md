@@ -27,17 +27,17 @@ Java-контейнеры работают без root с read-only файлов
 PostgreSQL 17 хранит `lab_control`, `vulnerable` и `protected` в volume `control-data`.
 `docker compose down` сохраняет данные, `docker compose down --volumes` удаляет их.
 
-db-init создаёт базы данных. При старте Control Flyway применяет миграции из `db/control/migrations`, включённые в JAR, с отдельными административными credentials. Рабочие запросы используют DML-роль `control_app`. Shop также применяет миграции при старте. Отдельного контейнера миграций нет.
+PostgreSQL создаёт базы данных через скрипты в `/docker-entrypoint-initdb.d/` при первом запуске с пустым volume. При старте Control Flyway применяет миграции из `db/control/migrations`, включённые в JAR, с отдельными административными credentials. Рабочие запросы используют DML-роль `control_app`. Shop также применяет миграции при старте. Отдельного контейнера миграций нет.
 `POSTGRES_USER` по умолчанию равен `lab_admin` и должен совпадать с администратором существующего volume.
 Изменение `.env` не меняет созданные роли и пароли. Применённые миграции не редактируй; следующие добавляй как V3, V4 и далее.
 
-Обновление БД без удаления данных:
+На существующем volume init-скрипты повторно не выполняются. Если базы уже созданы, дополнительных действий не нужно. Для создания недостающих баз без удаления данных:
 
 ```sh
-docker compose stop lab-control
-docker compose run --rm db-init
-docker compose up -d --wait lab-control
+docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -f /docker-entrypoint-initdb.d/20-databases.sql'
 ```
+
+Новые миграции таблиц применяются при следующем запуске соответствующего приложения.
 
 ## Создание эксперимента
 
