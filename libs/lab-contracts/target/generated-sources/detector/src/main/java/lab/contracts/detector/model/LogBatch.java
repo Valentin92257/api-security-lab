@@ -2,6 +2,7 @@ package lab.contracts.detector.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -60,8 +61,10 @@ public class LogBatch {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private ProducerEnum producer;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private List<@Valid AccessLog> entries = new ArrayList<>();
 
   public LogBatch() {

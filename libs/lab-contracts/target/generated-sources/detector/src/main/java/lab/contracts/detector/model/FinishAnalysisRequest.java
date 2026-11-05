@@ -2,6 +2,7 @@ package lab.contracts.detector.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import java.time.OffsetDateTime;
@@ -22,10 +23,13 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class FinishAnalysisRequest {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer gatewayLastSequence;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer shopLastSequence;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
   private OffsetDateTime deadlineAt;
 

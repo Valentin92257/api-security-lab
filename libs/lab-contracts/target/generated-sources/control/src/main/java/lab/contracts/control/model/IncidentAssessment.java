@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -25,6 +26,7 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class IncidentAssessment {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private lab.contracts.detector.model.Incident incident;
 
   /**
@@ -64,10 +66,13 @@ public class IncidentAssessment {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private VerdictEnum verdict;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Set<@Size(min = 1, max = 128)String> matchedEpisodeIds = new LinkedHashSet<>();
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String reason;
 
   public IncidentAssessment() {

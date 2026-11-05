@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -26,8 +27,10 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class CaseResult {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String caseId;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String episodeId;
 
   /**
@@ -71,6 +74,7 @@ public class CaseResult {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private FamilyEnum family;
 
   /**
@@ -108,6 +112,7 @@ public class CaseResult {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private LabelEnum label;
 
   /**
@@ -147,10 +152,13 @@ public class CaseResult {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private EffectEnum effect;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Set<UUID> requestIds = new LinkedHashSet<>();
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String reason;
 
   /**
@@ -194,6 +202,7 @@ public class CaseResult {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private DetectionEnum detection;
 
   public CaseResult() {

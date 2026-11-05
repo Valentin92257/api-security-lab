@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import java.util.ArrayList;
@@ -24,8 +25,10 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class TrialPage {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private List<@Valid Trial> items = new ArrayList<>();
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Long total;
 
   public TrialPage() {
