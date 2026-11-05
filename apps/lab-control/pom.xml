@@ -91,6 +91,11 @@
       <plugin>
         <groupId>org.openapitools</groupId>
         <artifactId>openapi-generator-maven-plugin</artifactId>
+        <configuration>
+          <schemaMappings>
+            <schemaMapping>Problem=lab.contracts.common.model.Problem</schemaMapping>
+          </schemaMappings>
+        </configuration>
         <executions>
           <execution>
             <id>control</id>

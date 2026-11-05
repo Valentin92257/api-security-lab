@@ -7,7 +7,6 @@ package lab.contracts.control.api;
 
 import lab.contracts.control.model.CreateTrialRequest;
 import org.springframework.lang.Nullable;
-import lab.contracts.control.model.Problem;
 import java.util.Set;
 import lab.contracts.control.model.Trial;
 import lab.contracts.control.model.TrialPage;

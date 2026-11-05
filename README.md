@@ -118,13 +118,16 @@ docker run --rm -v "$PWD:/workspace" -w /workspace \
 
 | Модуль | Контракты |
 |---|---|
-| `libs/lab-contracts` | модели `control`, `detector`, `runtime` + сериализация/валидация (`lab.contracts.json`) |
+| `libs/lab-contracts` | модели `common`, `control`, `detector`, `runtime` + сериализация/валидация (`lab.contracts.json`) |
 | `apps/shop-api` | `shop` (API и модели), `runtime` (API) |
 | `apps/lab-gateway` | `runtime` (API) |
 | `apps/lab-detector` | `detector` (API) |
 | `apps/lab-control` | `control` (API) |
 
 Пакеты `lab.contracts.<контракт>.api` содержат интерфейсы API с HTTP-аннотациями, `lab.contracts.<контракт>.model` - DTO и enum.
+
+Общий `Problem` находится в `lab.contracts.common.model`, общий `Incident` — в `lab.contracts.detector.model`.
+Работа с JSON вне контроллеров и область автоматической MVC-валидации описаны в [lab-contracts](libs/lab-contracts/README.md).
 
 У Shop API отключена генерация Bean Validation: ограничения спецификации применяются реализацией с учётом режима. Protected отклоняет нарушения, vulnerable допускает учебные quantity/quotedTotal. Runtime и остальные API сохраняют Bean Validation.
 

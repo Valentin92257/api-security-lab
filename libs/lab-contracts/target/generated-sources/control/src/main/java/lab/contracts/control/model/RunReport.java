@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -27,6 +28,7 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class RunReport {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private UUID runId;
 
   /**
@@ -64,6 +66,7 @@ public class RunReport {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private ModeEnum mode;
 
   /**
@@ -105,10 +108,13 @@ public class RunReport {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private StateEnum state;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private List<@Valid CaseResult> cases = new ArrayList<>();
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private List<@Valid IncidentAssessment> incidents;
 
   private @Nullable String error = null;

@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -28,6 +29,7 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class Trial {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private UUID trialId;
 
   /**
@@ -71,8 +73,10 @@ public class Trial {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Set<FamiliesEnum> families = new LinkedHashSet<>();
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer seed;
 
   /**
@@ -120,15 +124,20 @@ public class Trial {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private StateEnum state;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
   private OffsetDateTime createdAt;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Long plannedSteps;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Long finishedSteps;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Boolean cleanupSafe;
 
   private @Nullable String error = null;
