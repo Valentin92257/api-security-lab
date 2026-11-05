@@ -1,5 +1,6 @@
 package lab.contracts.json;
 
+import lab.contracts.common.model.Problem;
 import lab.contracts.control.model.CaseResult;
 import lab.contracts.control.model.CreateTrialRequest;
 import lab.contracts.control.model.IncidentAssessment;
@@ -13,22 +14,21 @@ import lab.contracts.detector.model.FinishAnalysisRequest;
 import lab.contracts.detector.model.Incident;
 import lab.contracts.detector.model.IncidentPage;
 import lab.contracts.detector.model.LogBatch;
+import lab.contracts.runtime.model.RunSetup;
+import lab.contracts.runtime.model.RuntimeStatus;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 
-/**
- * Validating JSON serializer and deserializer for experiment ({@link Trial}, {@link TrialReport},
- * {@link RunReport}, {@link CaseResult}, {@link IncidentAssessment}), incident ({@link Incident},
- * {@link IncidentPage}, {@link AnalysisStatus}, {@link FinishAnalysisRequest}), and access-log
- * ({@link AccessLog}, {@link LogBatch}, JSONL) schemas.
- */
+/** JSON and JSONL serialization for shared contract DTOs, independent of Spring MVC. */
 public class ContractJsonCodec {
 
     private final JsonMapper jsonMapper;
@@ -39,7 +39,8 @@ public class ContractJsonCodec {
     }
 
     public ContractJsonCodec(JsonMapper jsonMapper, ContractValidator validator) {
-        this.jsonMapper = Objects.requireNonNull(jsonMapper, "jsonMapper must not be null");
+        Objects.requireNonNull(jsonMapper, "jsonMapper must not be null");
+        this.jsonMapper = ContractJsonSupport.configure(jsonMapper.rebuild()).build();
         this.validator = Objects.requireNonNull(validator, "validator must not be null");
     }
 
@@ -52,7 +53,8 @@ public class ContractJsonCodec {
     }
 
     public <T> T validate(T value) {
-        return validator.validateObject(value);
+        writeAsBytes(value);
+        return value;
     }
 
     public <T> T read(String json, Class<T> type) {
@@ -62,40 +64,56 @@ public class ContractJsonCodec {
         return read(json.getBytes(StandardCharsets.UTF_8), type);
     }
 
+    public void validateJson(byte[] jsonBytes, Class<?> type) {
+        read(jsonBytes, type);
+    }
+
+    /** Reads within the documented byte limit without closing the caller's stream. */
+    public <T> T read(InputStream input, Class<T> type) throws IOException {
+        Objects.requireNonNull(input, "input must not be null");
+        requireContractType(type);
+        int limit = ContractValidator.payloadByteLimit(type);
+        byte[] bytes = limit == Integer.MAX_VALUE ? input.readAllBytes() : input.readNBytes(limit + 1);
+        return read(bytes, type);
+    }
+
     public <T> T read(byte[] jsonBytes, Class<T> type) {
-        Objects.requireNonNull(type, "type must not be null");
+        requireContractType(type);
         if (jsonBytes == null || jsonBytes.length == 0) {
             throw new ContractValidationException("JSON byte input must not be empty");
         }
-        enforcePayloadByteLimits(jsonBytes.length, type);
+        ContractValidator.validatePayloadSize(jsonBytes.length, type);
         try {
             JsonNode tree = jsonMapper.readTree(jsonBytes);
             validator.validateJsonTree(tree, type);
-            T value = jsonMapper.readValue(jsonBytes, type);
-            return validator.validateObject(value);
-        } catch (ContractValidationException e) {
-            throw e;
+            T value = jsonMapper.treeToValue(tree, type);
+            validator.validateBean(value);
+            return value;
         } catch (JacksonException e) {
-            throw new ContractValidationException("Invalid JSON for " + type.getSimpleName() + ": " + e.getMessage(), e);
+            throw new ContractValidationException("Invalid JSON for " + type.getSimpleName() + ": " + e.getMessage(),
+                    e);
         }
     }
 
     public <T> String writeAsString(T value) {
-        validator.validateObject(value);
-        try {
-            String json = jsonMapper.writeValueAsString(value);
-            byte[] utf8 = json.getBytes(StandardCharsets.UTF_8);
-            enforcePayloadByteLimits(utf8.length, value.getClass());
-            return json;
-        } catch (ContractValidationException e) {
-            throw e;
-        } catch (JacksonException e) {
-            throw new ContractValidationException("Failed to serialize " + value.getClass().getSimpleName() + ": " + e.getMessage(), e);
-        }
+        return new String(writeAsBytes(value), StandardCharsets.UTF_8);
     }
 
     public <T> byte[] writeAsBytes(T value) {
-        return writeAsString(value).getBytes(StandardCharsets.UTF_8);
+        if (value == null) {
+            throw new ContractValidationException("Contract payload must not be null");
+        }
+        requireContractType(value.getClass());
+        validator.validateBean(value);
+        try {
+            byte[] bytes = jsonMapper.writeValueAsBytes(value);
+            ContractValidator.validatePayloadSize(bytes.length, value.getClass());
+            validator.validateJsonTree(jsonMapper.readTree(bytes), value.getClass());
+            return bytes;
+        } catch (JacksonException e) {
+            throw new ContractValidationException(
+                    "Failed to serialize " + value.getClass().getSimpleName() + ": " + e.getMessage(), e);
+        }
     }
 
     // --- Experiment / Trial contracts ---
@@ -190,6 +208,30 @@ public class ContractJsonCodec {
         return writeAsString(request);
     }
 
+    public RunSetup readRunSetup(String json) {
+        return read(json, RunSetup.class);
+    }
+
+    public String writeRunSetup(RunSetup setup) {
+        return writeAsString(setup);
+    }
+
+    public RuntimeStatus readRuntimeStatus(String json) {
+        return read(json, RuntimeStatus.class);
+    }
+
+    public String writeRuntimeStatus(RuntimeStatus status) {
+        return writeAsString(status);
+    }
+
+    public Problem readProblem(String json) {
+        return read(json, Problem.class);
+    }
+
+    public String writeProblem(Problem problem) {
+        return writeAsString(problem);
+    }
+
     // --- AccessLog / LogBatch & JSONL contracts ---
 
     public AccessLog readAccessLog(String json) {
@@ -217,13 +259,15 @@ public class ContractJsonCodec {
     }
 
     /**
-     * Serializes a single {@link AccessLog} record as a compact JSONL line (without newline characters)
+     * Serializes a single {@link AccessLog} record as a compact JSONL line (without
+     * newline characters)
      * and validates the 64 KiB per-record limit.
      */
     public String writeAccessLogJsonLine(AccessLog entry) {
         String line = writeAccessLog(entry);
         if (line.indexOf('\n') >= 0 || line.indexOf('\r') >= 0) {
-            throw new ContractValidationException("Serialized AccessLog JSONL line must not contain newline characters");
+            throw new ContractValidationException(
+                    "Serialized AccessLog JSONL line must not contain newline characters");
         }
         return line;
     }
@@ -242,7 +286,8 @@ public class ContractJsonCodec {
     }
 
     /**
-     * Formats a collection of {@link AccessLog} records as newline-delimited JSON (JSONL).
+     * Formats a collection of {@link AccessLog} records as newline-delimited JSON
+     * (JSONL).
      */
     public String writeAccessLogJsonLines(Collection<AccessLog> entries) {
         Objects.requireNonNull(entries, "entries must not be null");
@@ -257,7 +302,8 @@ public class ContractJsonCodec {
     }
 
     /**
-     * Parses and validates newline-delimited JSON (JSONL) into a list of {@link AccessLog} records.
+     * Parses and validates newline-delimited JSON (JSONL) into a list of
+     * {@link AccessLog} records.
      */
     public List<AccessLog> readAccessLogJsonLines(String jsonLines) {
         Objects.requireNonNull(jsonLines, "jsonLines must not be null");
@@ -274,15 +320,10 @@ public class ContractJsonCodec {
         return List.copyOf(result);
     }
 
-    private static void enforcePayloadByteLimits(int byteLength, Class<?> type) {
-        if (type == AccessLog.class && byteLength > ContractValidator.MAX_ACCESS_LOG_BYTES) {
-            throw new ContractValidationException(
-                    "AccessLog size " + byteLength + " exceeds limit of " + ContractValidator.MAX_ACCESS_LOG_BYTES + " bytes");
-        }
-        if (type == LogBatch.class && byteLength > ContractValidator.MAX_LOG_BATCH_BYTES) {
-            throw new ContractValidationException(
-                    "LogBatch size " + byteLength + " exceeds limit of " + ContractValidator.MAX_LOG_BATCH_BYTES + " bytes");
+    private static void requireContractType(Class<?> type) {
+        Objects.requireNonNull(type, "type must not be null");
+        if (!ContractValidator.supports(type)) {
+            throw new IllegalArgumentException("Unsupported contract model: " + type.getName());
         }
     }
 }
-

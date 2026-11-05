@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -66,8 +67,10 @@ public class CreateTrialRequest {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Set<FamiliesEnum> families = new LinkedHashSet<>();
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private @Nullable Integer seed;
 
   public CreateTrialRequest() {

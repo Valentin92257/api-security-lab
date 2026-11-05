@@ -5,7 +5,6 @@
  */
 package lab.contracts.runtime.api;
 
-import lab.contracts.runtime.model.Problem;
 import lab.contracts.runtime.model.RunSetup;
 import lab.contracts.runtime.model.RuntimeStatus;
 import java.util.UUID;

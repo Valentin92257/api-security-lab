@@ -2,6 +2,7 @@ package lab.contracts.control.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -29,8 +30,10 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class TrialReport {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private UUID trialId;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer seed;
 
   /**
@@ -72,8 +75,10 @@ public class TrialReport {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private StateEnum state;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private List<@Valid RunReport> runs = new ArrayList<>();
 
   /**
@@ -117,6 +122,7 @@ public class TrialReport {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Set<FamiliesEnum> families = new LinkedHashSet<>();
 
   public TrialReport() {

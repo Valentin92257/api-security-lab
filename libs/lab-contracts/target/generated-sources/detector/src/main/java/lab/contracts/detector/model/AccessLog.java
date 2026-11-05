@@ -2,6 +2,7 @@ package lab.contracts.detector.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import java.time.OffsetDateTime;
@@ -23,31 +24,44 @@ import jakarta.annotation.Generated;
 @Generated(value = "org.openapitools.codegen.languages.SpringCodegen", comments = "Generator version: 7.26.0")
 public class AccessLog {
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer sequence;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private UUID requestId;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
   private OffsetDateTime time;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String remoteAddr;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Long user = null;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String method;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String path;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String route = null;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer status;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Long bytes;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Double requestTime;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String userAgent = null;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String reqHash = null;
 
   public AccessLog() {

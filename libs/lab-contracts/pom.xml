@@ -13,20 +13,68 @@
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-webmvc</artifactId>
+      <artifactId>spring-boot-http-converter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-jackson</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
+      <version>3.0.8</version>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webmvc</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/../../contracts/schemas</directory>
+        <targetPath>lab/contracts/schemas</targetPath>
+        <includes>
+          <include>common.yaml</include>
+          <include>control.yaml</include>
+          <include>detector.yaml</include>
+          <include>logs.yaml</include>
+          <include>runtime.yaml</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.openapitools</groupId>
         <artifactId>openapi-generator-maven-plugin</artifactId>
+        <configuration>
+          <configOptions>
+            <generateJsonIncludeAnnotations>true</generateJsonIncludeAnnotations>
+          </configOptions>
+        </configuration>
         <executions>
+          <execution>
+            <id>common</id>
+            <goals>
+              <goal>generate</goal>
+            </goals>
+            <configuration>
+              <inputSpec>${maven.multiModuleProjectDirectory}/contracts/control-api.openapi.yaml</inputSpec>
+              <output>${project.build.directory}/generated-sources/common</output>
+              <modelPackage>lab.contracts.common.model</modelPackage>
+              <generateApis>false</generateApis>
+              <modelsToGenerate>Problem</modelsToGenerate>
+            </configuration>
+          </execution>
           <execution>
             <id>control</id>
             <goals>
@@ -41,6 +89,7 @@
               <generateModels>true</generateModels>
               <schemaMappings>
                 <schemaMapping>Incident=lab.contracts.detector.model.Incident</schemaMapping>
+                <schemaMapping>Problem=lab.contracts.common.model.Problem</schemaMapping>
               </schemaMappings>
             </configuration>
           </execution>
@@ -54,6 +103,9 @@
               <output>${project.build.directory}/generated-sources/detector</output>
               <apiPackage>lab.contracts.detector.api</apiPackage>
               <modelPackage>lab.contracts.detector.model</modelPackage>
+              <schemaMappings>
+                <schemaMapping>Problem=lab.contracts.common.model.Problem</schemaMapping>
+              </schemaMappings>
               <generateApis>false</generateApis>
               <generateModels>true</generateModels>
             </configuration>
@@ -68,6 +120,9 @@
               <output>${project.build.directory}/generated-sources/runtime</output>
               <apiPackage>lab.contracts.runtime.api</apiPackage>
               <modelPackage>lab.contracts.runtime.model</modelPackage>
+              <schemaMappings>
+                <schemaMapping>Problem=lab.contracts.common.model.Problem</schemaMapping>
+              </schemaMappings>
               <generateApis>false</generateApis>
               <generateModels>true</generateModels>
             </configuration>

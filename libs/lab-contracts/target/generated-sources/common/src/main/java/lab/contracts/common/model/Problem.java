@@ -1,7 +1,8 @@
-package lab.contracts.runtime.model;
+package lab.contracts.common.model;
 
 import java.net.URI;
 import java.util.Objects;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
@@ -55,10 +56,13 @@ public class Problem {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private TypeEnum type;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private String title;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private Integer status;
 
   /**
@@ -108,8 +112,10 @@ public class Problem {
     }
   }
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private CodeEnum code;
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
   private UUID requestId;
 
   public Problem() {
