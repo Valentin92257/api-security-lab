@@ -10,7 +10,6 @@ import lab.contracts.detector.model.FinishAnalysisRequest;
 import lab.contracts.detector.model.IncidentPage;
 import lab.contracts.detector.model.LogBatch;
 import org.springframework.lang.Nullable;
-import lab.contracts.detector.model.Problem;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
