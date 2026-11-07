@@ -1,11 +1,11 @@
 package lab.shop.api;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lab.contracts.shop.model.Problem;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.context.request.WebRequest;
 
 import java.util.UUID;
 
@@ -15,7 +15,7 @@ public class GlobalExceptionHandler {
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Problem> handleGlobalException(Exception ex, WebRequest request) {
+    public ResponseEntity<Problem> handleGlobalException(Exception ex, HttpServletRequest request) {
         UUID requestId = getRequestId(request);
 
         Problem problem = new Problem(
@@ -27,7 +27,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(problem);
     }
 
-    private UUID getRequestId(WebRequest request) {
+    private UUID getRequestId(HttpServletRequest request) {
         String requestId = request.getHeader(REQUEST_ID_HEADER);
 
         try {
