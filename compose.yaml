@@ -45,7 +45,10 @@ services:
     build:
       context: .
       dockerfile: apps/lab-gateway/Dockerfile
+    volumes:
+      - lab-gateway-decisions:/app/logs
     environment:
+      DECISION_LOG_PATH: /app/logs/decisions.jsonl
       SERVER_PORT: "8081"
       GATEWAY_ADDITIONAL_PORT: "8082"
       SHOP_PROTECTED_URL: "${SHOP_PROTECTED_URL:-http://shop-protected:8080}"
@@ -63,7 +66,10 @@ services:
     build:
       context: .
       dockerfile: apps/shop-api/Dockerfile
+    volumes:
+      - shop-vulnerable-decisions:/app/logs
     environment:
+      DECISION_LOG_PATH: /app/logs/decisions.jsonl
       SPRING_PROFILES_ACTIVE: vulnerable
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
@@ -79,7 +85,10 @@ services:
       file: compose.common.yaml
       service: java-service
     image: api-security-lab/shop-api:dev
+    volumes:
+      - shop-protected-decisions:/app/logs
     environment:
+      DECISION_LOG_PATH: /app/logs/decisions.jsonl
       SPRING_PROFILES_ACTIVE: protected
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
@@ -112,4 +121,7 @@ networks:
     internal: true
 
 volumes:
+  lab-gateway-decisions:
+  shop-vulnerable-decisions:
+  shop-protected-decisions:
   control-data:

@@ -152,3 +152,18 @@ Gateway и оба Shop пишут JSON-логи `http_request`: `service`, `trac
 Недоступный upstream даёт 502/UNAVAILABLE, таймаут — 504/UNAVAILABLE. Слишком большой запрос — 413/INVALID_REQUEST, ответ upstream сверх бюджета — 502/UNAVAILABLE. Все эти ответы содержат X-Request-Id и Problem.requestId. Таймаут не означает откат заказа, proxy не повторяет операцию. Бюджеты — технические ограничения транспорта, а не экспериментальные политики.
 
 Тесты запускаются при Docker-сборке. Gateway integration tests используют локальный тестовый HTTP upstream: методы, query/body/headers, ID, ответы 429/redirect, disconnect без retry, timeout заголовков/тела, ограничения буфера и listener. Shop HTTP-тесты проверяют тот же ID в ответе/логе обоих профилей, 400/500, отсутствие секретов и восстановление MDC. Тестовые ручки существуют только в `src/test`.
+
+
+## Журнал решений
+
+Gateway и оба Shop дописывают решения в `/app/logs/decisions.jsonl`, каждый в свой Docker volume. В строке указаны `requestId`/`trace_id`, `policyId`, `decision`, `reason`, время и вид проверки. Формат и подключение новых политик описаны в [документации событий](docs/04-events-and-detection.md#локальный-журнал-решений-политик).
+
+```sh
+docker compose exec -T lab-gateway tail -n 20 /app/logs/decisions.jsonl
+docker compose exec -T shop-protected tail -n 20 /app/logs/decisions.jsonl
+docker compose exec -T shop-vulnerable tail -n 20 /app/logs/decisions.jsonl
+```
+
+Каталог сохраняется при пересоздании контейнера; `docker compose down --volumes` удаляет журналы вместе с данными БД. Ротация: 10 MB/день, архивы до 7 дней и 100 MB. `DECISION_LOG_PATH` задаёт полный путь файла; каталог должен быть доступен на запись пользователю сервиса.
+
+Сейчас журнал охватывает технические проверки request ID, маршрута и размера запроса. Экспериментальные политики Shop подключаются через `DecisionLog.record` по мере реализации. ALLOW относится к одной проверке, а итоговый HTTP-ответ смотрят в access-логе.
