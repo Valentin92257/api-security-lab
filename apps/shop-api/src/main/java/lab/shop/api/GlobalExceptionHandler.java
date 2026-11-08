@@ -1,6 +1,7 @@
 package lab.shop.api;
 
 import lab.contracts.common.model.Problem;
+import lab.contracts.json.ContractValidationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -13,6 +14,17 @@ import java.util.UUID;
 public class GlobalExceptionHandler {
 
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
+
+    @ExceptionHandler(ContractValidationException.class)
+    public ResponseEntity<Problem> handleInvalidContract(WebRequest request) {
+        Problem problem = new Problem(
+                Problem.TypeEnum.URN_LAB_PROBLEM_HTTP_ERROR,
+                "Invalid JSON contract",
+                HttpStatus.BAD_REQUEST.value(),
+                Problem.CodeEnum.INVALID_REQUEST,
+                getRequestId(request));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problem);
+    }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Problem> handleGlobalException(Exception ex, WebRequest request) {
