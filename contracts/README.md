@@ -9,6 +9,7 @@
 | Control → Shop/Gateway | [Runtime API](runtime-api.openapi.yaml) |
 | Дашборд → Control | [Control API](control-api.openapi.yaml) |
 
+- Gateway не выполняет защитные политики бизнес-трафика: JWT, schema validation и login limits находятся в Shop. JWT обязателен в обоих Shop; protected применяет все защитные проверки, vulnerable допускает документированные учебные нарушения и не применяет login limiter. Gateway пишет user=null и передаёт Authorization в Shop; Runtime admission и ServiceBearer остаются инфраструктурой.
 - Control запускает выбранные семейства атак сначала в vulnerable, затем в protected с одинаковыми seed и исходными данными. Одновременно активно одно испытание; сброс БД допустим только после безопасного завершения предыдущего.
 - Генератор и подготовка БД - модули Control. Служебный Runtime API задаёт активный runId; бизнес-запросы передают X-Request-Id и IP виртуального клиента в доверенном X-Forwarded-For.
 - Shop/Gateway передают Detector по HTTP/JSON одну итоговую access-запись на запрос у каждого producer. [Формат](schemas/logs.yaml), [пример](examples/log-batch.json). Detector хранит логи и возвращает только итоговые инциденты; family необязателен.

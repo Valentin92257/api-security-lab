@@ -1,61 +1,103 @@
 name: api-security-lab
 
-x-java-service: &java-service
-  init: true
-  read_only: true
-  tmpfs:
-    - /tmp:rw,noexec,nosuid,size=128m,mode=1777
-  cap_drop:
-    - ALL
-  security_opt:
-    - no-new-privileges:true
-  stop_grace_period: 30s
-  restart: "no"
-
 services:
   lab-control:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-control/Dockerfile
+    environment:
+      SPRING_FLYWAY_USER: ${POSTGRES_USER:-lab_admin}
+      SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      LAB_OPERATOR_TOKEN: ${LAB_OPERATOR_TOKEN:?Set LAB_OPERATOR_TOKEN in .env}
+      LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${LAB_CONTROL_PORT:-8080}:8080"
-    networks: [lab-traffic, shop-admin, lab-data, lab-observe]
+    networks: [ lab-traffic, shop-admin, lab-data, lab-observe ]
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: lab_control
+      POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
+    volumes:
+      - control-data:/var/lib/postgresql/data
+      - ./db/init/bootstrap.sql:/docker-entrypoint-initdb.d/20-databases.sql:ro
+      - ./db/control/role.sql:/docker-entrypoint-initdb.d/10-control.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [ lab-data ]
 
   lab-gateway:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-gateway/Dockerfile
     environment:
       SERVER_PORT: "8081"
       GATEWAY_ADDITIONAL_PORT: "8082"
+      SHOP_PROTECTED_URL: "${SHOP_PROTECTED_URL:-http://shop-protected:8080}"
+      GATEWAY_CONNECT_TIMEOUT: "${GATEWAY_CONNECT_TIMEOUT:-2s}"
+      GATEWAY_UPSTREAM_TIMEOUT: "${GATEWAY_UPSTREAM_TIMEOUT:-5s}"
+      GATEWAY_MAX_BODY_BYTES: "${GATEWAY_MAX_BODY_BYTES:-8388608}"
     expose: ["8081", "8082"]
     networks: [lab-traffic, shop-backend, shop-admin, lab-observe]
 
   shop-vulnerable:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: api-security-lab/shop-api:dev
     build:
       context: .
       dockerfile: apps/shop-api/Dockerfile
     environment:
       SPRING_PROFILES_ACTIVE: vulnerable
-    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   shop-protected:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     image: api-security-lab/shop-api:dev
     environment:
       SPRING_PROFILES_ACTIVE: protected
-    networks: [shop-backend, shop-admin, lab-data, lab-observe]
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ shop-backend, shop-admin, lab-data, lab-observe ]
 
   lab-detector:
-    <<: *java-service
+    extends:
+      file: compose.common.yaml
+      service: java-service
     build:
       context: .
       dockerfile: apps/lab-detector/Dockerfile
-    networks: [lab-data, lab-observe]
+    networks: [ lab-data, lab-observe ]
 
 networks:
   lab-traffic:
@@ -68,3 +110,6 @@ networks:
     internal: true
   lab-observe:
     internal: true
+
+volumes:
+  control-data:

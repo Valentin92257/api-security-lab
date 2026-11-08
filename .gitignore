@@ -17,3 +17,4 @@ libs/*/target/generated-sources/**
 .env
 .env.*
 !.env.example
+docs/plans/21-lab-control.md

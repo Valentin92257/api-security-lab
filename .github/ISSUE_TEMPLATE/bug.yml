@@ -1,0 +1,38 @@
+name: Ошибка
+description: Что-то работает не так
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      placeholder: "1. ...\n2. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидалось
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Получилось
+      description: Лог, код ответа, скриншот (без паролей и токенов)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Компонент
+      options:
+        - shop-api
+        - lab-gateway
+        - lab-detector
+        - lab-control
+        - compose
+        - docs
+    validations:
+      required: true

@@ -11,6 +11,10 @@
   <artifactId>lab-gateway</artifactId>
   <dependencies>
     <dependency>
+      <groupId>org.apache.httpcomponents.client5</groupId>
+      <artifactId>httpclient5</artifactId>
+    </dependency>
+    <dependency>
       <groupId>lab</groupId>
       <artifactId>lab-contracts</artifactId>
       <version>${project.version}</version>
@@ -55,7 +59,6 @@
               <output>${project.build.directory}/generated-sources/runtime</output>
               <apiPackage>lab.contracts.runtime.api</apiPackage>
               <modelPackage>lab.contracts.runtime.model</modelPackage>
-              <generateModels>false</generateModels>
             </configuration>
           </execution>
         </executions>

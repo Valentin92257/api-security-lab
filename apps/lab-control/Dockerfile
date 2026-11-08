@@ -4,6 +4,7 @@ COPY pom.xml ./
 COPY libs/ libs/
 COPY apps/ apps/
 COPY contracts/ contracts/
+COPY db/control/ db/control/
 RUN mvn -B -ntp -pl apps/lab-control -am package
 
 FROM eclipse-temurin:25-jre-alpine

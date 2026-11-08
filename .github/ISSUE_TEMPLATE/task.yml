@@ -1,0 +1,44 @@
+name: Задача
+description: Задача спринта с исполнителем и критерием готовности
+title: "[S2-?] "
+labels: ["task"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Описание
+      description: Что нужно сделать и зачем
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Готово, когда
+      description: Проверяемый результат
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Зона
+      options:
+        - shop-api
+        - lab-gateway
+        - lab-detector
+        - lab-control
+        - contracts
+        - docs
+        - infra
+    validations:
+      required: true
+  - type: input
+    id: requirements
+    attributes:
+      label: Требования
+      placeholder: "GW-2, DET-1"
+  - type: input
+    id: depends
+    attributes:
+      label: Зависит от
+      placeholder: "#12"

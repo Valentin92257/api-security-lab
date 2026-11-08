@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 @Component
 @Profile("vulnerable")
 public final class VulnerableShopImplementation implements ShopImplementation {
+
     @Override
     public ShopMode mode() {
         return ShopMode.VULNERABLE;
