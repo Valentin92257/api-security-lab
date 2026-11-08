@@ -7,7 +7,7 @@ Shop запускается в двух контейнерах с профиля
 ## Запуск
 
 Нужен Docker с Compose. Скопируй `.env.example` в `.env`: `cp .env.example .env`.
-Замени три `replace-with-*` на случайные секреты (`openssl rand -hex 32`) и запусти стенд:
+Замени пять `replace-with-*` на случайные секреты (`openssl rand -hex 32`) и запусти стенд:
 
 ```sh
 docker compose build
@@ -18,7 +18,8 @@ docker compose exec lab-control curl --fail http://127.0.0.1:8080/health
 Локальные Maven и JDK не нужны: сборка и модульные тесты выполняются в Docker.
 Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`), остальные сервисы доступны внутри Docker.
 Внутренние сети могут мешать доступу с хоста, поэтому примеры используют `docker compose exec`.
-Health Control проверяет БД. Shop содержит каркас API и миграции; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
+Health Control проверяет БД. Shop реализует регистрацию, вход (JWT) и чтение профиля в обоих режимах, остальные операции магазина пока
+не реализованы; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
@@ -95,13 +96,32 @@ lab.shop
 Дополнительные профили, например `test`, допустимы. Клиент не выбирает реализацию.
 HTTP-контроллеры реализуют lab.contracts.shop.api.DefaultApi и делегируют операции в application; secured/vulnerable не вызывают друг друга.
 Проверки владельца, SQL, checkout и идемпотентность реализуются отдельно в каждом варианте.
-Сейчас созданы структура, выбор варианта и проверки запуска; бизнес-операций ещё нет.
+Реализованы register, login и getUser. Access JWT (HS256) выдаёт и проверяет сам Shop: подпись, `iss`, `aud`,
+`exp`, `nbf`; у каждого режима свои секрет, issuer и audience, поэтому токен другого режима отклоняется.
+Правило доступа к профилю находится в сервисе: protected сверяет id из токена с запрошенным (чужой профиль
+даёт 404), vulnerable не сверяет. Остальных бизнес-операций ещё нет.
 `ShopImplementation.mode()` обозначает вариант, а не наличие работающей защиты.
 `/health` предоставляет Actuator; тесты охватывают оба профиля и неверные конфигурации.
 Настроены `Flyway` миграции в зависимости от активного Spring профиля. Настроены интеграционные тесты с использованием
 `Testcontainers`. Каждый режим API обращается к собственной БД.
 По умолчанию тесты запускаются без DataSource, `PostgreSQLIntegrationTest` позволяет проводить тесты с контейнером
 PostgreSQL и настроенным окружением.
+
+Для интеграционных тестов нужны Java 25, Maven и Docker:
+
+```sh
+mvn --batch-mode --no-transfer-progress -pl apps/shop-api -am verify
+```
+
+### JWT
+
+| Параметр                         | Где задаётся                                                | Назначение                                                 |
+|----------------------------------|-------------------------------------------------------------|------------------------------------------------------------|
+| JWT_SECRET                       | compose: `JWT_SECRET_VULNERABLE` / `JWT_SECRET_PROTECTED`   | Секрет HS256, не короче 32 символов, свой у каждого режима |
+| app.jwt.issuer, app.jwt.audience | `application-vulnerable.yaml`, `application-protected.yaml` | Различают токены режимов; значения в профилях разные       |
+| app.jwt.ttl                      | `application.yaml`                                          | Срок токена, по умолчанию 15m, допустимо 1…900 секунд      |
+
+Интеграционные и e2e-тесты Shop задают свои значения в `src/test/resources/config/application.yaml`.
 
 ## Генерация кода из OpenAPI
 

@@ -33,7 +33,7 @@ JSON UTF-8, camelCase, даты UTC RFC 3339. Все поля описанных
 
 ## Аутентификация и заголовки
 
-`Authorization: Bearer <accessToken>` обязателен, кроме register/login. JWT подписан локальным RS256-ключом target; проверяются фиксированный alg, signature, iss, aud, exp и nbf. Claims: sub=userId строкой, iat/nbf/exp, уникальный jti. TTL по умолчанию 15 минут, clock skew 5 секунд; время реальное. Ключ/issuer/audience выбираются по listener, token другого target отклоняется. Shop также проверяет JWT. Повторное использование действительного access JWT разрешено.
+`Authorization: Bearer <accessToken>` обязателен, кроме register/login. JWT подписан HS256 локальным секретом target (app.jwt.secret, не короче 32 байт); проверяются подпись, iss, aud, exp и nbf, допуск по времени 5 секунд. Claims: sub=userId строкой, iss, aud, iat, nbf, exp, уникальный jti. TTL по умолчанию 15 минут (не более 900 секунд). У каждого target свой секрет, issuer и audience; токен другого target отклоняется. Shop также проверяет JWT.
 
 Runner создаёт `X-Request-Id` до каждой отправки, Gateway сохраняет его при передаче в Shop и возвращает в ответе. Retry получает новый UUID; trace context распространяется отдельно. RunId берётся из активного контекста Runtime API. В `X-Forwarded-For` Runner передаёт один IP виртуального клиента: Gateway доверяет только генератору, Shop - только Gateway. Вычисленный IP используется в access-логах и limiter. Пользовательские role/owner/target headers полномочий не дают. Чужой и отсутствующий profile/order возвращают одинаковый 404.
 

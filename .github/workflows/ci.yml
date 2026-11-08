@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -46,7 +46,7 @@ jobs:
       - name: Prepare local credentials
         run: |
           umask 077
-          for secret_name in LAB_OPERATOR_TOKEN POSTGRES_PASSWORD LAB_CONTROL_DB_PASSWORD; do
+          for secret_name in LAB_OPERATOR_TOKEN POSTGRES_PASSWORD LAB_CONTROL_DB_PASSWORD JWT_SECRET_PROTECTED JWT_SECRET_VULNERABLE; do
             printf '%s=%s\n' "$secret_name" "$(openssl rand -hex 32)"
           done > .env
       - name: Build images

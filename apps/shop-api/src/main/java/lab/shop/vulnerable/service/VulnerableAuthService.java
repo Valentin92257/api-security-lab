@@ -1,24 +1,19 @@
 package lab.shop.vulnerable.service;
 
-import lab.contracts.shop.model.LoginRequest;
-import lab.contracts.shop.model.LoginResult;
-import lab.contracts.shop.model.RegisterRequest;
-import lab.contracts.shop.model.User;
-import lab.shop.application.service.AuthService;
+import lab.shop.api.security.JwtProperties;
+import lab.shop.api.security.JwtService;
+import lab.shop.application.repository.CartRepository;
+import lab.shop.application.repository.UserRepository;
+import lab.shop.application.service.BaseAuthService;
 import org.springframework.context.annotation.Profile;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
 @Profile("vulnerable")
-public class VulnerableAuthService implements AuthService {
+public class VulnerableAuthService extends BaseAuthService {
 
-    @Override
-    public LoginResult login(LoginRequest request) {
-        return new LoginResult();
-    }
-
-    @Override
-    public User register(RegisterRequest request) {
-        return new User();
+    protected VulnerableAuthService(UserRepository userRepository, CartRepository cartRepository, PasswordEncoder passwordEncoder, JwtService jwtService, JwtProperties jwtProperties) {
+        super(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties);
     }
 }
