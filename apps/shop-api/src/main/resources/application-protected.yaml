@@ -7,3 +7,7 @@ spring:
     locations:
       - classpath:db/migration/vulnerable
       - classpath:db/migration/protected
+app:
+  jwt:
+    issuer: urn:lab:shop:protected
+    audience: shop-protected

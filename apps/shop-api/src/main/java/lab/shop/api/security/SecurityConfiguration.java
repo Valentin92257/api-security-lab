@@ -13,13 +13,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
 
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
@@ -46,20 +41,16 @@ class SecurityConfiguration {
 
     @Bean
     JwtEncoder jwtEncoder(JwtProperties jwtProperties) {
-        return new NimbusJwtEncoder(new ImmutableSecret<>(key(jwtProperties.secret())));
+        return new NimbusJwtEncoder(new ImmutableSecret<>(JwtSupport.key(jwtProperties.secret())));
     }
 
     @Bean
     JwtDecoder jwtDecoder(JwtProperties jwtProperties) {
-        return NimbusJwtDecoder.withSecretKey(key(jwtProperties.secret())).build();
+        return JwtSupport.decoder(jwtProperties);
     }
 
     @Bean
     PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
-    }
-
-    private static SecretKey key(String secret) {
-        return new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
     }
 }

@@ -11,12 +11,10 @@ import java.time.Duration;
 @Validated
 @ConfigurationProperties(prefix = "app.jwt")
 public record JwtProperties(
-        @NotBlank(message = "app.jwt.secret не задан")
-        @Size(min = 32, message = "app.jwt.secret должен быть не короче 32 символов")
-        String secret,
-
-        @DefaultValue("15m")
-        Duration ttl
+        @NotBlank @Size(min = 32) String secret,
+        @NotBlank String issuer,
+        @NotBlank String audience,
+        @DefaultValue("15m") Duration ttl
 ) {
 
     public JwtProperties {

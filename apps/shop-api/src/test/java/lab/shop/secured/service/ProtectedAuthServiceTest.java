@@ -30,7 +30,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class ProtectedAuthServiceTest {
+public class ProtectedAuthServiceTest {
 
     private static final String DUMMY_HASH = "dummy-hash-value";
     private static final String VALID_PASSWORD = "password123";
@@ -49,7 +49,8 @@ class ProtectedAuthServiceTest {
     @BeforeEach
     void setUp() {
         JwtProperties jwtProperties = new JwtProperties(
-                "test-secret-at-least-32-bytes-long-0123456789", Duration.ofMinutes(10));
+                "test-secret-at-least-32-bytes-long-0123456789",
+                "urn:lab:shop:test", "shop-test", Duration.ofMinutes(10));
         when(passwordEncoder.encode("dummy-password")).thenReturn(DUMMY_HASH);
         service = new ProtectedAuthService(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties);
     }
