@@ -19,7 +19,7 @@ import java.sql.Statement;
 @Transactional
 public abstract class PostgreSQLIntegrationTest {
 
-    public static final PostgreSQLContainer POSTGRES;
+    private static final PostgreSQLContainer POSTGRES;
 
     static {
         POSTGRES = new PostgreSQLContainer("postgres:17-alpine")
