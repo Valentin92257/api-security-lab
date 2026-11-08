@@ -7,21 +7,23 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ActiveProfiles("protected")
 public class ProtectedCartRepositoryIntegrationTest extends PostgreSQLIntegrationTest {
 
     @Autowired
-    protected UserRepository userRepository;
+    private UserRepository userRepository;
 
     @Autowired
-    protected CartRepository cartRepository;
+    private CartRepository cartRepository;
 
     @Autowired
-    protected JdbcClient jdbcClient;
+    private JdbcClient jdbcClient;
 
     @Test
     @DisplayName("createEmpty создаёт ровно одну корзину для пользователя")

@@ -155,9 +155,7 @@ class VulnerableAuthServiceTest {
     }
 
     @Test
-    @DisplayName("Уязвимость: для несуществующего логина хеш не сравнивается вообще "
-            + "(в отличие от protected, здесь нет dummy-хеша — ответ по несуществующему "
-            + "логину быстрее, что позволяет перебором узнавать существующие логины)")
+    @DisplayName("Для несуществующего логина хеш не сравнивается вообще")
     void loginForUnknownUserSkipsHashComparisonEntirely() {
         when(userRepository.findCredentialsByLogin("ghost")).thenReturn(Optional.empty());
 

@@ -19,7 +19,7 @@ public class VulnerableUserRepository implements UserRepository {
     public long insert(String login, String name, String email, String passwordHash) {
         String sql = """
                 INSERT INTO users (login, name, email, password_hash)
-                VALUES (%s, %s, %s, %s)
+                VALUES ('%s', '%s', '%s', '%s')
                 RETURNING id
                 """;
         return jdbc.sql(String.format(sql, login, name, email, passwordHash))
@@ -29,7 +29,7 @@ public class VulnerableUserRepository implements UserRepository {
 
     @Override
     public Optional<Credentials> findCredentialsByLogin(String login) {
-        String sql = "SELECT id, password_hash FROM users WHERE login = %s";
+        String sql = "SELECT id, password_hash FROM users WHERE login = '%s'";
         return jdbc.sql(String.format(sql, login))
                 .query(Credentials.class)
                 .optional();

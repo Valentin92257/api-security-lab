@@ -5,8 +5,8 @@ import lab.shop.application.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Profile;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -14,11 +14,11 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@Profile("protected")
-public abstract class ProtectedUserRepositoryIntegrationTest extends PostgreSQLIntegrationTest {
+@ActiveProfiles("protected")
+public class ProtectedUserRepositoryIntegrationTest extends PostgreSQLIntegrationTest {
 
     @Autowired
-    protected UserRepository userRepository;
+    private UserRepository userRepository;
 
     @Test
     @DisplayName("insert создаёт пользователя, доступного через findCredentialsByLogin")

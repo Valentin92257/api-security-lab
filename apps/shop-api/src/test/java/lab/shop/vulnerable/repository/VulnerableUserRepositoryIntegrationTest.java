@@ -1,8 +1,8 @@
 package lab.shop.vulnerable.repository;
 
 import lab.shop.secured.repository.ProtectedUserRepositoryIntegrationTest;
-import org.springframework.context.annotation.Profile;
+import org.springframework.test.context.ActiveProfiles;
 
-@Profile("vulnerable")
+@ActiveProfiles(value = "vulnerable", inheritProfiles = false)
 public class VulnerableUserRepositoryIntegrationTest extends ProtectedUserRepositoryIntegrationTest {
 }
