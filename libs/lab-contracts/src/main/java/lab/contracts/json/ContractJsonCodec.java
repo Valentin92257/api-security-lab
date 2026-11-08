@@ -19,6 +19,7 @@ import lab.contracts.runtime.model.RuntimeStatus;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -85,6 +86,16 @@ public class ContractJsonCodec {
         ContractValidator.validatePayloadSize(jsonBytes.length, type);
         try {
             JsonNode tree = jsonMapper.readTree(jsonBytes);
+            if (type == CreateTrialRequest.class && tree instanceof ObjectNode object) {
+                JsonNode seed = object.get("seed");
+                if (seed != null && seed.isNumber() && !seed.isIntegralNumber()) {
+                    try {
+                        object.put("seed", seed.decimalValue().intValueExact());
+                    } catch (ArithmeticException ignored) {
+                        // Leave fractional and out-of-range values for schema validation.
+                    }
+                }
+            }
             validator.validateJsonTree(tree, type);
             T value = jsonMapper.treeToValue(tree, type);
             validator.validateBean(value);

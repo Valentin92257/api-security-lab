@@ -71,6 +71,19 @@ class ContractJsonCodecTest {
     }
 
     @Test
+    void acceptsIntegralSeedInDecimalAndExponentNotationWithoutRounding() {
+        for (String notation : List.of("1.0", "1e2", "2147483647.0")) {
+            int expected = new java.math.BigDecimal(notation).intValueExact();
+            CreateTrialRequest request = codec.readCreateTrialRequest(
+                    "{\"families\":[\"BOLA\"],\"seed\":" + notation + "}");
+            assertThat(request.getSeed()).isEqualTo(expected);
+        }
+        assertThatThrownBy(() -> codec.readCreateTrialRequest(
+                "{\"families\":[\"BOLA\"],\"seed\":1.000000000000000001}"))
+                .isInstanceOf(ContractValidationException.class);
+    }
+
+    @Test
     void rejectsUnknownPropertiesAndDuplicateKeysInTrialRequest() {
         String unknownFieldJson = """
                 {

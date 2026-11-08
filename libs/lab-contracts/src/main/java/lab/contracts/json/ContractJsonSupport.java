@@ -19,6 +19,7 @@ public final class ContractJsonSupport {
         // All JsonReadFeature flags enable non-standard JSON extensions.
         builder.disable(JsonReadFeature.values());
         builder.enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
