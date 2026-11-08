@@ -72,6 +72,7 @@
               <output>${project.build.directory}/generated-sources/control</output>
               <apiPackage>lab.contracts.control.api</apiPackage>
               <modelPackage>lab.contracts.control.model</modelPackage>
+              <generateModels>false</generateModels>
             </configuration>
           </execution>
         </executions>

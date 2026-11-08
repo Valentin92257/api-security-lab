@@ -59,6 +59,7 @@
               <output>${project.build.directory}/generated-sources/runtime</output>
               <apiPackage>lab.contracts.runtime.api</apiPackage>
               <modelPackage>lab.contracts.runtime.model</modelPackage>
+              <generateModels>false</generateModels>
             </configuration>
           </execution>
         </executions>
