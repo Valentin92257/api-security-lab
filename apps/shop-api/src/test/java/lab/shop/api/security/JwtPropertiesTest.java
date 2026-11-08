@@ -24,7 +24,7 @@ class JwtPropertiesTest {
     @Test
     @DisplayName("Корректный секрет проходит валидацию")
     void validSecretHasNoViolations() {
-        var props = new JwtProperties(VALID_SECRET, Duration.ofHours(1));
+        var props = new JwtProperties(VALID_SECRET, Duration.ofMinutes(15));
 
         assertThat(validator.validate(props)).isEmpty();
     }
@@ -34,7 +34,7 @@ class JwtPropertiesTest {
     @ValueSource(strings = {"   ", "short"})
     @DisplayName("Пустой или короткий секрет не проходит валидацию")
     void blankOrShortSecretIsRejected(String secret) {
-        var props = new JwtProperties(secret, Duration.ofHours(1));
+        var props = new JwtProperties(secret, Duration.ofMinutes(15));
 
         assertThat(validator.validate(props)).isNotEmpty();
     }
@@ -42,8 +42,8 @@ class JwtPropertiesTest {
     @Test
     @DisplayName("Граница длины секрета: 31 символ отклоняется, 32 принимается")
     void secretLengthBoundary() {
-        var tooShort = new JwtProperties("x".repeat(31), Duration.ofHours(1));
-        var minimal = new JwtProperties("x".repeat(32), Duration.ofHours(1));
+        var tooShort = new JwtProperties("x".repeat(31), Duration.ofMinutes(15));
+        var minimal = new JwtProperties("x".repeat(32), Duration.ofMinutes(15));
 
         assertThat(validator.validate(tooShort)).isNotEmpty();
         assertThat(validator.validate(minimal)).isEmpty();
@@ -55,7 +55,7 @@ class JwtPropertiesTest {
         JwtProperties props = bind(Map.of("app.jwt.secret", VALID_SECRET));
 
         assertThat(props.secret()).isEqualTo(VALID_SECRET);
-        assertThat(props.ttl()).isEqualTo(Duration.ofHours(1));
+        assertThat(props.ttl()).isEqualTo(Duration.ofMinutes(15));
     }
 
     @Test
@@ -63,9 +63,9 @@ class JwtPropertiesTest {
     void ttlIsBoundFromConfiguration() {
         JwtProperties props = bind(Map.of(
                 "app.jwt.secret", VALID_SECRET,
-                "app.jwt.ttl", "30m"));
+                "app.jwt.ttl", "10m"));
 
-        assertThat(props.ttl()).isEqualTo(Duration.ofMinutes(30));
+        assertThat(props.ttl()).isEqualTo(Duration.ofMinutes(10));
     }
 
     private static JwtProperties bind(Map<String, String> properties) {

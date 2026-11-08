@@ -15,7 +15,13 @@ public record JwtProperties(
         @Size(min = 32, message = "app.jwt.secret должен быть не короче 32 символов")
         String secret,
 
-        @DefaultValue("1h")
+        @DefaultValue("15m")
         Duration ttl
 ) {
+
+    public JwtProperties {
+        if (ttl.compareTo(Duration.ofSeconds(1)) < 0 || ttl.compareTo(Duration.ofSeconds(900)) > 0) {
+            throw new IllegalArgumentException("app.jwt.ttl должен быть от 1 до 900 секунд");
+        }
+    }
 }

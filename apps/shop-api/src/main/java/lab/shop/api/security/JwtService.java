@@ -12,12 +12,12 @@ import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
-class JwtService {
+public class JwtService {
 
     private final JwtEncoder encoder;
     private final JwtProperties jwtProperties;
 
-    String issue(long userId) {
+    public String issue(long userId) {
         Instant now = Instant.now();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()

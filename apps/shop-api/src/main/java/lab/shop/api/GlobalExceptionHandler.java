@@ -2,6 +2,7 @@ package lab.shop.api;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lab.contracts.shop.model.Problem;
+import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.UnauthorizedException;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -38,6 +40,14 @@ public class GlobalExceptionHandler {
         log.info("409 requestId={}: {}", requestId, ex.getMessage());
 
         return respond(HttpStatus.CONFLICT, Problem.CodeEnum.CONFLICT, requestId, _ -> {
+        });
+    }
+
+    @ExceptionHandler({BadRequestException.class, HttpClientErrorException.class})
+    public ResponseEntity<Problem> handleBadRequest(RuntimeException ex, HttpServletRequest request) {
+        UUID requestId = getRequestId(request);
+        log.info("400 requestId={}: {}", requestId, ex.getMessage());
+        return respond(HttpStatus.BAD_REQUEST, Problem.CodeEnum.INVALID_REQUEST, requestId, _ -> {
         });
     }
 

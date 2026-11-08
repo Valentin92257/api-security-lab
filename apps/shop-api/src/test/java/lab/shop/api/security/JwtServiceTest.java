@@ -27,7 +27,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("В sub попадает id пользователя")
     void issuePutsUserIdIntoSubject() {
-        String token = service(SECRET, Duration.ofHours(1)).issue(42L);
+        String token = service(SECRET, Duration.ofMinutes(15)).issue(42L);
 
         assertThat(decoder.decode(token).getSubject()).isEqualTo("42");
     }
@@ -35,7 +35,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("Токен подписан алгоритмом HS256")
     void issueSignsWithHs256() {
-        String token = service(SECRET, Duration.ofHours(1)).issue(1L);
+        String token = service(SECRET, Duration.ofMinutes(15)).issue(1L);
 
         assertThat(decoder.decode(token).getHeaders()).containsEntry("alg", "HS256");
     }
@@ -43,7 +43,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("Токен, подписанный другим секретом, отклоняется")
     void tokenSignedWithAnotherSecretIsRejected() {
-        String token = service(OTHER_SECRET, Duration.ofHours(1)).issue(1L);
+        String token = service(OTHER_SECRET, Duration.ofMinutes(15)).issue(1L);
 
         assertThatThrownBy(() -> decoder.decode(token)).isInstanceOf(JwtException.class);
     }
@@ -51,9 +51,9 @@ class JwtServiceTest {
     @Test
     @DisplayName("Просроченный токен отклоняется")
     void expiredTokenIsRejected() {
-        String token = service(SECRET, Duration.ofHours(1)).issue(1L);
+        String token = service(SECRET, Duration.ofMinutes(15)).issue(1L);
 
-        JwtDecoder decoderInTheFuture = decoderAt(Instant.now().plus(Duration.ofHours(2)));
+        JwtDecoder decoderInTheFuture = decoderAt(Instant.now().plus(Duration.ofMinutes(16)));
 
         assertThatThrownBy(() -> decoderInTheFuture.decode(token)).isInstanceOf(JwtException.class);
     }
@@ -61,9 +61,9 @@ class JwtServiceTest {
     @Test
     @DisplayName("До истечения срока токен принимается")
     void tokenIsAcceptedBeforeExpiration() {
-        String token = service(SECRET, Duration.ofHours(1)).issue(1L);
+        String token = service(SECRET, Duration.ofMinutes(15)).issue(1L);
 
-        JwtDecoder decoderInTheFuture = decoderAt(Instant.now().plus(Duration.ofMinutes(30)));
+        JwtDecoder decoderInTheFuture = decoderAt(Instant.now().plus(Duration.ofMinutes(10)));
 
         assertThat(decoderInTheFuture.decode(token).getSubject()).isEqualTo("1");
     }
@@ -71,7 +71,7 @@ class JwtServiceTest {
     @Test
     @DisplayName("Токен с подменённым payload отклоняется (подпись не совпадает)")
     void tamperedPayloadIsRejected() {
-        String token = service(SECRET, Duration.ofHours(1)).issue(42L);
+        String token = service(SECRET, Duration.ofMinutes(15)).issue(42L);
         String[] parts = token.split("\\.");
         String forgedPayload = base64Url("{\"sub\":\"1\",\"exp\":9999999999}");
 
