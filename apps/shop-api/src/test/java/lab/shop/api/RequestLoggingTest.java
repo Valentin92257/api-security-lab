@@ -10,8 +10,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -139,6 +141,11 @@ class RequestLoggingTest {
         @GetMapping("/api/v1/failure")
         String failure() {
             throw new IllegalStateException("password-secret");
+        }
+
+        @Bean
+        WebSecurityCustomizer probeSecurityBypass() {
+            return web -> web.ignoring().requestMatchers("/api/v1/probe", "/api/v1/failure");
         }
     }
 }
