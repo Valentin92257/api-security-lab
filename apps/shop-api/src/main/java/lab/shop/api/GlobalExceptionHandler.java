@@ -4,6 +4,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lab.contracts.shop.model.Problem;
 import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.ConflictException;
+import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,14 @@ public class GlobalExceptionHandler {
         UUID requestId = getRequestId(request);
         log.info("400 requestId={}: {}", requestId, ex.getMessage());
         return respond(HttpStatus.BAD_REQUEST, Problem.CodeEnum.INVALID_REQUEST, requestId, _ -> {
+        });
+    }
+
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<Problem> handleNotFound(NotFoundException ex, HttpServletRequest request) {
+        UUID requestId = getRequestId(request);
+        log.info("404 requestId={}: {}", requestId, ex.getMessage());
+        return respond(HttpStatus.NOT_FOUND, Problem.CodeEnum.NOT_FOUND, requestId, _ -> {
         });
     }
 

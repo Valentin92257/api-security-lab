@@ -9,6 +9,7 @@ import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.UnauthorizedException;
 import lab.shop.api.security.JwtProperties;
 import lab.shop.api.security.JwtService;
+import lab.shop.application.model.UserCredentials;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.UserRepository;
 import lab.shop.application.service.AuthService;
@@ -53,7 +54,7 @@ public class VulnerableAuthService implements AuthService {
     public LoginResult login(LoginRequest request) {
         String login = requireText(request.getLogin(), "login");
 
-        Optional<UserRepository.Credentials> credentials = userRepository.findCredentialsByLogin(login);
+        Optional<UserCredentials> credentials = userRepository.findCredentialsByLogin(login);
         boolean matches = false;
         if (credentials.isPresent()) {
             matches = passwordEncoder.matches(request.getPassword(), credentials.get().passwordHash());

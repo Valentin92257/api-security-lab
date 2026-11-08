@@ -1,5 +1,7 @@
 package lab.shop.vulnerable.repository;
 
+import lab.shop.application.model.UserCredentials;
+import lab.shop.application.model.UserProfile;
 import lab.shop.application.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
@@ -28,10 +30,19 @@ public class VulnerableUserRepository implements UserRepository {
     }
 
     @Override
-    public Optional<Credentials> findCredentialsByLogin(String login) {
+    public Optional<UserCredentials> findCredentialsByLogin(String login) {
         String sql = "SELECT id, password_hash FROM users WHERE login = '%s'";
         return jdbc.sql(String.format(sql, login))
-                .query(Credentials.class)
+                .query(UserCredentials.class)
+                .optional();
+    }
+
+    @Override
+    public Optional<UserProfile> findProfile(long id) {
+        String sql = "SELECT id, login, name, email FROM users WHERE id = %s";
+
+        return jdbc.sql(String.format(sql, id))
+                .query(UserProfile.class)
                 .optional();
     }
 }

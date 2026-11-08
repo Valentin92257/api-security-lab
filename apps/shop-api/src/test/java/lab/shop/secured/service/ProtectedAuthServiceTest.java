@@ -9,9 +9,9 @@ import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.UnauthorizedException;
 import lab.shop.api.security.JwtProperties;
 import lab.shop.api.security.JwtService;
+import lab.shop.application.model.UserCredentials;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.UserRepository;
-import lab.shop.application.repository.UserRepository.Credentials;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -138,7 +138,7 @@ class ProtectedAuthServiceTest {
     @Test
     @DisplayName("Корректные credentials возвращают токен и срок жизни из JwtProperties")
     void loginReturnsTokenForValidCredentials() {
-        when(userRepository.findCredentialsByLogin("bob")).thenReturn(Optional.of(new Credentials(5L, "stored-hash")));
+        when(userRepository.findCredentialsByLogin("bob")).thenReturn(Optional.of(new UserCredentials(5L, "stored-hash")));
         when(passwordEncoder.matches(VALID_PASSWORD, "stored-hash")).thenReturn(true);
         when(jwtService.issue(5L)).thenReturn("token-value");
 
@@ -152,7 +152,7 @@ class ProtectedAuthServiceTest {
     @Test
     @DisplayName("Неверный пароль существующего пользователя даёт 401, токен не выдаётся")
     void loginRejectsWrongPassword() {
-        when(userRepository.findCredentialsByLogin("bob")).thenReturn(Optional.of(new Credentials(5L, "stored-hash")));
+        when(userRepository.findCredentialsByLogin("bob")).thenReturn(Optional.of(new UserCredentials(5L, "stored-hash")));
         when(passwordEncoder.matches(VALID_PASSWORD, "stored-hash")).thenReturn(false);
 
         assertThatThrownBy(() -> service.login(new LoginRequest("bob", VALID_PASSWORD)))

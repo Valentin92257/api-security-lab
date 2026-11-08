@@ -1,6 +1,8 @@
 package lab.shop.secured.repository;
 
 import lab.shop.PostgreSQLIntegrationTest;
+import lab.shop.application.model.UserCredentials;
+import lab.shop.application.model.UserProfile;
 import lab.shop.application.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,21 +23,21 @@ public class ProtectedUserRepositoryIntegrationTest extends PostgreSQLIntegratio
     private UserRepository userRepository;
 
     @Test
-    @DisplayName("insert создаёт пользователя, доступного через findCredentialsByLogin")
-    void insertThenFindCredentials() {
+    @DisplayName("insert создаёт пользователя, доступного через findUserCredentialsByLogin")
+    void insertThenFindUserCredentials() {
         String login = uniqueLogin();
 
         long id = userRepository.insert(login, "Test User", login + "@example.com", "hash-value");
 
-        Optional<UserRepository.Credentials> found = userRepository.findCredentialsByLogin(login);
+        Optional<UserCredentials> found = userRepository.findCredentialsByLogin(login);
         assertThat(found).isPresent();
         assertThat(found.get().id()).isEqualTo(id);
         assertThat(found.get().passwordHash()).isEqualTo("hash-value");
     }
 
     @Test
-    @DisplayName("findCredentialsByLogin для несуществующего логина возвращает пусто")
-    void findCredentialsForUnknownLoginIsEmpty() {
+    @DisplayName("findUserCredentialsByLogin для несуществующего логина возвращает пусто")
+    void findUserCredentialsForUnknownLoginIsEmpty() {
         assertThat(userRepository.findCredentialsByLogin(uniqueLogin())).isEmpty();
     }
 
@@ -48,6 +50,23 @@ public class ProtectedUserRepositoryIntegrationTest extends PostgreSQLIntegratio
         assertThatThrownBy(() ->
                 userRepository.insert(login, "Second", "other-" + login + "@example.com", "hash-2"))
                 .isInstanceOf(DuplicateKeyException.class);
+    }
+
+    @Test
+    @DisplayName("findProfile возвращает собственный профиль")
+    void findProfileReturnsOwnProfile() {
+        String login = uniqueLogin();
+        long id = userRepository.insert(login, "Test User", login + "@example.com", "hash");
+
+        Optional<UserProfile> profile = userRepository.findProfile(id);
+
+        assertThat(profile).contains(new UserProfile(id, login, "Test User", login + "@example.com"));
+    }
+
+    @Test
+    @DisplayName("findProfile для несуществующего id возвращает пусто")
+    void findProfileForUnknownIdIsEmpty() {
+        assertThat(userRepository.findProfile(Long.MAX_VALUE)).isEmpty();
     }
 
     @Test

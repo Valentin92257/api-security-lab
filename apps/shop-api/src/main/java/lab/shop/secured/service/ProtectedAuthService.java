@@ -9,6 +9,7 @@ import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.UnauthorizedException;
 import lab.shop.api.security.JwtProperties;
 import lab.shop.api.security.JwtService;
+import lab.shop.application.model.UserCredentials;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.UserRepository;
 import lab.shop.application.service.AuthService;
@@ -77,10 +78,10 @@ public class ProtectedAuthService implements AuthService {
         String login = normalizeLogin(request.getLogin());
         validatePassword(request.getPassword());
 
-        Optional<UserRepository.Credentials> credentials = userRepository.findCredentialsByLogin(login);
+        Optional<UserCredentials> credentials = userRepository.findCredentialsByLogin(login);
         boolean matches = passwordEncoder.matches(
                 request.getPassword(),
-                credentials.map(UserRepository.Credentials::passwordHash).orElse(dummyHash));
+                credentials.map(UserCredentials::passwordHash).orElse(dummyHash));
 
         if (credentials.isEmpty() || !matches) {
             throw new UnauthorizedException("Неверный логин или пароль");

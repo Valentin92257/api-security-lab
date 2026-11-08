@@ -1,5 +1,8 @@
 package lab.shop.application.repository;
 
+import lab.shop.application.model.UserCredentials;
+import lab.shop.application.model.UserProfile;
+
 import java.util.Optional;
 
 public interface UserRepository {
@@ -9,10 +12,7 @@ public interface UserRepository {
      */
     long insert(String login, String name, String email, String passwordHash);
 
-    Optional<Credentials> findCredentialsByLogin(String login);
+    Optional<UserCredentials> findCredentialsByLogin(String login);
 
-
-
-    record Credentials(long id, String passwordHash) {
-    }
+    Optional<UserProfile> findProfile(long id);
 }
