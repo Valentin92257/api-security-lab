@@ -18,7 +18,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:${LAB_CONTROL_PORT:-8080}:8080"
-    networks: [ lab-traffic, shop-admin, lab-data, lab-observe ]
+    networks: [ control-public, lab-traffic, shop-admin, lab-data, lab-observe ]
 
   db:
     image: postgres:17-alpine
@@ -100,6 +100,8 @@ services:
     networks: [ lab-data, lab-observe ]
 
 networks:
+  # Only lab-control joins this network: Docker publishes ports only for containers on a non-internal network.
+  control-public: {}
   lab-traffic:
     internal: true
   shop-backend:
