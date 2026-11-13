@@ -6,18 +6,46 @@ Shop запускается в двух контейнерах с профиля
 
 ## Запуск
 
-Нужен Docker с Compose. Скопируй `.env.example` в `.env`: `cp .env.example .env`.
-Замени три `replace-with-*` на случайные секреты (`openssl rand -hex 32`) и запусти стенд:
+Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).
+Одна команда из корня репозитория:
 
 ```sh
-docker compose build
-docker compose up -d --wait
-docker compose exec lab-control curl --fail http://127.0.0.1:8080/health
+./scripts/start.sh
 ```
 
+При первом запуске скрипт создаёт `.env` из `.env.example` со случайными секретами, собирает образы,
+запускает все сервисы и проверяет health Control. Первая сборка занимает несколько минут. Остановка: `docker compose down`.
+Если volume с БД уже есть, а `.env` нет, скрипт останавливается: новые пароли не подойдут к созданным ролям.
+
+То же вручную:
+
+```sh
+cp .env.example .env   # замени три replace-with-* на случайные секреты: openssl rand -hex 32
+docker compose up -d --build --wait
+curl --fail http://127.0.0.1:8080/health
+```
+
+### Переменные окружения
+
+Настройки задаются в `.env` (образец - `.env.example`), файл `.env` не коммитится.
+
+| Переменная | Обязательна | По умолчанию | Назначение |
+|---|---|---|---|
+| `LAB_OPERATOR_TOKEN` | да | - | Bearer-токен оператора Control |
+| `POSTGRES_PASSWORD` | да | - | Пароль администратора БД |
+| `LAB_CONTROL_DB_PASSWORD` | да | - | Пароль рабочей роли `control_app` |
+| `POSTGRES_USER` | нет | `lab_admin` | Администратор БД; должен совпадать с администратором существующего volume |
+| `LAB_CONTROL_PORT` | нет | `8080` | Порт Control на `127.0.0.1` |
+| `SHOP_PROTECTED_URL` | нет | `http://shop-protected:8080` | Адрес protected-магазина для Gateway |
+| `GATEWAY_CONNECT_TIMEOUT` | нет | `2s` | Таймаут соединения Gateway |
+| `GATEWAY_UPSTREAM_TIMEOUT` | нет | `5s` | Таймаут ответа магазина |
+| `GATEWAY_MAX_BODY_BYTES` | нет | `8388608` | Максимальный размер тела запроса/ответа |
+
+Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
+
 Локальные Maven и JDK не нужны: сборка и модульные тесты выполняются в Docker.
-Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`), остальные сервисы доступны внутри Docker.
-Внутренние сети могут мешать доступу с хоста, поэтому примеры используют `docker compose exec`.
+Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`) через отдельную сеть `control-public`.
+Остальные сервисы подключены только к internal-сетям и с хоста недоступны.
 Health Control проверяет БД. Shop содержит каркас API и миграции; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
