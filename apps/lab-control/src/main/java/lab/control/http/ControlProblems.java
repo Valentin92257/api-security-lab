@@ -3,7 +3,7 @@ package lab.control.http;
 import java.util.UUID;
 
 import jakarta.servlet.http.HttpServletRequest;
-import lab.contracts.control.model.Problem;
+import lab.contracts.common.model.Problem;
 import org.springframework.http.HttpStatus;
 
 final class ControlProblems {

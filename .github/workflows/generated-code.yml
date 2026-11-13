@@ -17,10 +17,11 @@ jobs:
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          generated=':(glob)apps/*/target/generated-sources/*/src/main/java/**/*.java'
-          if ! git diff --exit-code -- "$generated" ||
-             [ -n "$(git ls-files --others --exclude-standard -- "$generated")" ]; then
-            git status --short --untracked-files=all -- "$generated"
+          set -- ':(glob)apps/*/target/generated-sources/*/src/main/java/**/*.java' \
+                 ':(glob)libs/*/target/generated-sources/*/src/main/java/**/*.java'
+          if ! git diff --exit-code -- "$@" ||
+             [ -n "$(git ls-files --others --exclude-standard -- "$@")" ]; then
+            git status --short --untracked-files=all -- "$@"
             echo "::error::Сгенерированный код устарел. Повторите генерацию по инструкции в README и добавьте обновлённые Java-файлы в коммит."
             exit 1
           fi
