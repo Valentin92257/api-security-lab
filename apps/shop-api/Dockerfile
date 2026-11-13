@@ -8,6 +8,7 @@ RUN mvn -B -ntp -pl apps/shop-api -am package
 FROM eclipse-temurin:25-jre-alpine
 RUN apk add --no-cache curl
 WORKDIR /app
+RUN mkdir /app/logs && chown 10001:10001 /app/logs
 COPY --from=build /workspace/apps/shop-api/target/app.jar /app/app.jar
 USER 10001:10001
 EXPOSE 8080

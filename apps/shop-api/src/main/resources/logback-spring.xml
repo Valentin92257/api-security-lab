@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="org.springframework.boot.logging.logback.StructuredLogEncoder">
+            <format>${CONSOLE_LOG_STRUCTURED_FORMAT:-logstash}</format>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+    <property name="DECISION_FILE" value="${DECISION_LOG_PATH:-${java.io.tmpdir}/shop-api-decisions/decisions.jsonl}"/>
+    <appender name="DECISIONS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${DECISION_FILE}</file>
+        <append>true</append>
+        <encoder>
+            <charset>UTF-8</charset>
+            <pattern>%msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${DECISION_FILE}.%d{yyyy-MM-dd}.%i.gz</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>100MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+    <logger name="lab.decision" level="INFO" additivity="false">
+        <appender-ref ref="DECISIONS"/>
+    </logger>
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

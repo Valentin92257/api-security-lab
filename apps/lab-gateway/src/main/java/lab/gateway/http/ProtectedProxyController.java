@@ -1,5 +1,9 @@
 package lab.gateway.http;
 
+import lab.gateway.logging.DecisionLog;
+import lab.gateway.logging.DecisionLog.Decision;
+import lab.gateway.logging.DecisionLog.Kind;
+
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
@@ -39,12 +43,19 @@ class ProtectedProxyController {
         String requestId = (String) incoming.getAttribute(RequestLoggingFilter.REQUEST_ID);
         boolean protectedListener = factory.getAdditionalConnectors().stream()
                 .anyMatch(connector -> connector.getLocalPort() == incoming.getLocalPort());
+        DecisionLog.record(requestId, "gateway.route", Kind.TECHNICAL,
+                protectedListener ? Decision.ALLOW : Decision.BLOCK,
+                protectedListener ? "ROUTE_CONFIGURED" : "ROUTE_NOT_CONFIGURED");
         if (!protectedListener) {
             ProblemResponseWriter.write(outgoing, requestId, 404, "NOT_FOUND", "Route is not configured on this listener");
             return;
         }
         byte[] body = incoming.getInputStream().readNBytes(properties.maxBodyBytes() + 1);
-        if (body.length > properties.maxBodyBytes()) {
+        boolean bodyAllowed = body.length <= properties.maxBodyBytes();
+        DecisionLog.record(requestId, "gateway.request-size", Kind.TECHNICAL,
+                bodyAllowed ? Decision.ALLOW : Decision.BLOCK,
+                bodyAllowed ? "WITHIN_REQUEST_LIMIT" : "REQUEST_LIMIT_EXCEEDED");
+        if (!bodyAllowed) {
             ProblemResponseWriter.write(outgoing, requestId, 413, "INVALID_REQUEST", "Request body exceeds transport limit");
             return;
         }

@@ -23,6 +23,44 @@
 7. До 100 записей в LogBatch, 64 KiB на запись, 8 MiB на пачку, 100000 записей на producer/run. Превышение не приводит к усечению: опыт недействителен. Ошибка логирования после commit не отменяет созданный заказ.
 8. CLOSED подтверждает in-flight=0 и окончательный lastSequence. Поздние отклонённые запросы закрытого run пишутся только в operational log, не меняют завершённый поток. Локальный JSONL допустим, но не является транспортом между компонентами.
 
+## Локальный журнал решений политик
+
+Gateway и оба Shop пишут отдельный operational-журнал `decisions.jsonl`: одна UTF-8 JSON-строка на одно фактически принятое решение конкретной проверки. Он предназначен для объяснения allow/block оператору. Это не AccessLog и не вход Detector: причины и идентификаторы политик не добавляются в контракт LogBatch.
+
+| Поле | Содержание |
+|---|---|
+| schemaVersion | Версия формата, сейчас 1 |
+| event | `policy_decision` |
+| time | UTC-время решения в ISO-8601 |
+| service | `lab-gateway` или `shop-api`; экземпляры Shop имеют разные файлы/volumes |
+| requestId, trace_id | Один и тот же X-Request-Id; при неверном заголовке — ID отказа из HTTP-ответа |
+| policyId | Стабильный идентификатор проверки, например `http.request-id` |
+| kind | `TECHNICAL` — инфраструктурная проверка; `SECURITY` — экспериментальная защита Shop |
+| decision | `ALLOW` или `BLOCK` |
+| reason | Фиксированный код причины без пользовательских значений |
+
+```json
+{"schemaVersion":1,"event":"policy_decision","time":"2026-11-07T12:00:00Z","service":"shop-api","requestId":"01234567-89ab-4cde-8fab-0123456789ab","trace_id":"01234567-89ab-4cde-8fab-0123456789ab","policyId":"http.request-id","kind":"TECHNICAL","decision":"ALLOW","reason":"VALID_REQUEST_ID"}
+```
+
+Реализованные точки записи:
+
+| Проверка | Где | ALLOW / BLOCK |
+|---|---|---|
+| `http.request-id` | Gateway и оба Shop | `VALID_REQUEST_ID` / `INVALID_REQUEST_ID` |
+| `gateway.route` | Gateway | `ROUTE_CONFIGURED` / `ROUTE_NOT_CONFIGURED` |
+| `gateway.request-size` | Gateway | `WITHIN_REQUEST_LIMIT` / `REQUEST_LIMIT_EXCEEDED` |
+
+Проверка пишет решение до продолжения цепочки или возврата отказа. Невыполненные проверки не создают записей. Один запрос может иметь несколько ALLOW, затем BLOCK. ALLOW означает прохождение только указанной проверки: итоговый HTTP-статус остаётся в access-логе. Ошибки приложения, недоступность upstream, timeout и переданный ответ Shop сами по себе не превращаются в BLOCK. TECHNICAL-отказы не учитываются как предотвращение атаки.
+
+Для новой политики Shop вызывает `lab.shop.logging.DecisionLog.record(requestId, policyId, Kind.SECURITY, decision, reason)` в точке принятия решения, используя исходный ID. Сам журнал ничего не блокирует: политика по-прежнему отвечает за прекращение операции. Бизнес-политики пока не реализованы; журнал не создаёт фиктивных решений за JWT, owner-check или login limiter. В vulnerable пропущенная защита не записывается как ALLOW.
+
+`policyId` ограничен 96 символами `[a-z][a-z0-9._-]*`, `reason` — 96 символами `[A-Z][A-Z0-9_]*`. Это константы кода, не тексты исключений или значения запроса. Журнал не сохраняет тела, заголовки, URL, JWT, пароли и произвольный MDC. Неверные параметры вызова отклоняются как ошибка программирования.
+
+Файл задаётся `DECISION_LOG_PATH`. В Compose это `/app/logs/decisions.jsonl`, отдельные named volumes у Gateway, protected и vulnerable; каталог принадлежит UID 10001. Без Compose используется временный каталог JVM и имя сервиса. Logback синхронно дописывает строки без AsyncAppender, существующий файл сохраняется при рестарте. Ротация — ежедневно или по 10 MB, архивы gzip за 7 дней с общим лимитом 100 MB. Это ограниченный operational-журнал, не бессрочное хранилище результатов эксперимента.
+
+При недоступном каталоге на старте ошибка конфигурации Logback препятствует нормальному запуску. Ошибки записи во время работы диагностирует Logback; подтверждения долговечной записи и отката бизнес-операции нет. Стенд предполагает исправное локальное хранилище. Для расчёта метрик применяется отдельный контракт полноты access-логов.
+
 ## Формат access-лога v1
 
 LogBatch содержит producer GATEWAY/SHOP и entries. В каждой записи обязательны sequence, requestId, time, remote_addr, user, method, path, route, status, bytes, request_time, user_agent и req_hash; неизвестные user/route/user_agent/req_hash равны null. [JSON Schema](../contracts/schemas/logs.yaml) и [пример пачки](../contracts/examples/log-batch.json) задают точные типы и пределы.

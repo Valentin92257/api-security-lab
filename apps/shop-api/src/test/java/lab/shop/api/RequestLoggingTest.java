@@ -1,6 +1,11 @@
 package lab.shop.api;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import ch.qos.logback.core.FileAppender;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -125,6 +130,28 @@ class RequestLoggingTest {
         assertThat(event.getFormattedMessage() + event.getKeyValuePairs() + event.getMDCPropertyMap())
                 .doesNotContain("query-secret", "token-secret", "body-secret", "password-secret");
         assertThat(logs).isEmpty();
+        var decisionLogger = (Logger) LoggerFactory.getLogger("lab.decision");
+        var fileAppender = (FileAppender<?>) decisionLogger.getAppender("DECISIONS");
+        assertThat(fileAppender).isNotNull();
+        var json = new JsonMapper();
+        var decisions = Files.readAllLines(Path.of(fileAppender.getFile())).stream()
+                .map(json::readTree).filter(entry -> id.equals(entry.get("requestId").asText())).toList();
+        assertThat(decisions).isNotEmpty();
+        assertThat(decisions).allSatisfy(entry -> {
+            assertThat(entry.get("trace_id").asText()).isEqualTo(id);
+            assertThat(entry.get("kind").asText()).isEqualTo("TECHNICAL");
+            assertThat(entry.toString()).doesNotContain("query-secret", "token-secret", "body-secret", "password-secret");
+        });
+        var requestDecision = decisions.stream()
+                .filter(entry -> entry.get("policyId").asText().equals("http.request-id")).toList();
+        assertThat(requestDecision).hasSize(1);
+        assertThat(requestDecision.getFirst().get("decision").asText()).isEqualTo(status == 400 ? "BLOCK" : "ALLOW");
+        assertThat(requestDecision.getFirst().get("reason").asText())
+                .isEqualTo(status == 400 ? "INVALID_REQUEST_ID" : "VALID_REQUEST_ID");
+        if (status >= 500) {
+            assertThat(decisions).allSatisfy(entry ->
+                    assertThat(entry.get("decision").asText()).isEqualTo("ALLOW"));
+        }
     }
 
     @TestConfiguration(proxyBeanMethods = false)
