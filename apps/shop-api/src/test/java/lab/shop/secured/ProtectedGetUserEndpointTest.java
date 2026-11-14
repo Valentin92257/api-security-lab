@@ -1,4 +1,4 @@
-package lab.shop.secured.service;
+package lab.shop.secured;
 
 import lab.shop.api.GetUserEndpointTest;
 import org.junit.jupiter.api.DisplayName;

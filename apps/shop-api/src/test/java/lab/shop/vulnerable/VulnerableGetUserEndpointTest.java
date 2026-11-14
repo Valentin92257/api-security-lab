@@ -1,4 +1,4 @@
-package lab.shop.vulnerable.service;
+package lab.shop.vulnerable;
 
 import lab.shop.api.GetUserEndpointTest;
 import org.junit.jupiter.api.DisplayName;

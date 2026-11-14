@@ -20,7 +20,7 @@ Shop запускается в двух контейнерах с профиля
 То же вручную:
 
 ```sh
-cp .env.example .env   # замени три replace-with-* на случайные секреты: openssl rand -hex 32
+cp .env.example .env   # замени пять replace-with-* на случайные секреты: openssl rand -hex 32
 docker compose up -d --build --wait
 curl --fail http://127.0.0.1:8080/health
 ```
@@ -29,17 +29,19 @@ curl --fail http://127.0.0.1:8080/health
 
 Настройки задаются в `.env` (образец - `.env.example`), файл `.env` не коммитится.
 
-| Переменная | Обязательна | По умолчанию | Назначение |
-|---|---|---|---|
-| `LAB_OPERATOR_TOKEN` | да | - | Bearer-токен оператора Control |
-| `POSTGRES_PASSWORD` | да | - | Пароль администратора БД |
-| `LAB_CONTROL_DB_PASSWORD` | да | - | Пароль рабочей роли `control_app` |
-| `POSTGRES_USER` | нет | `lab_admin` | Администратор БД; должен совпадать с администратором существующего volume |
-| `LAB_CONTROL_PORT` | нет | `8080` | Порт Control на `127.0.0.1` |
-| `SHOP_PROTECTED_URL` | нет | `http://shop-protected:8080` | Адрес protected-магазина для Gateway |
-| `GATEWAY_CONNECT_TIMEOUT` | нет | `2s` | Таймаут соединения Gateway |
-| `GATEWAY_UPSTREAM_TIMEOUT` | нет | `5s` | Таймаут ответа магазина |
-| `GATEWAY_MAX_BODY_BYTES` | нет | `8388608` | Максимальный размер тела запроса/ответа |
+| Переменная                 | Обязательна | По умолчанию                 | Назначение                                                                |
+|----------------------------|-------------|------------------------------|---------------------------------------------------------------------------|
+| `LAB_OPERATOR_TOKEN`       | да          | -                            | Bearer-токен оператора Control                                            |
+| `POSTGRES_PASSWORD`        | да          | -                            | Пароль администратора БД                                                  |
+| `LAB_CONTROL_DB_PASSWORD`  | да          | -                            | Пароль рабочей роли `control_app`                                         |
+| `POSTGRES_USER`            | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
+| `LAB_CONTROL_PORT`         | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
+| `SHOP_PROTECTED_URL`       | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
+| `GATEWAY_CONNECT_TIMEOUT`  | нет         | `2s`                         | Таймаут соединения Gateway                                                |
+| `GATEWAY_UPSTREAM_TIMEOUT` | нет         | `5s`                         | Таймаут ответа магазина                                                   |
+| `GATEWAY_MAX_BODY_BYTES`   | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
+| `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет для авторизации защищенной версии API                          |
+| `JWT_SECRET_VULNERABLE`    | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
 
 Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
 

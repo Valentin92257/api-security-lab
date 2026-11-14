@@ -103,7 +103,7 @@ services:
 
 networks:
   # Only lab-control joins this network: Docker publishes ports only for containers on a non-internal network.
-  control-public: {}
+  control-public: { }
   lab-traffic:
     internal: true
   shop-backend:
