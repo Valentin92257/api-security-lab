@@ -40,6 +40,12 @@ public class ContractJsonAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    public AccessLogJsonlCodec accessLogJsonlCodec(ContractJsonCodec codec) {
+        return new AccessLogJsonlCodec(codec);
+    }
+
+    @Bean
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
     public ServerHttpMessageConvertersCustomizer contractMessageConvertersCustomizer(ContractJsonCodec codec) {
         return builder -> builder.configureMessageConvertersList(converters ->

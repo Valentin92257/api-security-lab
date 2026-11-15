@@ -1,5 +1,6 @@
 package lab.contracts.json;
 
+import lab.contracts.control.model.CreateTrialRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -66,8 +67,8 @@ class ContractJsonSupportTest {
     void appliesRequiredParsingRulesToSuppliedCodecMapper() {
         JsonMapper suppliedMapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
         var codec = new ContractJsonCodec(suppliedMapper, new ContractValidator());
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(
-                "{\"families\":[\"BOLA\"],\"families\":[\"REPLAY\"]}"))
+        assertThatThrownBy(() -> codec.read(
+                "{\"families\":[\"BOLA\"],\"families\":[\"REPLAY\"]}", CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class);
         assertThat(codec.jsonMapper().isEnabled(SerializationFeature.INDENT_OUTPUT)).isTrue();
     }

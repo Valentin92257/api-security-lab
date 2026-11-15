@@ -13,20 +13,26 @@ import java.util.concurrent.TimeUnit;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import lab.contracts.runtime.model.RunSetup;
+import lab.contracts.runtime.model.RuntimeStatus;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -104,6 +110,54 @@ class RequestLoggingTest {
         assertThat(logs).isEmpty();
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{\"login\":123,\"password\":\"secret\"}",
+            "{\"login\":\"first\",\"login\":\"second\",\"password\":\"secret\"}",
+            "{\"login\":\"buyer\",\"password\":\"secret\",\"extra\":true}",
+            "{"
+    })
+    void returns400ForInvalidShopJson(String json) throws Exception {
+        String id = UUID.randomUUID().toString();
+        var response = client.send(request("/api/v1/auth/login")
+                .header("X-Request-Id", id).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json)).build(), HttpResponse.BodyHandlers.ofString());
+        assertProblem(response, id, 400, "INVALID_REQUEST");
+        assertLog(id, "/api/v1/auth/login", 400);
+    }
+
+    @Test
+    void returns400ForInvalidSharedContractJson() throws Exception {
+        String id = UUID.randomUUID().toString();
+        var response = client.send(request("/api/v1/contract-probe")
+                .header("X-Request-Id", id).header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+        assertProblem(response, id, 400, "INVALID_REQUEST");
+        assertLog(id, "/api/v1/contract-probe", 400);
+    }
+
+    @Test
+    void returns500ForInvalidSharedContractResponse() throws Exception {
+        String id = UUID.randomUUID().toString();
+        var response = client.send(request("/api/v1/invalid-contract").header("X-Request-Id", id).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertProblem(response, id, 500, "INTERNAL_ERROR");
+        assertLog(id, "/api/v1/invalid-contract", 500);
+    }
+
+    private void assertProblem(HttpResponse<String> response, String id, int status, String code) {
+        assertThat(response.statusCode()).isEqualTo(status);
+        assertThat(response.headers().firstValue("Content-Type").orElseThrow())
+                .startsWith(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        assertThat(response.headers().firstValue("X-Request-Id")).contains(id);
+        var problem = JsonMapper.builder().build().readTree(response.body());
+        assertThat(problem.get("type").asString()).isEqualTo("urn:lab:problem:http-error");
+        assertThat(problem.get("status").asInt()).isEqualTo(status);
+        assertThat(problem.get("code").asString()).isEqualTo(code);
+        assertThat(problem.get("requestId").asString()).isEqualTo(id);
+        assertThat(response.body()).doesNotContain("secret", "Exception", "must have");
+    }
+
     private HttpRequest.Builder request(String path) {
         return HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path)).timeout(Duration.ofSeconds(5));
     }
@@ -138,6 +192,16 @@ class RequestLoggingTest {
         @GetMapping("/api/v1/failure")
         String failure() {
             throw new IllegalStateException("password-secret");
+        }
+
+        @PostMapping("/api/v1/contract-probe")
+        RunSetup contract(@RequestBody RunSetup body) {
+            return body;
+        }
+
+        @GetMapping("/api/v1/invalid-contract")
+        RuntimeStatus invalidContract() {
+            return new RuntimeStatus();
         }
     }
 }

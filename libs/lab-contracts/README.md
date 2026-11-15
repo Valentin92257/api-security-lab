@@ -10,17 +10,30 @@
 
 ```java
 var codec = new ContractJsonCodec();
-CreateTrialRequest request = codec.readCreateTrialRequest(json);
-String serialized = codec.writeCreateTrialRequest(request);
+CreateTrialRequest request = codec.read(json, CreateTrialRequest.class);
+String serialized = codec.writeAsString(request);
 
 LogBatch batch = codec.read(inputStream, LogBatch.class);
-byte[] bytes = codec.writeLogBatchAsBytes(batch);
+byte[] bytes = codec.writeAsBytes(batch);
 ```
 
 Универсальные публичные методы `read(String, Class)`, `read(byte[], Class)`,
 `read(InputStream, Class)`, `writeAsString` и `writeAsBytes` работают со всеми общими DTO.
-Поток закрывает вызывающий код. Для access-логов есть методы чтения и записи JSONL.
+Поток закрывает вызывающий код. Отдельные пары `readTrial`/`writeTrial` и аналогичные
+обёртки для каждого DTO заменены этими универсальными методами. Соответствие классов
+схемам задаётся в `ContractValidator`; при добавлении обычного DTO codec менять не нужно.
 `validateJson` проверяет JSON полностью, `validate` — JSON-представление объекта.
+
+JSONL-формат access-логов обслуживает отдельный `AccessLogJsonlCodec`, также доступный
+как Spring bean. Он делегирует разбор JSON и проверку записей общему codec:
+
+```java
+var jsonlCodec = new AccessLogJsonlCodec(codec);
+String line = jsonlCodec.writeLine(entry);
+AccessLog restored = jsonlCodec.readLine(line);
+String lines = jsonlCodec.writeLines(batch.getEntries());
+List<AccessLog> entries = jsonlCodec.readLines(lines);
+```
 
 ## Общие правила JSON
 
@@ -94,7 +107,10 @@ Shop DTO не проходят автоматическую проверку о�
 
 Правила жизненного цикла прогона, дедупликация доставки, сопоставление evidence и
 вычисление отчётов остаются в Control/Detector, как указано в `contracts/semantics.md`.
-Библиотека выбрасывает `ContractValidationException`; общего HTTP-обработчика ошибок нет.
+Самостоятельные codec и валидатор выбрасывают `ContractValidationException`.
+MVC-конвертер оборачивает ошибки чтения в `HttpMessageNotReadableException` (400),
+а ошибки записи ответа — в `HttpMessageNotWritableException` (500).
+Общего HTTP-обработчика ошибок нет.
 
 ## Проверка сборки
 

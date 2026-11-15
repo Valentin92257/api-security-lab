@@ -4,6 +4,8 @@ import org.springframework.http.HttpInputMessage;
 import org.springframework.http.HttpOutputMessage;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.AbstractHttpMessageConverter;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -29,11 +31,21 @@ public final class ContractJsonHttpMessageConverter extends AbstractHttpMessageC
 
     @Override
     protected Object readInternal(Class<?> type, HttpInputMessage message) throws IOException {
-        return codec.read(message.getBody(), type);
+        try {
+            return codec.read(message.getBody(), type);
+        } catch (ContractValidationException e) {
+            throw new HttpMessageNotReadableException("Invalid JSON contract", e, message);
+        }
     }
 
     @Override
     protected void writeInternal(Object body, HttpOutputMessage message) throws IOException {
-        message.getBody().write(codec.writeAsBytes(body));
+        byte[] bytes;
+        try {
+            bytes = codec.writeAsBytes(body);
+        } catch (ContractValidationException e) {
+            throw new HttpMessageNotWritableException("Invalid JSON contract response", e);
+        }
+        message.getBody().write(bytes);
     }
 }

@@ -41,6 +41,7 @@ public class ContractValidator {
 
     public static final int MAX_ACCESS_LOG_BYTES = 64 * 1024;
     public static final int MAX_LOG_BATCH_BYTES = 8 * 1024 * 1024;
+    public static final int MAX_DEFAULT_PAYLOAD_BYTES = 64 * 1024 * 1024;
     private static final String SCHEMA_ROOT = "classpath:lab/contracts/schemas/";
     private static final Map<Class<?>, String> SCHEMA_FILES = Map.ofEntries(
             Map.entry(CreateTrialRequest.class, "control.yaml"),
@@ -142,13 +143,11 @@ public class ContractValidator {
     }
 
     static int payloadByteLimit(Class<?> type) {
-        if (type == AccessLog.class) {
-            return MAX_ACCESS_LOG_BYTES;
-        }
-        if (type == LogBatch.class) {
-            return MAX_LOG_BATCH_BYTES;
-        }
-        return Integer.MAX_VALUE;
+        return switch (type) {
+            case Class<?> c when c == AccessLog.class -> MAX_ACCESS_LOG_BYTES;
+            case Class<?> c when c == LogBatch.class -> MAX_LOG_BATCH_BYTES;
+            case null, default -> MAX_DEFAULT_PAYLOAD_BYTES;
+        };
     }
 
     static void validatePayloadSize(int byteLength, Class<?> type) {

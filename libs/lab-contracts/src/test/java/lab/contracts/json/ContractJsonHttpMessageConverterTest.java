@@ -7,6 +7,8 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.ByteArrayHttpMessageConverter;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.http.converter.ResourceHttpMessageConverter;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
@@ -25,7 +27,6 @@ import tools.jackson.databind.json.JsonMapper;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -53,11 +54,14 @@ class ContractJsonHttpMessageConverterTest {
     }
 
     @Test
-    void rejectsDuplicateItemsBeforeCallingController() {
-        assertThatThrownBy(() -> mvc.perform(post("/contracts")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"families\":[\"BOLA\",\"BOLA\"]}")))
-                .hasRootCauseInstanceOf(ContractValidationException.class);
+    void rejectsDuplicateItemsBeforeCallingController() throws Exception {
+        var result = mvc.perform(post("/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"families\":[\"BOLA\",\"BOLA\"]}"))
+                .andExpect(status().isBadRequest())
+                .andReturn();
+        assertThat(result.getResolvedException()).isInstanceOf(HttpMessageNotReadableException.class)
+                .hasCauseInstanceOf(ContractValidationException.class);
         assertThat(controller.calls).isZero();
     }
 
@@ -72,9 +76,12 @@ class ContractJsonHttpMessageConverterTest {
     }
 
     @Test
-    void rejectsInvalidControllerResponse() {
-        assertThatThrownBy(() -> mvc.perform(get("/invalid-contract")))
-                .hasRootCauseInstanceOf(ContractValidationException.class);
+    void rejectsInvalidControllerResponse() throws Exception {
+        var result = mvc.perform(get("/invalid-contract"))
+                .andExpect(status().isInternalServerError())
+                .andReturn();
+        assertThat(result.getResolvedException()).isInstanceOf(HttpMessageNotWritableException.class)
+                .hasCauseInstanceOf(ContractValidationException.class);
     }
 
     @Test

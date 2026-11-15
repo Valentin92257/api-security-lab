@@ -1,6 +1,7 @@
 package lab.contracts.json;
 
 import lab.contracts.control.model.CreateTrialRequest;
+import lab.contracts.control.model.IncidentAssessment;
 import lab.contracts.common.model.Problem;
 import lab.contracts.control.model.RunReport;
 import lab.contracts.control.model.Trial;
@@ -12,6 +13,7 @@ import lab.contracts.detector.model.Incident;
 import lab.contracts.detector.model.LogBatch;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
@@ -39,47 +41,56 @@ class ContractJsonCodecTest {
         Path dir = examplesDir();
 
         String startTrialJson = Files.readString(dir.resolve("start-trial.json"));
-        CreateTrialRequest startTrial = codec.readCreateTrialRequest(startTrialJson);
+        CreateTrialRequest startTrial = codec.read(startTrialJson, CreateTrialRequest.class);
         assertThat(startTrial.getFamilies()).hasSize(2);
         assertThat(startTrial.getSeed()).isEqualTo(42);
-        assertThat(codec.readCreateTrialRequest(codec.writeCreateTrialRequest(startTrial))).isEqualTo(startTrial);
+        assertThat(codec.read(codec.writeAsString(startTrial), CreateTrialRequest.class)).isEqualTo(startTrial);
 
         String reportJson = Files.readString(dir.resolve("report.json"));
-        TrialReport report = codec.readTrialReport(reportJson);
+        TrialReport report = codec.read(reportJson, TrialReport.class);
         assertThat(report.getTrialId()).isEqualTo(UUID.fromString("00000000-0000-4000-8000-000000000030"));
         assertThat(report.getRuns()).hasSize(2);
-        assertThat(codec.readTrialReport(codec.writeTrialReport(report))).isEqualTo(report);
+        assertThat(codec.read(codec.writeAsString(report), TrialReport.class)).isEqualTo(report);
 
         String incidentJson = Files.readString(dir.resolve("incident.json"));
-        Incident incident = codec.readIncident(incidentJson);
+        Incident incident = codec.read(incidentJson, Incident.class);
         assertThat(incident.getIncidentId()).isEqualTo(UUID.fromString("00000000-0000-4000-8000-000000000200"));
         assertThat(incident.getFamily()).isNull();
         assertThat(incident.getRequestIds()).hasSize(2);
-        assertThat(codec.readIncident(codec.writeIncident(incident))).isEqualTo(incident);
+        assertThat(codec.read(codec.writeAsString(incident), Incident.class)).isEqualTo(incident);
 
         String finishJson = Files.readString(dir.resolve("finish-analysis.json"));
-        FinishAnalysisRequest finish = codec.readFinishAnalysisRequest(finishJson);
+        FinishAnalysisRequest finish = codec.read(finishJson, FinishAnalysisRequest.class);
         assertThat(finish.getGatewayLastSequence()).isEqualTo(2);
         assertThat(finish.getShopLastSequence()).isEqualTo(2);
-        assertThat(codec.readFinishAnalysisRequest(codec.writeFinishAnalysisRequest(finish))).isEqualTo(finish);
+        assertThat(codec.read(codec.writeAsString(finish), FinishAnalysisRequest.class)).isEqualTo(finish);
 
         String logBatchJson = Files.readString(dir.resolve("log-batch.json"));
-        LogBatch logBatch = codec.readLogBatch(logBatchJson);
+        LogBatch logBatch = codec.read(logBatchJson, LogBatch.class);
         assertThat(logBatch.getProducer()).isEqualTo(LogBatch.ProducerEnum.SHOP);
         assertThat(logBatch.getEntries()).hasSize(2);
-        assertThat(codec.readLogBatch(codec.writeLogBatch(logBatch))).isEqualTo(logBatch);
+        assertThat(codec.read(codec.writeAsString(logBatch), LogBatch.class)).isEqualTo(logBatch);
+    }
+
+    @Test
+    void readsTypedContractsFromBytesAndStreams() throws Exception {
+        var request = new CreateTrialRequest(Set.of(CreateTrialRequest.FamiliesEnum.BOLA)).seed(42);
+        byte[] bytes = codec.writeAsBytes(request);
+
+        assertThat(codec.read(bytes, CreateTrialRequest.class)).isEqualTo(request);
+        assertThat(codec.read(new ByteArrayInputStream(bytes), CreateTrialRequest.class)).isEqualTo(request);
     }
 
     @Test
     void acceptsIntegralSeedInDecimalAndExponentNotationWithoutRounding() {
         for (String notation : List.of("1.0", "1e2", "2147483647.0")) {
             int expected = new java.math.BigDecimal(notation).intValueExact();
-            CreateTrialRequest request = codec.readCreateTrialRequest(
-                    "{\"families\":[\"BOLA\"],\"seed\":" + notation + "}");
+            CreateTrialRequest request = codec.read(
+                    "{\"families\":[\"BOLA\"],\"seed\":" + notation + "}", CreateTrialRequest.class);
             assertThat(request.getSeed()).isEqualTo(expected);
         }
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(
-                "{\"families\":[\"BOLA\"],\"seed\":1.000000000000000001}"))
+        assertThatThrownBy(() -> codec.read(
+                "{\"families\":[\"BOLA\"],\"seed\":1.000000000000000001}", CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class);
     }
 
@@ -92,7 +103,7 @@ class ContractJsonCodecTest {
                   "extraField": true
                 }
                 """;
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(unknownFieldJson))
+        assertThatThrownBy(() -> codec.read(unknownFieldJson, CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class);
 
         String duplicateKeyJson = """
@@ -102,7 +113,7 @@ class ContractJsonCodecTest {
                   "seed": 43
                 }
                 """;
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(duplicateKeyJson))
+        assertThatThrownBy(() -> codec.read(duplicateKeyJson, CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class);
     }
 
@@ -114,7 +125,7 @@ class ContractJsonCodecTest {
                   "seed": 42
                 }
                 """;
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(duplicateFamiliesJson))
+        assertThatThrownBy(() -> codec.read(duplicateFamiliesJson, CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class)
                 .hasMessageContaining("unique items");
 
@@ -124,7 +135,7 @@ class ContractJsonCodecTest {
                   "seed": "42"
                 }
                 """;
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(stringSeedJson))
+        assertThatThrownBy(() -> codec.read(stringSeedJson, CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class);
 
         String floatSeedJson = """
@@ -133,7 +144,7 @@ class ContractJsonCodecTest {
                   "seed": 42.5
                 }
                 """;
-        assertThatThrownBy(() -> codec.readCreateTrialRequest(floatSeedJson))
+        assertThatThrownBy(() -> codec.read(floatSeedJson, CreateTrialRequest.class))
                 .isInstanceOf(ContractValidationException.class);
     }
 
@@ -148,7 +159,7 @@ class ContractJsonCodecTest {
                   "description": "Подозрительный запрос"
                 }
                 """;
-        assertThatThrownBy(() -> codec.readIncident(invalidFamilyJson))
+        assertThatThrownBy(() -> codec.read(invalidFamilyJson, Incident.class))
                 .isInstanceOf(ContractValidationException.class)
                 .hasMessageContaining("family");
 
@@ -164,7 +175,7 @@ class ContractJsonCodecTest {
                   "description": "Подозрительный запрос"
                 }
                 """;
-        assertThatThrownBy(() -> codec.readIncident(duplicateRequestIdsJson))
+        assertThatThrownBy(() -> codec.read(duplicateRequestIdsJson, Incident.class))
                 .isInstanceOf(ContractValidationException.class)
                 .hasMessageContaining("unique items");
     }
@@ -184,8 +195,8 @@ class ContractJsonCodecTest {
                 Set.of("BO-01-episode"),
                 "Confirmed BOLA attempt"
         );
-        String json = codec.writeIncidentAssessment(assessment);
-        var restored = codec.readIncidentAssessment(json);
+        String json = codec.writeAsString(assessment);
+        var restored = codec.read(json, IncidentAssessment.class);
         assertThat(restored.getIncident()).isEqualTo(incident);
     }
 
@@ -205,7 +216,7 @@ class ContractJsonCodecTest {
                   "request_time": 0.012
                 }
                 """;
-        assertThatThrownBy(() -> codec.readAccessLog(accessLogMissingNullableKeys))
+        assertThatThrownBy(() -> codec.read(accessLogMissingNullableKeys, AccessLog.class))
                 .isInstanceOf(ContractValidationException.class)
                 .hasMessageContaining("user");
 
@@ -227,7 +238,7 @@ class ContractJsonCodecTest {
                   "req_hash": null
                 }
                 """;
-        AccessLog log = codec.readAccessLog(accessLogWithExplicitNulls);
+        AccessLog log = codec.read(accessLogWithExplicitNulls, AccessLog.class);
         assertThat(log.getUser()).isNull();
         assertThat(log.getRoute()).isNull();
 
@@ -240,7 +251,7 @@ class ContractJsonCodecTest {
                   "cases": []
                 }
                 """;
-        assertThatThrownBy(() -> codec.readRunReport(runReportMissingIncidents))
+        assertThatThrownBy(() -> codec.read(runReportMissingIncidents, RunReport.class))
                 .isInstanceOf(ContractValidationException.class)
                 .hasMessageContaining("incidents");
 
@@ -253,7 +264,7 @@ class ContractJsonCodecTest {
                   "incidents": null
                 }
                 """;
-        RunReport runReport = codec.readRunReport(runReportNullIncidents);
+        RunReport runReport = codec.read(runReportNullIncidents, RunReport.class);
         assertThat(runReport.getIncidents()).isNull();
 
         // Missing "observedRequestIds" in AnalysisStatus must fail, whereas "observedRequestIds": null is valid
@@ -263,7 +274,7 @@ class ContractJsonCodecTest {
                   "state": "ACCEPTING"
                 }
                 """;
-        assertThatThrownBy(() -> codec.readAnalysisStatus(statusMissingObserved))
+        assertThatThrownBy(() -> codec.read(statusMissingObserved, AnalysisStatus.class))
                 .isInstanceOf(ContractValidationException.class)
                 .hasMessageContaining("observedRequestIds");
 
@@ -274,20 +285,8 @@ class ContractJsonCodecTest {
                   "observedRequestIds": null
                 }
                 """;
-        AnalysisStatus status = codec.readAnalysisStatus(statusNullObserved);
+        AnalysisStatus status = codec.read(statusNullObserved, AnalysisStatus.class);
         assertThat(status.getObservedRequestIds()).isNull();
-    }
-
-    @Test
-    void writesAndReadsAccessLogJsonLines() throws Exception {
-        String logBatchJson = Files.readString(examplesDir().resolve("log-batch.json"));
-        LogBatch batch = codec.readLogBatch(logBatchJson);
-
-        String jsonl = codec.writeAccessLogJsonLines(batch.getEntries());
-        assertThat(jsonl.lines().count()).isEqualTo(2);
-
-        List<AccessLog> parsed = codec.readAccessLogJsonLines(jsonl);
-        assertThat(parsed).isEqualTo(batch.getEntries());
     }
 
     @Test
@@ -326,8 +325,8 @@ class ContractJsonCodecTest {
                 3L,
                 false
         );
-        String json = codec.writeTrial(trial);
-        Trial restored = codec.readTrial(json);
+        String json = codec.writeAsString(trial);
+        Trial restored = codec.read(json, Trial.class);
         assertThat(restored).isEqualTo(trial);
     }
 

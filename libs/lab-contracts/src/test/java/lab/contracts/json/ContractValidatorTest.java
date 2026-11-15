@@ -65,7 +65,7 @@ class ContractValidatorTest {
         var entries = new ArrayList<AccessLog>();
         entries.add(null);
         var batch = new LogBatch(LogBatch.ProducerEnum.SHOP, entries);
-        assertThatThrownBy(() -> codec.writeLogBatch(batch))
+        assertThatThrownBy(() -> codec.writeAsString(batch))
                 .isInstanceOf(ContractValidationException.class).hasMessageContaining("entries");
         assertThatThrownBy(() -> codec.validator().validateObject(batch))
                 .isInstanceOf(ContractValidationException.class).hasMessageContaining("entries");
@@ -73,9 +73,9 @@ class ContractValidatorTest {
 
     @Test
     void preservesOptionalSeedAndRequiredNullableFieldsWhenWriting() {
-        var request = codec.readCreateTrialRequest("{\"families\":[\"BOLA\"]}");
-        assertThat(codec.writeCreateTrialRequest(request)).doesNotContain("seed");
-        String json = codec.writeAccessLog(codec.readAccessLog(ACCESS_LOG));
+        var request = codec.read("{\"families\":[\"BOLA\"]}", CreateTrialRequest.class);
+        assertThat(codec.writeAsString(request)).doesNotContain("seed");
+        String json = codec.writeAsString(codec.read(ACCESS_LOG, AccessLog.class));
         assertThat(json).contains("\"user\":null", "\"route\":null", "\"user_agent\":null", "\"req_hash\":null");
     }
 
@@ -93,19 +93,19 @@ class ContractValidatorTest {
     @Test
     void enforcesBatchByteBoundary() {
         String batch = "{\"producer\":\"SHOP\",\"entries\":[" + ACCESS_LOG + "]}";
-        assertThat(codec.readLogBatch(paddedJson(batch, ContractValidator.MAX_LOG_BATCH_BYTES))
+        assertThat(codec.read(paddedJson(batch, ContractValidator.MAX_LOG_BATCH_BYTES), LogBatch.class)
                 .getEntries()).hasSize(1);
-        assertThatThrownBy(() -> codec.readLogBatch(
-                paddedJson(batch, ContractValidator.MAX_LOG_BATCH_BYTES + 1)))
+        assertThatThrownBy(() -> codec.read(
+                paddedJson(batch, ContractValidator.MAX_LOG_BATCH_BYTES + 1), LogBatch.class))
                 .isInstanceOf(ContractValidationException.class).hasMessageContaining("exceeds limit");
     }
 
     @Test
     void rejectsNonFiniteNumbersAndTrailingJson() {
-        AccessLog log = codec.readAccessLog(ACCESS_LOG);
+        AccessLog log = codec.read(ACCESS_LOG, AccessLog.class);
         log.setRequestTime(Double.POSITIVE_INFINITY);
-        assertThatThrownBy(() -> codec.writeAccessLog(log)).isInstanceOf(ContractValidationException.class);
-        assertThatThrownBy(() -> codec.readAccessLog(ACCESS_LOG + "{}"))
+        assertThatThrownBy(() -> codec.writeAsString(log)).isInstanceOf(ContractValidationException.class);
+        assertThatThrownBy(() -> codec.read(ACCESS_LOG + "{}", AccessLog.class))
                 .isInstanceOf(ContractValidationException.class);
     }
 

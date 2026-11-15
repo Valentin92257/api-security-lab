@@ -28,7 +28,8 @@ class ContractJsonAutoConfigurationTest {
     @Test
     void registersContractConverterAlongsideStandardConverters() {
         runner.run(context -> {
-            assertThat(context).hasSingleBean(ContractJsonCodec.class).hasSingleBean(ContractValidator.class);
+            assertThat(context).hasSingleBean(ContractJsonCodec.class).hasSingleBean(ContractValidator.class)
+                    .hasSingleBean(AccessLogJsonlCodec.class);
             var builder = HttpMessageConverters.forServer().registerDefaults();
             context.getBean("contractMessageConvertersCustomizer", ServerHttpMessageConvertersCustomizer.class)
                     .customize(builder);

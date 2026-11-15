@@ -2,7 +2,6 @@ package lab.control.http;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
-import lab.contracts.json.ContractValidationException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -19,11 +18,6 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 @RestControllerAdvice
 class ControlExceptionHandler extends ResponseEntityExceptionHandler {
-    @ExceptionHandler(ContractValidationException.class)
-    ResponseEntity<Object> invalidContract(HttpServletRequest request) {
-        return problem(HttpStatus.BAD_REQUEST, "Invalid JSON contract", HttpHeaders.EMPTY, request);
-    }
-
     @ExceptionHandler(ConstraintViolationException.class)
     ResponseEntity<Object> validationError(HttpServletRequest request) {
         return problem(HttpStatus.BAD_REQUEST, "Некорректные параметры запроса", HttpHeaders.EMPTY, request);
