@@ -23,6 +23,7 @@
     <testcontainers.version>2.0.5</testcontainers.version>
   </properties>
   <modules>
+    <module>libs/lab-contracts</module>
     <module>apps/shop-api</module>
     <module>apps/lab-gateway</module>
     <module>apps/lab-detector</module>
