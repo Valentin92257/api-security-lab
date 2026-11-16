@@ -21,27 +21,29 @@ public class VulnerableUserRepository implements UserRepository {
     public long insert(String login, String name, String email, String passwordHash) {
         String sql = """
                 INSERT INTO users (login, name, email, password_hash)
-                VALUES ('%s', '%s', '%s', '%s')
+                VALUES ('%s', '%s', '%s', :passwordHash)
                 RETURNING id
-                """;
-        return jdbc.sql(String.format(sql, login, name, email, passwordHash))
+                """.formatted(login, name, email);
+
+        return jdbc.sql(sql)
+                .param("passwordHash", passwordHash)
                 .query(Long.class)
                 .single();
     }
 
     @Override
     public Optional<UserCredentials> findCredentialsByLogin(String login) {
-        String sql = "SELECT id, password_hash FROM users WHERE login = '%s'";
-        return jdbc.sql(String.format(sql, login))
+        String sql = "SELECT id, password_hash FROM users WHERE login = '%s'".formatted(login);
+        return jdbc.sql(sql)
                 .query(UserCredentials.class)
                 .optional();
     }
 
     @Override
     public Optional<UserProfile> findProfile(long id) {
-        String sql = "SELECT id, login, name, email FROM users WHERE id = %s";
+        String sql = "SELECT id, login, name, email FROM users WHERE id = %s".formatted(id);
 
-        return jdbc.sql(String.format(sql, id))
+        return jdbc.sql(sql)
                 .query(UserProfile.class)
                 .optional();
     }

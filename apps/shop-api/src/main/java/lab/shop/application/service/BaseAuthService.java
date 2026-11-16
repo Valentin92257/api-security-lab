@@ -12,6 +12,7 @@ import lab.shop.api.security.JwtService;
 import lab.shop.application.model.UserCredentials;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.UserRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,10 +39,10 @@ public abstract class BaseAuthService implements AuthService {
     private final String dummyHash;
 
     protected BaseAuthService(UserRepository userRepository,
-                                   CartRepository cartRepository,
-                                   PasswordEncoder passwordEncoder,
-                                   JwtService jwtService,
-                                   JwtProperties jwtProperties) {
+                              CartRepository cartRepository,
+                              PasswordEncoder passwordEncoder,
+                              JwtService jwtService,
+                              JwtProperties jwtProperties) {
         this.userRepository = userRepository;
         this.cartRepository = cartRepository;
         this.passwordEncoder = passwordEncoder;
@@ -65,6 +66,8 @@ public abstract class BaseAuthService implements AuthService {
             return new User(id, login, name, email);
         } catch (DuplicateKeyException e) {
             throw new ConflictException("Логин или email уже заняты", e);
+        } catch (DataIntegrityViolationException e) {
+            throw new BadRequestException("Неправильный формат данных", e);
         }
     }
 

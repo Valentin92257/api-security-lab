@@ -15,9 +15,9 @@ public class VulnerableCartRepository implements CartRepository {
 
     @Override
     public void createEmpty(long userId) {
-        String sql = "INSERT INTO carts (user_id) VALUES ('%s')";
+        String sql = "INSERT INTO carts (user_id) VALUES ('%s')".formatted(userId);
 
-        jdbc.sql(String.format(sql, userId))
+        jdbc.sql(sql)
                 .update();
     }
 }

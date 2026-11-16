@@ -35,8 +35,8 @@ if [ ! -f .env ]; then
     sed -e "s/replace-with-local-random-token/$token/" \
         -e "s/replace-with-local-admin-password/$admin/" \
         -e "s/replace-with-local-control-password/$control/" \
-        -e "s/replace-with-protected-jwt-secret/$protected_jwt" \
-        -e "s/replace-with-vulnerable-jwt-secret/$vulnerable_jwt"
+        -e "s/replace-with-protected-jwt-secret/$protected_jwt/" \
+        -e "s/replace-with-vulnerable-jwt-secret/$vulnerable_jwt/" \
         .env.example > .env
   )
   echo "Создан .env со случайными секретами."

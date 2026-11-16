@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -79,6 +80,20 @@ public class ProtectedAuthServiceTest {
         RegisterRequest request = new RegisterRequest("alice", VALID_PASSWORD, "Alice", "alice@example.com");
 
         assertThatThrownBy(() -> service.register(request)).isInstanceOf(ConflictException.class);
+        verify(cartRepository, never()).createEmpty(anyLong());
+    }
+
+    @Test
+    @DisplayName("Нарушение ограничений БД (например, name длиннее 100) даёт BadRequestException, корзина не создаётся")
+    void registerMapsDataIntegrityViolationToBadRequest() {
+        String longName = "n".repeat(101);
+        when(passwordEncoder.encode(VALID_PASSWORD)).thenReturn("real-hash");
+        when(userRepository.insert("alice", longName, "alice@example.com", "real-hash"))
+                .thenThrow(new DataIntegrityViolationException("value too long for type character varying(100)"));
+
+        RegisterRequest request = new RegisterRequest("alice", VALID_PASSWORD, longName, "alice@example.com");
+
+        assertThatThrownBy(() -> service.register(request)).isInstanceOf(BadRequestException.class);
         verify(cartRepository, never()).createEmpty(anyLong());
     }
 
@@ -181,4 +196,3 @@ public class ProtectedAuthServiceTest {
         verifyNoInteractions(userRepository, jwtService);
     }
 }
-
