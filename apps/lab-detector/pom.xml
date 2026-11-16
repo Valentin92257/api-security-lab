@@ -11,6 +11,11 @@
   <artifactId>lab-detector</artifactId>
   <dependencies>
     <dependency>
+      <groupId>lab</groupId>
+      <artifactId>lab-contracts</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc</artifactId>
     </dependency>
@@ -34,6 +39,11 @@
       <plugin>
         <groupId>org.openapitools</groupId>
         <artifactId>openapi-generator-maven-plugin</artifactId>
+        <configuration>
+          <schemaMappings>
+            <schemaMapping>Problem=lab.contracts.common.model.Problem</schemaMapping>
+          </schemaMappings>
+        </configuration>
         <executions>
           <execution>
             <id>detector</id>
@@ -45,6 +55,7 @@
               <output>${project.build.directory}/generated-sources/detector</output>
               <apiPackage>lab.contracts.detector.api</apiPackage>
               <modelPackage>lab.contracts.detector.model</modelPackage>
+              <generateModels>false</generateModels>
             </configuration>
           </execution>
         </executions>

@@ -6,6 +6,12 @@ apps/*/target/*
 apps/*/target/generated-sources/**
 !apps/*/target/generated-sources/**/
 !apps/*/target/generated-sources/*/src/main/java/**/*.java
+!libs/*/target/
+libs/*/target/*
+!libs/*/target/generated-sources/
+libs/*/target/generated-sources/**
+!libs/*/target/generated-sources/**/
+!libs/*/target/generated-sources/*/src/main/java/**/*.java
 *.iml
 .DS_Store
 .env
