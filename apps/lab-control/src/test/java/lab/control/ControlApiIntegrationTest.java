@@ -66,7 +66,7 @@ class ControlApiIntegrationTest {
 
     @BeforeEach
     void emptyDatabase() {
-        admin.sql("TRUNCATE control.execution_slot, control.trials").update();
+        admin.sql("TRUNCATE control.step_results, control.execution_slot, control.trials").update();
         admin.sql("INSERT INTO control.execution_slot (id) VALUES (1)").update();
     }
 
