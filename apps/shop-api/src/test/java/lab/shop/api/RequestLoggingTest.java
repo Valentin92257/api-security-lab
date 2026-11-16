@@ -199,7 +199,11 @@ class RequestLoggingTest {
 
         @Bean
         WebSecurityCustomizer probeSecurityBypass() {
-            return web -> web.ignoring().requestMatchers("/api/v1/probe", "/api/v1/failure");
+            return web -> web.ignoring().requestMatchers(
+                    "/api/v1/probe",
+                    "/api/v1/failure",
+                    "/api/v1/contract-probe",
+                    "/api/v1/invalid-contract");
         }
 
         @PostMapping("/api/v1/contract-probe")
