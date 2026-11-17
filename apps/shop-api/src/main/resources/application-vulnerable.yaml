@@ -6,3 +6,7 @@ spring:
   flyway:
     locations:
       - classpath:db/migration/vulnerable
+app:
+  jwt:
+    issuer: urn:lab:shop:vulnerable
+    audience: shop-vulnerable

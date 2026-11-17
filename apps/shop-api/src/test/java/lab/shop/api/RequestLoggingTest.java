@@ -1,15 +1,5 @@
 package lab.shop.api;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
@@ -24,9 +14,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,12 +26,23 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ActiveProfiles("protected")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(RequestLoggingTest.ProbeController.class)
 class RequestLoggingTest {
+
     @LocalServerPort
     private int port;
     private final BlockingQueue<ILoggingEvent> logs = new LinkedBlockingQueue<>();
@@ -192,6 +195,15 @@ class RequestLoggingTest {
         @GetMapping("/api/v1/failure")
         String failure() {
             throw new IllegalStateException("password-secret");
+        }
+
+        @Bean
+        WebSecurityCustomizer probeSecurityBypass() {
+            return web -> web.ignoring().requestMatchers(
+                    "/api/v1/probe",
+                    "/api/v1/failure",
+                    "/api/v1/contract-probe",
+                    "/api/v1/invalid-contract");
         }
 
         @PostMapping("/api/v1/contract-probe")

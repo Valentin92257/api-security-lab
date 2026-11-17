@@ -41,7 +41,7 @@ CREATE TABLE carts
     user_id    bigint                                  NOT NULL UNIQUE,
     coupon_id  bigint,
     revision   bigint                                  NOT NULL DEFAULT 0,
-    updated_at timestamptz                             NOT NULL,
+    updated_at timestamptz                             NOT NULL DEFAULT current_timestamp,
     CHECK (revision BETWEEN 0 AND 9007199254740991),
     CHECK (id BETWEEN 1 AND 9007199254740991)
 );
@@ -64,7 +64,7 @@ CREATE TABLE orders
     discount             integer                                 NOT NULL,
     total                integer                                 NOT NULL,
     coupon_id            bigint,
-    created_at           timestamptz                             NOT NULL,
+    created_at           timestamptz                             NOT NULL DEFAULT current_timestamp,
     idempotency_key_hash bytea                                   NOT NULL,
     request_fingerprint  bytea                                   NOT NULL,
     response_body        jsonb                                   NOT NULL,

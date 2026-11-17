@@ -21,7 +21,7 @@ Shop запускается в двух контейнерах с профиля
 То же вручную:
 
 ```sh
-cp .env.example .env   # замени три replace-with-* на случайные секреты: openssl rand -hex 32
+cp .env.example .env   # замени пять replace-with-* на случайные секреты: openssl rand -hex 32
 docker compose up -d --build --wait
 curl --fail http://127.0.0.1:8080/health
 ```
@@ -30,24 +30,27 @@ curl --fail http://127.0.0.1:8080/health
 
 Настройки задаются в `.env` (образец - `.env.example`), файл `.env` не коммитится.
 
-| Переменная | Обязательна | По умолчанию | Назначение |
-|---|---|---|---|
-| `LAB_OPERATOR_TOKEN` | да | - | Bearer-токен оператора Control |
-| `POSTGRES_PASSWORD` | да | - | Пароль администратора БД |
-| `LAB_CONTROL_DB_PASSWORD` | да | - | Пароль рабочей роли `control_app` |
-| `POSTGRES_USER` | нет | `lab_admin` | Администратор БД; должен совпадать с администратором существующего volume |
-| `LAB_CONTROL_PORT` | нет | `8080` | Порт Control на `127.0.0.1` |
-| `SHOP_PROTECTED_URL` | нет | `http://shop-protected:8080` | Адрес protected-магазина для Gateway |
-| `GATEWAY_CONNECT_TIMEOUT` | нет | `2s` | Таймаут соединения Gateway |
-| `GATEWAY_UPSTREAM_TIMEOUT` | нет | `5s` | Таймаут ответа магазина |
-| `GATEWAY_MAX_BODY_BYTES` | нет | `8388608` | Максимальный размер тела запроса/ответа |
+| Переменная                 | Обязательна | По умолчанию                 | Назначение                                                                |
+|----------------------------|-------------|------------------------------|---------------------------------------------------------------------------|
+| `LAB_OPERATOR_TOKEN`       | да          | -                            | Bearer-токен оператора Control                                            |
+| `POSTGRES_PASSWORD`        | да          | -                            | Пароль администратора БД                                                  |
+| `LAB_CONTROL_DB_PASSWORD`  | да          | -                            | Пароль рабочей роли `control_app`                                         |
+| `POSTGRES_USER`            | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
+| `LAB_CONTROL_PORT`         | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
+| `SHOP_PROTECTED_URL`       | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
+| `GATEWAY_CONNECT_TIMEOUT`  | нет         | `2s`                         | Таймаут соединения Gateway                                                |
+| `GATEWAY_UPSTREAM_TIMEOUT` | нет         | `5s`                         | Таймаут ответа магазина                                                   |
+| `GATEWAY_MAX_BODY_BYTES`   | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
+| `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет для авторизации защищенной версии API                          |
+| `JWT_SECRET_VULNERABLE`    | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
 
 Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
 
 Локальные Maven и JDK не нужны: сборка и модульные тесты выполняются в Docker.
 Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`) через отдельную сеть `control-public`.
 Остальные сервисы подключены только к internal-сетям и с хоста недоступны.
-Health Control проверяет БД. Shop содержит каркас API и миграции; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
+Health Control проверяет БД. Shop реализует регистрацию, вход (JWT) и чтение профиля в обоих режимах, остальные операции магазина пока
+не реализованы; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
@@ -124,13 +127,32 @@ lab.shop
 Дополнительные профили, например `test`, допустимы. Клиент не выбирает реализацию.
 HTTP-контроллеры реализуют lab.contracts.shop.api.DefaultApi и делегируют операции в application; secured/vulnerable не вызывают друг друга.
 Проверки владельца, SQL, checkout и идемпотентность реализуются отдельно в каждом варианте.
-Сейчас созданы структура, выбор варианта и проверки запуска; бизнес-операций ещё нет.
+Реализованы register, login и getUser. Access JWT (HS256) выдаёт и проверяет сам Shop: подпись, `iss`, `aud`,
+`exp`, `nbf`; у каждого режима свои секрет, issuer и audience, поэтому токен другого режима отклоняется.
+Правило доступа к профилю находится в сервисе: protected сверяет id из токена с запрошенным (чужой профиль
+даёт 404), vulnerable не сверяет. Остальных бизнес-операций ещё нет.
 `ShopImplementation.mode()` обозначает вариант, а не наличие работающей защиты.
 `/health` предоставляет Actuator; тесты охватывают оба профиля и неверные конфигурации.
 Настроены `Flyway` миграции в зависимости от активного Spring профиля. Настроены интеграционные тесты с использованием
 `Testcontainers`. Каждый режим API обращается к собственной БД.
 По умолчанию тесты запускаются без DataSource, `PostgreSQLIntegrationTest` позволяет проводить тесты с контейнером
 PostgreSQL и настроенным окружением.
+
+Для интеграционных тестов нужны Java 25, Maven и Docker:
+
+```sh
+mvn --batch-mode --no-transfer-progress -pl apps/shop-api -am verify
+```
+
+### JWT
+
+| Параметр                         | Где задаётся                                                | Назначение                                                 |
+|----------------------------------|-------------------------------------------------------------|------------------------------------------------------------|
+| JWT_SECRET                       | compose: `JWT_SECRET_VULNERABLE` / `JWT_SECRET_PROTECTED`   | Секрет HS256, не короче 32 символов, свой у каждого режима |
+| app.jwt.issuer, app.jwt.audience | `application-vulnerable.yaml`, `application-protected.yaml` | Различают токены режимов; значения в профилях разные       |
+| app.jwt.ttl                      | `application.yaml`                                          | Срок токена, по умолчанию 15m, допустимо 1…900 секунд      |
+
+Интеграционные и e2e-тесты Shop задают свои значения в `src/test/resources/config/application.yaml`.
 
 ## Генерация кода из OpenAPI
 
