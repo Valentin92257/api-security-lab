@@ -153,7 +153,7 @@ public class ContractValidator {
     static void validatePayloadSize(int byteLength, Class<?> type) {
         int limit = payloadByteLimit(type);
         if (byteLength > limit) {
-            throw new ContractValidationException(type.getSimpleName() + " size " + byteLength
+            throw new ContractPayloadTooLargeException(type.getSimpleName() + " size " + byteLength
                     + " exceeds limit of " + limit + " bytes");
         }
     }

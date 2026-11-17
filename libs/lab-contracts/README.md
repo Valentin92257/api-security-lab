@@ -17,6 +17,9 @@ LogBatch batch = codec.read(inputStream, LogBatch.class);
 byte[] bytes = codec.writeAsBytes(batch);
 ```
 
+Превышение байтового лимита имеет отдельный тип
+`ContractPayloadTooLargeException`, наследующий `ContractValidationException`.
+
 Универсальные публичные методы `read(String, Class)`, `read(byte[], Class)`,
 `read(InputStream, Class)`, `writeAsString` и `writeAsBytes` работают со всеми общими DTO.
 Поток закрывает вызывающий код. Отдельные пары `readTrial`/`writeTrial` и аналогичные
