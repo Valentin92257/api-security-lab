@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import lab.control.result.StepResultRepository;
 import lab.control.trial.TrialRepository;
 import lab.control.trial.TrialSnapshot;
 import org.junit.jupiter.api.AfterEach;
@@ -32,6 +33,9 @@ import static org.mockito.Mockito.when;
 class ControlJsonErrorsTest {
     @MockitoBean
     private TrialRepository repository;
+
+    @MockitoBean
+    private StepResultRepository stepResults;
 
     @LocalServerPort
     private int port;
