@@ -8,6 +8,7 @@ import lab.shop.application.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -19,6 +20,7 @@ public class ProtectedProductService implements ProductService {
     private final ProductRepository productRepository;
 
     @Override
+    @Transactional(readOnly = true)
     public List<Product> searchProducts(String query) {
         if (query != null && query.length() > 120) {
             throw new BadRequestException("query должен быть короче 120 символов");
