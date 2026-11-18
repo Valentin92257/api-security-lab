@@ -21,7 +21,7 @@ Shop запускается в двух контейнерах с профиля
 То же вручную:
 
 ```sh
-cp .env.example .env   # замени пять replace-with-* на случайные секреты: openssl rand -hex 32
+cp .env.example .env   # замени все replace-with-* на случайные секреты: openssl rand -hex 32
 docker compose up -d --build --wait
 curl --fail http://127.0.0.1:8080/health
 ```
@@ -35,6 +35,11 @@ curl --fail http://127.0.0.1:8080/health
 | `LAB_OPERATOR_TOKEN`       | да          | -                            | Bearer-токен оператора Control                                            |
 | `POSTGRES_PASSWORD`        | да          | -                            | Пароль администратора БД                                                  |
 | `LAB_CONTROL_DB_PASSWORD`  | да          | -                            | Пароль рабочей роли `control_app`                                         |
+| `LAB_DETECTOR_CONTROL_TOKEN` | да | - | Управление и чтение Detector из Control |
+| `LAB_DETECTOR_GATEWAY_TOKEN` | да | - | Запись логов только producer GATEWAY |
+| `LAB_DETECTOR_SHOP_TOKEN` | да | - | Запись логов только producer SHOP |
+| `LAB_DETECTOR_DB_PASSWORD` | да | - | Пароль рабочей роли `detector_app` |
+| `LAB_DETECTOR_MIGRATION_PASSWORD` | да | - | Пароль роли миграций `detector_migrator` |
 | `POSTGRES_USER`            | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
 | `LAB_CONTROL_PORT`         | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
 | `SHOP_PROTECTED_URL`       | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
@@ -50,13 +55,13 @@ curl --fail http://127.0.0.1:8080/health
 Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`) через отдельную сеть `control-public`.
 Остальные сервисы подключены только к internal-сетям и с хоста недоступны.
 Health Control проверяет БД. Shop реализует регистрацию, вход (JWT) и чтение профиля в обоих режимах, остальные операции магазина пока
-не реализованы; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
+не реализованы; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector принимает LogBatch и завершает анализ по границам последовательностей; правила обнаружения ещё не подключены.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
 ## БД
 
-PostgreSQL 17 хранит `lab_control`, `vulnerable` и `protected` в volume `control-data`.
+PostgreSQL 17 хранит `lab_control`, `lab_detector`, `vulnerable` и `protected` в volume `control-data`.
 `docker compose down` сохраняет данные, `docker compose down --volumes` удаляет их.
 
 PostgreSQL создаёт базы данных через скрипты в `/docker-entrypoint-initdb.d/` при первом запуске с пустым volume. При старте Control Flyway применяет миграции из `db/control/migrations`, включённые в JAR, с отдельными административными credentials. Рабочие запросы используют DML-роль `control_app`. Shop также применяет миграции при старте. Отдельного контейнера миграций нет.
@@ -70,6 +75,73 @@ docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" 
 ```
 
 Новые миграции таблиц применяются при следующем запуске соответствующего приложения.
+
+Detector владеет схемой `detector` в `lab_detector`. Bootstrap
+`db/detector/bootstrap.sql` создаёт собственные роли, Flyway применяет
+`db/detector/migrations` от `detector_migrator`; запросы приложения работают от
+`detector_app`, без DDL и без UPDATE/DELETE логов и incidents. Пароли администратора,
+Control и Shop в Detector не передаются. Последующие изменения схемы добавляются
+как V2, V3 и далее, применённые миграции не редактируются.
+
+Для volume, созданного до появления Detector, добавь пять `LAB_DETECTOR_*` секретов
+из `.env.example`, затем создай недостающую БД и роли без удаления старых данных:
+
+```sh
+docker compose up -d db
+docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -f /docker-entrypoint-initdb.d/15-detector.sql'
+docker compose up -d --build lab-detector
+```
+
+Повтор bootstrap сохраняет существующие роли/пароли и данные. Новая БД и миграции
+создаются автоматически на пустом volume.
+
+## Detector
+
+[ADR-0002](docs/adr/0002-detector-ingestion-and-storage.md) описывает схему, транзакции
+и завершение анализа. API доступен внутри сети `lab-ingest` по
+`http://lab-detector:8080/internal/v1`; порт на хост не публикуется.
+
+| Операция | Роль и результат |
+|---|---|
+| PUT `/runs/{runId}` | Control: 201 для нового run, 200 для повтора |
+| GET `/runs/{runId}` | Control: состояние и instanceId; observedRequestIds только после COMPLETED |
+| POST `/runs/{runId}/log-batches` | Gateway/Shop: только свой producer; 204 после сохранения всей пачки |
+| PUT `/runs/{runId}/finish` | Control: фиксация обоих lastSequence и deadlineAt, 202 |
+| GET `/runs/{runId}/incidents` | Control: итоговые страницы после COMPLETED, до него 409 |
+
+Три токена должны быть непустыми, разными и без пробелов. Producer не может управлять
+run или читать результаты; токен Control не пишет логи. Ключ доставки —
+`(runId, producer, sequence)`; повторы сравниваются по всем значениям DTO AccessLog
+после штатной десериализации и не увеличивают счётчики. Разные числовые литералы,
+дающие один double, считаются одинаковыми. Конфликт отклоняет пачку целиком с 409.
+
+Служебные токены имеют область действия всего Detector: Control управляет всеми
+runs, Gateway/Shop пишут своего producer в любой подготовленный run. Владельцев runs
+и привязки токена к одному run в контракте нет. UUID не заменяет проверку роли;
+чтение результатов и запись чужого producer запрещены независимо от знания runId.
+
+Токены проверяются в `ServiceAccessFilter`: заголовок Authorization не копируется
+в состояние run, access-логи или ответы. В текущем Compose используется HTTP без TLS;
+internal-сеть ограничивает доступ, но не шифрует трафик. Секреты доступны в окружении
+контейнера и памяти JVM, поэтому доступ к Docker, процессу и дампам памяти остаётся
+доверенной административной границей.
+
+Finish ждёт все номера 1..N отдельно у каждого producer, включая N=0. Поздние пачки
+допустимы внутри объявленных границ. Изменённый повтор finish даёт 409; идентичный
+возвращает текущее состояние. Ошибка или deadline переводят анализ в FAILED.
+После COMPLETED/FAILED допустимы только сохранённые идентичные повторы логов.
+При рестарте незавершённые runs становятся FAILED, instanceId меняется; resume нет.
+
+Сейчас `EmptyAnalysisEngine` читает полный поток и возвращает пустые incidents.
+Это проверка транспорта и протокола; правила и оценка качества обнаружения — S2-20.
+Доставка полного AccessLog из Gateway/Shop и вызовы оркестрации из Control пока
+остаются отдельными задачами.
+
+Интеграционные тесты протокола запускаются с Java 25, Maven и Docker:
+
+```sh
+mvn --batch-mode --no-transfer-progress -pl apps/lab-detector -am verify
+```
 
 ## Создание эксперимента
 

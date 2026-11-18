@@ -25,19 +25,14 @@ if [ ! -f .env ]; then
   fi
   command -v openssl >/dev/null 2>&1 || fail "Нужен openssl для генерации секретов."
 
-  token=$(openssl rand -hex 32)
-  admin=$(openssl rand -hex 32)
-  control=$(openssl rand -hex 32)
-  protected_jwt=$(openssl rand -hex 32)
-  vulnerable_jwt=$(openssl rand -hex 32)
   (
     umask 077
-    sed -e "s/replace-with-local-random-token/$token/" \
-        -e "s/replace-with-local-admin-password/$admin/" \
-        -e "s/replace-with-local-control-password/$control/" \
-        -e "s/replace-with-protected-jwt-secret/$protected_jwt/" \
-        -e "s/replace-with-vulnerable-jwt-secret/$vulnerable_jwt/" \
-        .env.example > .env
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        *=replace-with-*) printf '%s=%s\n' "${line%%=*}" "$(openssl rand -hex 32)" ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < .env.example > .env
   )
   echo "Создан .env со случайными секретами."
 fi
