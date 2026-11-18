@@ -72,7 +72,6 @@ public abstract class BaseAuthService implements AuthService {
     }
 
     @Override
-    @Transactional(readOnly = true)
     public LoginResult login(LoginRequest request) {
         String login = normalizeLogin(request.getLogin());
         validatePassword(request.getPassword());

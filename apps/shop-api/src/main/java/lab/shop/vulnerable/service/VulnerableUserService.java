@@ -8,7 +8,6 @@ import lab.shop.application.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Profile("vulnerable")
@@ -18,7 +17,6 @@ public class VulnerableUserService implements UserService {
     private final UserRepository userRepository;
 
     @Override
-    @Transactional(readOnly = true)
     public User getUser(Long userId) {
         return userRepository.findProfile(userId)
                 .map(UserProfile::toDto)

@@ -7,7 +7,6 @@ import lab.shop.application.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -19,7 +18,6 @@ public class VulnerableProductService implements ProductService {
     private final ProductRepository productRepository;
 
     @Override
-    @Transactional(readOnly = true)
     public List<Product> searchProducts(String query) {
         return productRepository.search(query).stream()
                 .map(CatalogProduct::toDto)
