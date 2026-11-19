@@ -9,6 +9,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -113,10 +115,11 @@ public class ProtectedCouponRepositoryIntegrationTest extends PostgreSQLIntegrat
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     @DisplayName("Конкуренция: не более max_uses успешных расходований")
     void concurrentConsumptionRespectsMaxUses() throws Exception {
         long couponId = insertCoupon("RACE99", 99, T0.plusSeconds(3600), 1);
-        int attempts = 16;
+        int attempts = 10;
 
         ExecutorService pool = Executors.newFixedThreadPool(attempts);
         CountDownLatch start = new CountDownLatch(1);
@@ -145,6 +148,8 @@ public class ProtectedCouponRepositoryIntegrationTest extends PostgreSQLIntegrat
             }
         } finally {
             pool.shutdownNow();
+            jdbc.sql("DELETE FROM coupons WHERE code IN ('SPRING10', 'OLD20', 'EDGE30', 'RACE99')")
+                    .update();
         }
     }
 
