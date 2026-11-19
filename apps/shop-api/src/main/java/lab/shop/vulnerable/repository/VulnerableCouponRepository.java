@@ -1,0 +1,63 @@
+package lab.shop.vulnerable.repository;
+
+import lab.shop.application.model.Coupon;
+import lab.shop.application.repository.CouponRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.Optional;
+
+@Repository
+@Profile("vulnerable")
+@RequiredArgsConstructor
+public class VulnerableCouponRepository implements CouponRepository {
+
+    private final JdbcClient jdbc;
+
+    @Override
+    public Optional<Coupon> findByCode(String code) {
+        return jdbc.sql("""
+                        SELECT id, code, discount_percent, expires_at, max_uses, used_count
+                        FROM coupons
+                        WHERE code = :code
+                        """)
+                .param("code", code)
+                .query(Coupon.class)
+                .optional();
+    }
+
+    /**
+     * Проверка и инкремент НЕ атомарны.
+     */
+    @Override
+    public int tryConsume(long couponId, Instant now) {
+        Optional<Coupon> found = jdbc.sql("""
+                        SELECT id, code, discount_percent, expires_at, max_uses, used_count
+                        FROM coupons
+                        WHERE id = :id
+                        """)
+                .param("id", couponId)
+                .query(Coupon.class)
+                .optional();
+
+        if (found.isEmpty()) {
+            return 0;
+        }
+
+        Coupon coupon = found.get();
+        if (coupon.usedCount() >= coupon.maxUses() || !coupon.expiresAt().isAfter(now)) {
+            return 0;
+        }
+
+        return jdbc.sql("""
+                        UPDATE coupons
+                        SET used_count = used_count + 1
+                        WHERE id = :id
+                        """)
+                .param("id", couponId)
+                .update();
+    }
+}

@@ -20,9 +20,7 @@ public record Coupon(
     private CartCoupon.EligibilityEnum getEligibility(Instant now) {
         if (usedCount >= maxUses) {
             return CartCoupon.EligibilityEnum.EXHAUSTED;
-        }
-
-        if (!expiresAt.isAfter(now)) {
+        } else if (!expiresAt.isAfter(now)) {
             return CartCoupon.EligibilityEnum.EXPIRED;
         }
 
