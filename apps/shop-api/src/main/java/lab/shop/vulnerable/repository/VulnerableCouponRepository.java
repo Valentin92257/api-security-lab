@@ -52,6 +52,13 @@ public class VulnerableCouponRepository implements CouponRepository {
             return 0;
         }
 
+        try {
+            // искусственное окно для Race Condition
+            Thread.sleep(50);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
         return jdbc.sql("""
                         UPDATE coupons
                         SET used_count = used_count + 1
