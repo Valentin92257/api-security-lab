@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -163,7 +164,7 @@ public class ProtectedCouponRepositoryIntegrationTest extends PostgreSQLIntegrat
                         """)
                 .param("code", code)
                 .param("discountPercent", discountPercent)
-                .param("expiresAt", expiresAt)
+                .param("expiresAt", Timestamp.from(expiresAt))
                 .param("maxUses", maxUses)
                 .param("usedCount", usedCount)
                 .query(Long.class)
