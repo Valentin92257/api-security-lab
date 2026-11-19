@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -42,7 +43,7 @@ public class ProtectedCouponRepository implements CouponRepository {
                           AND expires_at > :now
                         """)
                 .param("id", couponId)
-                .param("now", now)
+                .param("now", Timestamp.from(now))
                 .update();
     }
 }
