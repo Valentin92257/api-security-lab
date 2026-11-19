@@ -116,32 +116,28 @@ public class ProtectedCouponRepositoryIntegrationTest extends PostgreSQLIntegrat
     @DisplayName("Конкуренция: не более max_uses успешных расходований")
     void concurrentConsumptionRespectsMaxUses() throws Exception {
         long couponId = insertCoupon("RACE99", 99, T0.plusSeconds(3600), 1);
-        int attempts = 8;
+        int attempts = 16;
 
         ExecutorService pool = Executors.newFixedThreadPool(attempts);
-        CountDownLatch ready = new CountDownLatch(attempts);
-        CountDownLatch go = new CountDownLatch(1);
+        CountDownLatch start = new CountDownLatch(1);
 
         try {
             List<Future<Integer>> futures = IntStream.range(0, attempts)
                     .mapToObj(_ -> pool.submit(() -> {
-                        ready.countDown();
-                        go.await();
+                        start.await();
                         return couponRepository.tryConsume(couponId, T0);
                     }))
                     .toList();
 
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            go.countDown();
+            start.countDown();
 
             int successes = 0;
             for (Future<Integer> future : futures) {
-                successes += future.get(10, TimeUnit.SECONDS);
+                successes += future.get(3, TimeUnit.SECONDS);
             }
 
             // Инвариант обоих профилей: потерянных обновлений нет.
             assertThat(usedCount(couponId)).isEqualTo(successes);
-
             if (shouldOverconsumeUnderConcurrency()) {
                 assertThat(successes).isGreaterThan(1);
             } else {
