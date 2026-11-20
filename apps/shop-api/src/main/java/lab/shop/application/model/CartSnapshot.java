@@ -22,8 +22,8 @@ public record CartSnapshot(
                 .map(CartItemSnapshot::toDto)
                 .toList();
 
-        long subtotal = items.stream()
-                .mapToLong(CartItemSnapshot::lineTotal)
+        long subtotal = lineItems.stream()
+                .mapToLong(LineItem::getLineTotal)
                 .sum();
 
         CartCoupon cartCoupon = coupon == null ? null : coupon.toDto(now);
@@ -40,7 +40,7 @@ public record CartSnapshot(
                 userId,
                 revision,
                 lineItems,
-                coupon == null ? null : coupon.toDto(now),
+                cartCoupon,
                 subtotal,
                 discount,
                 total,

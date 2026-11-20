@@ -19,16 +19,17 @@ public class VulnerableProductRepository implements ProductRepository {
     @Override
     public List<CatalogProduct> search(String query) {
         String normalizedQuery = query == null ? "" : query;
+        String sql = """
+                SELECT id, name, description, price, published
+                FROM products
+                WHERE published = true AND 
+                      (STRPOS(LOWER(name), LOWER('%s')) > 0 OR STRPOS(LOWER(description), LOWER('%s')) > 0)
+                ORDER BY id ASC
+                LIMIT 100
+                """.formatted(normalizedQuery, normalizedQuery);
 
         // Намеренная SQL Injection vulnerability.
-        return jdbc.sql("""
-                        SELECT id, name, description, price, published
-                        FROM products
-                        WHERE published = true AND 
-                              (STRPOS(LOWER(name), LOWER('%s')) > 0 OR STRPOS(LOWER(description), LOWER('%s')) > 0)
-                        ORDER BY id ASC
-                        LIMIT 100
-                        """.formatted(normalizedQuery, normalizedQuery))
+        return jdbc.sql(sql)
                 .query(CatalogProduct.class)
                 .list();
     }

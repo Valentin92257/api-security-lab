@@ -19,12 +19,13 @@ public class VulnerableCouponRepository implements CouponRepository {
 
     @Override
     public Optional<Coupon> findByCode(String code) {
-        return jdbc.sql("""
-                        SELECT id, code, discount_percent, expires_at, max_uses, used_count
-                        FROM coupons
-                        WHERE code = :code
-                        """)
-                .param("code", code)
+        String sql = """
+                SELECT id, code, discount_percent, expires_at, max_uses, used_count
+                FROM coupons
+                WHERE code = '%s'
+                """.formatted(code);
+
+        return jdbc.sql(sql)
                 .query(Coupon.class)
                 .optional();
     }
@@ -34,12 +35,13 @@ public class VulnerableCouponRepository implements CouponRepository {
      */
     @Override
     public int tryConsume(long couponId, Instant now) {
-        Optional<Coupon> found = jdbc.sql("""
-                        SELECT id, code, discount_percent, expires_at, max_uses, used_count
-                        FROM coupons
-                        WHERE id = :id
-                        """)
-                .param("id", couponId)
+        String sql = """
+                SELECT id, code, discount_percent, expires_at, max_uses, used_count
+                FROM coupons
+                WHERE id = %s
+                """.formatted(couponId);
+
+        Optional<Coupon> found = jdbc.sql(sql)
                 .query(Coupon.class)
                 .optional();
 
@@ -62,9 +64,8 @@ public class VulnerableCouponRepository implements CouponRepository {
         return jdbc.sql("""
                         UPDATE coupons
                         SET used_count = used_count + 1
-                        WHERE id = :id
-                        """)
-                .param("id", couponId)
+                        WHERE id = %s
+                        """.formatted(couponId))
                 .update();
     }
 }
