@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,7 +32,7 @@ public class ProtectedCartRepositoryIntegrationTest extends PostgreSQLIntegratio
         String login = "u" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         long userId = userRepository.insert(login, "Test User", login + "@example.com", "hash");
 
-        cartRepository.createEmpty(userId);
+        cartRepository.createEmpty(userId, Instant.now());
 
         Integer count = jdbcClient.sql("SELECT count(*) FROM carts WHERE user_id = :userId")
                 .param("userId", userId)

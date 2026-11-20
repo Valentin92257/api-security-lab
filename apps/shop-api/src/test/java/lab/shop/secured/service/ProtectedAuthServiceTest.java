@@ -22,7 +22,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,7 +55,8 @@ public class ProtectedAuthServiceTest {
                 "test-secret-at-least-32-bytes-long-0123456789",
                 "urn:lab:shop:test", "shop-test", Duration.ofMinutes(10));
         when(passwordEncoder.encode("dummy-password")).thenReturn(DUMMY_HASH);
-        service = new ProtectedAuthService(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties);
+        service = new ProtectedAuthService(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties,
+                Clock.systemUTC());
     }
 
     @Test
@@ -67,7 +70,7 @@ public class ProtectedAuthServiceTest {
 
         assertThat(user.getId()).isEqualTo(10L);
         assertThat(user.getLogin()).isEqualTo("alice");
-        verify(cartRepository).createEmpty(10L);
+        verify(cartRepository).createEmpty(eq(10L), any(Instant.class));
     }
 
     @Test
@@ -80,7 +83,7 @@ public class ProtectedAuthServiceTest {
         RegisterRequest request = new RegisterRequest("alice", VALID_PASSWORD, "Alice", "alice@example.com");
 
         assertThatThrownBy(() -> service.register(request)).isInstanceOf(ConflictException.class);
-        verify(cartRepository, never()).createEmpty(anyLong());
+        verify(cartRepository, never()).createEmpty(anyLong(), any(Instant.class));
     }
 
     @Test
@@ -94,7 +97,7 @@ public class ProtectedAuthServiceTest {
         RegisterRequest request = new RegisterRequest("alice", VALID_PASSWORD, longName, "alice@example.com");
 
         assertThatThrownBy(() -> service.register(request)).isInstanceOf(BadRequestException.class);
-        verify(cartRepository, never()).createEmpty(anyLong());
+        verify(cartRepository, never()).createEmpty(anyLong(), any(Instant.class));
     }
 
     @Test

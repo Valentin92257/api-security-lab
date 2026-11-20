@@ -12,3 +12,5 @@ management:
 app:
   jwt:
     secret: test-secret-at-least-32-bytes-long-0123456789
+  checkout:
+    idempotency-secret: test-idempotency-secret-at-least-32-bytes

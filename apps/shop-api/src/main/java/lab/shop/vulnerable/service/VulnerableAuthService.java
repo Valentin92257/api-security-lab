@@ -9,11 +9,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+
 @Service
 @Profile("vulnerable")
 public class VulnerableAuthService extends BaseAuthService {
 
-    protected VulnerableAuthService(UserRepository userRepository, CartRepository cartRepository, PasswordEncoder passwordEncoder, JwtService jwtService, JwtProperties jwtProperties) {
-        super(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties);
+    protected VulnerableAuthService(UserRepository userRepository, CartRepository cartRepository, PasswordEncoder passwordEncoder, JwtService jwtService, JwtProperties jwtProperties, Clock clock) {
+        super(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties, clock);
     }
 }

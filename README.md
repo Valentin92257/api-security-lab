@@ -43,14 +43,16 @@ curl --fail http://127.0.0.1:8080/health
 | `GATEWAY_MAX_BODY_BYTES`   | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
 | `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет для авторизации защищенной версии API                          |
 | `JWT_SECRET_VULNERABLE`    | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
+| `IDEMPOTENCY_SECRET`       | да          | -                            | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
 
 Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
 
 Локальные Maven и JDK не нужны: сборка и модульные тесты выполняются в Docker.
 Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`) через отдельную сеть `control-public`.
 Остальные сервисы подключены только к internal-сетям и с хоста недоступны.
-Health Control проверяет БД. Shop реализует регистрацию, вход (JWT) и чтение профиля в обоих режимах, остальные операции магазина пока
-не реализованы; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
+Health Control проверяет БД. Shop реализует регистрацию, вход (JWT), чтение профиля и поиск каталога в обоих режимах,
+корзина и заказы пока не реализованы; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока
+предоставляет health.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
@@ -153,6 +155,13 @@ mvn --batch-mode --no-transfer-progress -pl apps/shop-api -am verify
 | app.jwt.ttl                      | `application.yaml`                                          | Срок токена, по умолчанию 15m, допустимо 1…900 секунд      |
 
 Интеграционные и e2e-тесты Shop задают свои значения в `src/test/resources/config/application.yaml`.
+
+### Checkout
+
+| Параметр                      | Где задаётся                                        | Назначение                                                         |
+|-------------------------------|-----------------------------------------------------|--------------------------------------------------------------------|
+| IDEMPOTENCY_SECRET            | compose: `IDEMPOTENCY_SECRET` (оба экземпляра Shop) | HMAC-ключ для `idempotency_key_hash`, не короче 32 символов        |
+| app.checkout.key-lock-timeout | `application.yaml`                                  | Ожидание advisory lock по ключу идемпотентности, по умолчанию `2s` |
 
 ## Генерация кода из OpenAPI
 
