@@ -128,6 +128,23 @@ public class ProtectedOrderRepositoryIntegrationTest extends PostgreSQLIntegrati
     }
 
     @Test
+    @DisplayName("insert сохраняет response_body с апострофом в названии товара")
+    void insertStoresResponseBodyWithApostrophe() {
+        long orderId = orderRepository.nextId();
+        String responseBody = """
+                {"id":%d,"userId":%d,"cartId":%d,"cartRevision":0,"items":[{"productId":%d,"name":"Лампа 'Java'","quantity":1,"unitPrice":1000,"lineTotal":1000}],"coupon":null,"subtotal":1000,"discount":0,"total":1000,"currency":"RUB"}
+                """.formatted(orderId, userId, cartId, productId);
+
+        orderRepository.insert(new NewOrder(
+                orderId, userId, cartId, 0, 1000, 0, 1000,
+                null, T0, bytes(5), bytes(6), responseBody,
+                List.of(new OrderItem(productId, 1, 1000))));
+
+        String stored = orderRepository.findResponse(orderId).orElseThrow().responseBody();
+        assertThat(jsonMapper.readTree(stored)).isEqualTo(jsonMapper.readTree(responseBody));
+    }
+
+    @Test
     @DisplayName("findByIdempotencyKey возвращает id, fingerprint и сохранённый response_body")
     void findByIdempotencyKeyReturnsStoredOrder() {
         byte[] keyHash = bytes(1);

@@ -87,6 +87,7 @@ public class VulnerableOrderRepository implements OrderRepository {
 
     @Override
     public void insert(NewOrder order) {
+        String escapedResponseBody = order.responseBody().replace("'", "''");
         String sql = """
                 INSERT INTO orders (id, user_id, cart_id, cart_revision, subtotal, discount, total,
                                     coupon_id, created_at, idempotency_key_hash, request_fingerprint,
@@ -98,7 +99,7 @@ public class VulnerableOrderRepository implements OrderRepository {
                 order.id(), order.userId(), order.cartId(), order.cartRevision(), order.subtotal(),
                 order.discount(), order.total(), order.couponId(), Timestamp.from(order.createdAt()),
                 HexFormat.of().formatHex(order.idempotencyKeyHash()), HexFormat.of().formatHex(order.requestFingerprint()),
-                order.responseBody());
+                escapedResponseBody);
 
         jdbc.sql(sql)
                 .update();
