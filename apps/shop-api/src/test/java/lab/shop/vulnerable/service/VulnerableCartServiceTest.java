@@ -150,18 +150,18 @@ class VulnerableCartServiceTest {
     @Test
     @DisplayName("selectCoupon выбирает купон без блокировки корзины и повышает revision")
     void selectCouponUpdatesCartWithoutLock() {
-        Coupon coupon = new Coupon(7L, "SAVE10", 10, T0.plusSeconds(3600), 5, 0);
+        Coupon coupon = new Coupon(7L, "save10", 10, T0.plusSeconds(3600), 5, 0);
         CartSnapshot before = new CartSnapshot(CART_ID, USER_ID, 1L, T0,
                 List.of(new CartItemSnapshot(1L, "Лампа", 1, 1000, true)), null);
         CartSnapshot after = new CartSnapshot(CART_ID, USER_ID, 2L, T0, before.items(), coupon);
 
-        when(couponRepository.findByCode("SAVE10")).thenReturn(Optional.of(coupon));
+        when(couponRepository.findByCode("save10")).thenReturn(Optional.of(coupon));
         when(cartRepository.findByUserId(USER_ID)).thenReturn(Optional.of(before), Optional.of(after));
 
         Cart result = service.selectCoupon(new SelectCouponRequest("save10"));
 
         assertThat(result.getRevision()).isEqualTo(2L);
-        assertThat(result.getCoupon()).isEqualTo(new CartCoupon("SAVE10", 10, CartCoupon.EligibilityEnum.VALID));
+        assertThat(result.getCoupon()).isEqualTo(new CartCoupon("save10", 10, CartCoupon.EligibilityEnum.VALID));
         verify(cartRepository).setCoupon(CART_ID, 7L, T0);
         verify(cartRepository, never()).lockByUserId(anyLong());
     }
