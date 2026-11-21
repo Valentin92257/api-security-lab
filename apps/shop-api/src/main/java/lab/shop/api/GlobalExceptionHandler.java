@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.*;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -81,6 +82,16 @@ public class GlobalExceptionHandler {
             if (supported != null) {
                 headers.setAllow(supported);
             }
+        });
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Problem> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex,
+                                                               HttpServletRequest request) {
+        UUID requestId = getRequestId(request);
+        log.info("415 requestId={}: {}", requestId, ex.getMessage());
+
+        return respond(HttpStatus.UNSUPPORTED_MEDIA_TYPE, Problem.CodeEnum.INVALID_REQUEST, requestId, _ -> {
         });
     }
 

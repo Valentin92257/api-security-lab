@@ -26,6 +26,8 @@ import java.util.regex.Pattern;
 public abstract class BaseAuthService implements AuthService {
 
     private static final Pattern LOGIN_PATTERN = Pattern.compile("[a-z0-9_]{3,32}");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+    private static final int EMAIL_MAX_LENGTH = 254;
     private static final int PASSWORD_MIN_BYTES = 8;
     private static final int PASSWORD_MAX_BYTES = 72;
 
@@ -61,7 +63,7 @@ public abstract class BaseAuthService implements AuthService {
     public User register(RegisterRequest request) {
         String login = normalizeLogin(request.getLogin());
         String name = requireText(request.getName(), "name");
-        String email = requireText(request.getEmail(), "email").toLowerCase(Locale.ROOT);
+        String email = normalizeEmail(request.getEmail());
         validatePassword(request.getPassword());
 
         String hash = passwordEncoder.encode(request.getPassword());
@@ -117,6 +119,14 @@ public abstract class BaseAuthService implements AuthService {
         if (bytes < PASSWORD_MIN_BYTES || bytes > PASSWORD_MAX_BYTES) {
             throw new BadRequestException("password должен занимать 8-72 байта UTF-8");
         }
+    }
+
+    private static String normalizeEmail(String raw) {
+        String email = requireText(raw, "email").toLowerCase(Locale.ROOT);
+        if (email.length() > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.matcher(email).matches()) {
+            throw new BadRequestException("Некорректный формат email");
+        }
+        return email;
     }
 
     private static String requireText(String value, String field) {

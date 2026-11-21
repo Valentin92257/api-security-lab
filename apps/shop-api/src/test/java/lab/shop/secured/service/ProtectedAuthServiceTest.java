@@ -155,6 +155,15 @@ public class ProtectedAuthServiceTest {
     }
 
     @Test
+    @DisplayName("Некорректный формат email отклоняется до обращения к репозиторию")
+    void registerRejectsInvalidEmailFormat() {
+        RegisterRequest request = new RegisterRequest("alice", VALID_PASSWORD, "Alice", "not-an-email");
+
+        assertThatThrownBy(() -> service.register(request)).isInstanceOf(BadRequestException.class);
+        verifyNoInteractions(userRepository, cartRepository);
+    }
+
+    @Test
     @DisplayName("Корректные credentials возвращают токен и срок жизни из JwtProperties")
     void loginReturnsTokenForValidCredentials() {
         when(userRepository.findCredentialsByLogin("bob")).thenReturn(Optional.of(new UserCredentials(5L, "stored-hash")));
