@@ -32,7 +32,7 @@ public record CartSnapshot(
                 && cartCoupon.getEligibility() == CartCoupon.EligibilityEnum.VALID
                 ? cartCoupon.getDiscountPercent() : 0;
 
-        long discount = subtotal * discountPercent / 100;
+        long discount = Math.floorDiv(subtotal * discountPercent, 100);
         long total = subtotal - discount;
 
         return new Cart(
