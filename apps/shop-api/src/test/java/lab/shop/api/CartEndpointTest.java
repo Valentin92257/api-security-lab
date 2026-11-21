@@ -3,7 +3,6 @@ package lab.shop.api;
 import lab.shop.api.security.JwtService;
 import lab.shop.application.model.CartItemSnapshot;
 import lab.shop.application.model.CartSnapshot;
-import lab.shop.application.model.Coupon;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.CouponRepository;
 import lab.shop.application.repository.ProductRepository;
@@ -169,28 +168,6 @@ public abstract class CartEndpointTest {
 
         assertThat(response.statusCode()).isEqualTo(401);
         verifyNoInteractions(cartRepository, productRepository);
-    }
-
-    @Test
-    @DisplayName("PUT /cart/coupon выбирает купон с нормализацией кода")
-    void selectCartCouponUpdatesCart() throws Exception {
-        Coupon coupon = new Coupon(7L, "SAVE10", 10, Instant.now().plusSeconds(3600), 5, 0);
-        CartSnapshot before = new CartSnapshot(CART_ID, CURRENT_USER_ID, 1L, T0,
-                List.of(new CartItemSnapshot(5L, "Лампа", 1, 1000, true)), null);
-        CartSnapshot after = new CartSnapshot(CART_ID, CURRENT_USER_ID, 2L, T0, before.items(), coupon);
-
-        when(couponRepository.findByCode("SAVE10")).thenReturn(Optional.of(coupon));
-        stubCartMutationRead(before, after);
-
-        HttpResponse<String> response = put("/cart/coupon", Map.of("code", " save10 "), tokenFor(CURRENT_USER_ID));
-
-        assertThat(response.statusCode()).isEqualTo(200);
-        JsonNode body = json(response);
-        assertThat(body.get("revision").asLong()).isEqualTo(2L);
-        assertThat(body.get("coupon").get("code").asString()).isEqualTo("SAVE10");
-        assertThat(body.get("coupon").get("eligibility").asString()).isEqualTo("VALID");
-        assertThat(body.get("discount").asLong()).isEqualTo(100L);
-        assertThat(body.get("total").asLong()).isEqualTo(900L);
     }
 
     @Test

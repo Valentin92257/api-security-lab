@@ -3,14 +3,18 @@ package lab.shop.vulnerable;
 import lab.shop.api.CartEndpointTest;
 import lab.shop.application.model.CartItemSnapshot;
 import lab.shop.application.model.CartSnapshot;
+import lab.shop.application.model.Coupon;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -40,5 +44,21 @@ class VulnerableCartEndpointTest extends CartEndpointTest {
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(json(response).get("items").get(0).get("quantity").asInt()).isEqualTo(quantity);
         verify(cartRepository, never()).lockByUserId(anyLong());
+    }
+
+    @Test
+    @DisplayName("PUT /cart/coupon не нормализует код купона")
+    void selectCartCouponUpdatesCart() throws Exception {
+        Coupon coupon = new Coupon(7L, "SAVE10", 10, Instant.now().plusSeconds(3600), 5, 0);
+        CartSnapshot before = new CartSnapshot(CART_ID, CURRENT_USER_ID, 1L, T0,
+                List.of(new CartItemSnapshot(5L, "Лампа", 1, 1000, true)), null);
+        CartSnapshot after = new CartSnapshot(CART_ID, CURRENT_USER_ID, 2L, T0, before.items(), coupon);
+
+        when(couponRepository.findByCode("SAVE10")).thenReturn(Optional.of(coupon));
+        stubCartMutationRead(before, after);
+
+        HttpResponse<String> response = put("/cart/coupon", Map.of("code", " save10 "), tokenFor(CURRENT_USER_ID));
+
+        assertThat(response.statusCode()).isEqualTo(404);
     }
 }
