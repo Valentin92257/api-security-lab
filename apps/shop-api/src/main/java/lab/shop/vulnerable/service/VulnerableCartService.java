@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Locale;
 
 /**
  * Уязвимая реализация корзины:
@@ -95,6 +96,6 @@ public class VulnerableCartService implements CartService {
         if (raw == null || raw.isBlank()) {
             throw new BadRequestException("code не указан");
         }
-        return raw.trim();
+        return raw.trim().toUpperCase(Locale.ROOT);
     }
 }
