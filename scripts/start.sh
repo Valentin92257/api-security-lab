@@ -30,6 +30,7 @@ if [ ! -f .env ]; then
   control=$(openssl rand -hex 32)
   protected_jwt=$(openssl rand -hex 32)
   vulnerable_jwt=$(openssl rand -hex 32)
+  idempotency=$(openssl rand -hex 32)
   (
     umask 077
     sed -e "s/replace-with-local-random-token/$token/" \
@@ -37,6 +38,7 @@ if [ ! -f .env ]; then
         -e "s/replace-with-local-control-password/$control/" \
         -e "s/replace-with-protected-jwt-secret/$protected_jwt/" \
         -e "s/replace-with-vulnerable-jwt-secret/$vulnerable_jwt/" \
+        -e "s/replace-with-local-idempotency-secret/$idempotency/" \
         .env.example > .env
   )
   echo "Создан .env со случайными секретами."

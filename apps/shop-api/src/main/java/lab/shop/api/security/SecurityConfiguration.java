@@ -16,6 +16,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
+import java.time.Clock;
+
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 @Configuration
@@ -45,8 +47,8 @@ class SecurityConfiguration {
     }
 
     @Bean
-    JwtDecoder jwtDecoder(JwtProperties jwtProperties) {
-        return JwtSupport.decoder(jwtProperties);
+    JwtDecoder jwtDecoder(JwtProperties jwtProperties, Clock clock) {
+        return JwtSupport.decoder(jwtProperties, clock);
     }
 
     @Bean

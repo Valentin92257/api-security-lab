@@ -117,7 +117,7 @@ class JwtServiceTest {
 
     private static JwtService service(JwtProperties props) {
         JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(JwtSupport.key(props.secret())));
-        return new JwtService(encoder, props);
+        return new JwtService(encoder, props, Clock.systemUTC());
     }
 
     private static JwtDecoder decoderAt(Instant now) {

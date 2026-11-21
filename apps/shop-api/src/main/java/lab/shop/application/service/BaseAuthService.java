@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -33,6 +34,8 @@ public abstract class BaseAuthService implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
+    private final Clock clock;
+
     /**
      * Хеш-пустышка: пароль проверяется и для несуществующего логина, чтобы время ответа не выдавало его.
      */
@@ -42,12 +45,14 @@ public abstract class BaseAuthService implements AuthService {
                               CartRepository cartRepository,
                               PasswordEncoder passwordEncoder,
                               JwtService jwtService,
-                              JwtProperties jwtProperties) {
+                              JwtProperties jwtProperties,
+                              Clock clock) {
         this.userRepository = userRepository;
         this.cartRepository = cartRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
+        this.clock = clock;
         this.dummyHash = passwordEncoder.encode("dummy-password");
     }
 
@@ -62,7 +67,7 @@ public abstract class BaseAuthService implements AuthService {
         String hash = passwordEncoder.encode(request.getPassword());
         try {
             long id = userRepository.insert(login, name, email, hash);
-            cartRepository.createEmpty(id);
+            cartRepository.createEmpty(id, clock.instant());
             return new User(id, login, name, email);
         } catch (DuplicateKeyException e) {
             throw new ConflictException("Логин или email уже заняты", e);

@@ -8,6 +8,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -18,9 +19,10 @@ public class JwtService {
 
     private final JwtEncoder encoder;
     private final JwtProperties jwtProperties;
+    private final Clock clock;
 
     public String issue(long userId) {
-        Instant now = Instant.now();
+        Instant now = clock.instant();
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(jwtProperties.issuer())

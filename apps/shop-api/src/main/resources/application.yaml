@@ -23,3 +23,6 @@ logging:
 app:
   jwt:
     secret: ${JWT_SECRET}
+  checkout:
+    idempotency-secret: ${IDEMPOTENCY_SECRET}
+    key-lock-timeout: 2s
