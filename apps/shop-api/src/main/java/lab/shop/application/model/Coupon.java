@@ -14,10 +14,6 @@ public record Coupon(
         long usedCount
 ) {
 
-    public boolean isAvailable(Instant now) {
-        return usedCount < maxUses && expiresAt.isAfter(now);
-    }
-
     public CartCoupon toDto(Instant now) {
         return new CartCoupon(code, discountPercent, getEligibility(now));
     }
@@ -26,7 +22,7 @@ public record Coupon(
         return new OrderCoupon(code, discountPercent);
     }
 
-    private CartCoupon.EligibilityEnum getEligibility(Instant now) {
+    public CartCoupon.EligibilityEnum getEligibility(Instant now) {
         if (usedCount >= maxUses) {
             return CartCoupon.EligibilityEnum.EXHAUSTED;
         } else if (!expiresAt.isAfter(now)) {

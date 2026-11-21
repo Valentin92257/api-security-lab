@@ -31,7 +31,11 @@ public class VulnerableCouponRepository implements CouponRepository {
     }
 
     /**
-     * Проверка и инкремент НЕ атомарны.
+     * Намеренные слабости:
+     * <ul>
+     * <li> Не проверяет срок действия и лимит max_uses (истёкший/исчерпанный купон расходуется) </li>
+     * <li> Проверка существования и инкремент не атомарны (окно для Race Condition) </li>
+     * </ul>
      */
     @Override
     public int tryConsume(long couponId, Instant now) {
@@ -46,11 +50,6 @@ public class VulnerableCouponRepository implements CouponRepository {
                 .optional();
 
         if (found.isEmpty()) {
-            return 0;
-        }
-
-        Coupon coupon = found.get();
-        if (coupon.usedCount() >= coupon.maxUses() || !coupon.expiresAt().isAfter(now)) {
             return 0;
         }
 

@@ -8,16 +8,18 @@ import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -45,8 +47,14 @@ public class GlobalExceptionHandler {
         });
     }
 
-    @ExceptionHandler({BadRequestException.class, HttpClientErrorException.class, HttpMessageNotReadableException.class})
-    public ResponseEntity<Problem> handleBadRequest(RuntimeException ex, HttpServletRequest request) {
+    @ExceptionHandler({
+            BadRequestException.class,
+            HttpClientErrorException.class,
+            HttpMessageNotReadableException.class,
+            MissingRequestHeaderException.class,
+            MethodArgumentTypeMismatchException.class
+    })
+    public ResponseEntity<Problem> handleBadRequest(Exception ex, HttpServletRequest request) {
         UUID requestId = getRequestId(request);
         log.info("400 requestId={}: {}", requestId, ex.getMessage());
 
@@ -54,11 +62,25 @@ public class GlobalExceptionHandler {
         });
     }
 
-    @ExceptionHandler(NotFoundException.class)
-    public ResponseEntity<Problem> handleNotFound(NotFoundException ex, HttpServletRequest request) {
+    @ExceptionHandler({NotFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<Problem> handleNotFound(Exception ex, HttpServletRequest request) {
         UUID requestId = getRequestId(request);
         log.info("404 requestId={}: {}", requestId, ex.getMessage());
         return respond(HttpStatus.NOT_FOUND, Problem.CodeEnum.NOT_FOUND, requestId, _ -> {
+        });
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Problem> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex,
+                                                            HttpServletRequest request) {
+        UUID requestId = getRequestId(request);
+        log.info("405 requestId={}: {}", requestId, ex.getMessage());
+
+        return respond(HttpStatus.METHOD_NOT_ALLOWED, Problem.CodeEnum.INVALID_REQUEST, requestId, headers -> {
+            Set<HttpMethod> supported = ex.getSupportedHttpMethods();
+            if (supported != null) {
+                headers.setAllow(supported);
+            }
         });
     }
 

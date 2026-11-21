@@ -10,4 +10,9 @@ public class VulnerableCouponRepositoryIntegrationTest extends ProtectedCouponRe
     protected boolean shouldOverconsumeUnderConcurrency() {
         return true;
     }
+
+    @Override
+    protected boolean enforcesCouponValidity() {
+        return false;
+    }
 }

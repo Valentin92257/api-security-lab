@@ -44,6 +44,13 @@ public class ProtectedCouponRepositoryIntegrationTest extends PostgreSQLIntegrat
         return false;
     }
 
+    /**
+     * Protected проверяет срок действия и остаток max_uses; vulnerable пропускает.
+     */
+    protected boolean enforcesCouponValidity() {
+        return true;
+    }
+
     @BeforeEach
     void setUp() {
         validId = insertCoupon("SPRING10", 10, T0.plusSeconds(3600), 5);
@@ -89,22 +96,32 @@ public class ProtectedCouponRepositoryIntegrationTest extends PostgreSQLIntegrat
     }
 
     @Test
-    @DisplayName("Исчерпанный купон не расходуется, счётчик не меняется")
+    @DisplayName("Исчерпанный купон: protected отклоняет, vulnerable допускает превышение max_uses")
     void tryConsumeFailsWhenExhausted() {
         int result = couponRepository.tryConsume(exhaustedId, T0);
 
-        assertThat(result).isZero();
-        assertThat(usedCount(exhaustedId)).isEqualTo(2);
+        if (enforcesCouponValidity()) {
+            assertThat(result).isZero();
+            assertThat(usedCount(exhaustedId)).isEqualTo(2);
+        } else {
+            assertThat(result).isEqualTo(1);
+            assertThat(usedCount(exhaustedId)).isEqualTo(3);
+        }
     }
 
     @Test
-    @DisplayName("Граница срока: now равное expires_at уже означает истечение")
+    @DisplayName("Граница срока (now == expires_at): protected отклоняет, vulnerable допускает")
     void tryConsumeFailsAtExpiryBoundary() {
         int atBoundary = couponRepository.tryConsume(expiringId, T0.plusSeconds(60));
         int before = couponRepository.tryConsume(validId, T0.plusSeconds(3599));
 
-        assertThat(atBoundary).isZero();
-        assertThat(usedCount(expiringId)).isZero();
+        if (enforcesCouponValidity()) {
+            assertThat(atBoundary).isZero();
+            assertThat(usedCount(expiringId)).isZero();
+        } else {
+            assertThat(atBoundary).isEqualTo(1);
+            assertThat(usedCount(expiringId)).isEqualTo(1);
+        }
         assertThat(before).isEqualTo(1);
     }
 
