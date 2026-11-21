@@ -33,4 +33,20 @@ public class VulnerableProductRepository implements ProductRepository {
                 .query(CatalogProduct.class)
                 .list();
     }
+
+    @Override
+    public boolean existsPublished(long id) {
+        String sql = """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM products
+                    WHERE id = %s
+                      AND published = true
+                )
+                """.formatted(id);
+
+        return jdbc.sql(sql)
+                .query(Boolean.class)
+                .single();
+    }
 }

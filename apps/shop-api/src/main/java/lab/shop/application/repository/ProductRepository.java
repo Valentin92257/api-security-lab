@@ -7,4 +7,6 @@ import java.util.List;
 public interface ProductRepository {
 
     List<CatalogProduct> search(String query);
+
+    boolean existsPublished(long id);
 }

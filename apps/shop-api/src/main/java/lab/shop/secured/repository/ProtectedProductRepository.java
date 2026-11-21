@@ -33,4 +33,19 @@ public class ProtectedProductRepository implements ProductRepository {
                 .query(CatalogProduct.class)
                 .list();
     }
+
+    @Override
+    public boolean existsPublished(long id) {
+        return jdbc.sql("""
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM products
+                            WHERE id = :id
+                              AND published = true
+                        )
+                        """)
+                .param("id", id)
+                .query(Boolean.class)
+                .single();
+    }
 }

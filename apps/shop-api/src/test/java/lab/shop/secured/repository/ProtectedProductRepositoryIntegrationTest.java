@@ -209,4 +209,12 @@ public class ProtectedProductRepositoryIntegrationTest extends PostgreSQLIntegra
                     .doesNotContain(draftId);
         }
     }
+
+    @Test
+    @DisplayName("existsPublished возвращает true только для существующего опубликованного товара")
+    void existsPublishedChecksExistenceAndPublishedFlag() {
+        assertThat(productRepository.existsPublished(lampId)).isTrue();
+        assertThat(productRepository.existsPublished(draftId)).isFalse();
+        assertThat(productRepository.existsPublished(999_999L)).isFalse();
+    }
 }
