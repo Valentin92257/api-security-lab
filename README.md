@@ -143,6 +143,23 @@ Finish ждёт все номера 1..N отдельно у каждого prod
 mvn --batch-mode --no-transfer-progress -pl apps/lab-detector -am verify
 ```
 
+Новые Spring-тесты Detector с БД могут наследоваться от `AbstractDetectorDatabaseTest`
+и выбирать нужный режим `@SpringBootTest`. Базовый класс управляет контейнером PostgreSQL,
+передаёт настройки runtime/Flyway, предоставляет `runtime` и `admin` JDBC-клиенты и очищает
+таблицы перед каждым тестом. После каждого класса Spring-контекст закрывается, чтобы
+следующий класс не использовал подключения к уже остановленному контейнеру.
+`DetectorTestDatabase` остаётся фабрикой для тестов, которые управляют приложением вручную,
+например `DetectorRecoveryIntegrationTest`.
+
+HTTP-тесты наследуются от `AbstractDetectorApiIntegrationTest`: он добавляет общий
+`@SpringBootTest`, явно подключённую конфигурацию тестового движка, HTTP-запросы и ожидание
+результатов. `HttpClient` принадлежит Spring-контексту конкретного класса и закрывается
+вместе с ним. Сценарии разделены на `DetectorRunsIntegrationTest`,
+`DetectorIngestionIntegrationTest`, `DetectorFinalizationIntegrationTest`,
+`DetectorIncidentsIntegrationTest` и `DetectorSecurityIntegrationTest`.
+Фабрики логов, пачек, finish и incidents находятся в `DetectorTestData`; их использует
+и recovery-тест. Базовые классы не содержат тестовых сценариев.
+
 ## Создание эксперимента
 
 Control предоставляет каталог сценариев, создание и чтение trial по [контракту](contracts/control-api.openapi.yaml).

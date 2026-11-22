@@ -16,10 +16,10 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import static lab.detector.DetectorApiIntegrationTest.batch;
-import static lab.detector.DetectorApiIntegrationTest.finishBody;
-import static lab.detector.DetectorApiIntegrationTest.log;
-import static lab.detector.DetectorApiIntegrationTest.path;
+import static lab.detector.DetectorTestData.batch;
+import static lab.detector.DetectorTestData.finishBody;
+import static lab.detector.DetectorTestData.log;
+import static lab.detector.DetectorTestData.path;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
