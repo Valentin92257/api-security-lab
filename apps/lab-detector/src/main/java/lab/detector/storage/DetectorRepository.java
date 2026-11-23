@@ -21,21 +21,18 @@ import lab.contracts.json.ContractJsonCodec;
 import lab.detector.analysis.FinishSpec;
 import lab.detector.analysis.RunSnapshot;
 import lab.detector.engine.AnalysisEngine.Observation;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.support.SqlArrayValue;
 import org.springframework.stereotype.Repository;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 @Repository
 public class DetectorRepository {
     private final JdbcClient jdbc;
-    private final JdbcTemplate template;
     private final JsonMapper json;
 
-    public DetectorRepository(JdbcClient jdbc, JdbcTemplate template, ContractJsonCodec codec) {
+    public DetectorRepository(JdbcClient jdbc, ContractJsonCodec codec) {
         this.jdbc = jdbc;
-        this.template = template;
         this.json = codec.jsonMapper();
     }
 
@@ -54,17 +51,18 @@ public class DetectorRepository {
     }
 
     public Optional<RunSnapshot> find(UUID id, boolean lock) {
-        return jdbc.sql("SELECT * FROM detector.analysis_runs WHERE run_id = :id" + (lock ? " FOR UPDATE" : ""))
-                .param("id", id).query((rs, row) -> new RunSnapshot(id, rs.getString("state"), rs.getString("error"),
-                        rs.getString("finish_request") == null ? null
-                                : FinishSpec.from(json.readTree(rs.getString("finish_request"))))).optional();
+        return jdbc.sql("""
+                SELECT run_id AS id, state, error, finish_request::text AS finish
+                FROM detector.analysis_runs WHERE run_id = :id
+                """ + (lock ? " FOR UPDATE" : ""))
+                .param("id", id).query(RunSnapshot.class).optional();
     }
 
     public Progress progress(UUID id, String producer) {
-        return jdbc.sql("SELECT * FROM detector.producer_progress WHERE run_id = :id AND producer = :producer")
-                .param("id", id).param("producer", producer)
-                .query((rs, row) -> new Progress(rs.getInt("received_count"), rs.getInt("max_sequence"),
-                        rs.getObject("last_sequence", Integer.class))).single();
+        return jdbc.sql("""
+                SELECT received_count AS count, max_sequence AS max, last_sequence AS last
+                FROM detector.producer_progress WHERE run_id = :id AND producer = :producer
+                """).param("id", id).param("producer", producer).query(Progress.class).single();
     }
 
     public Optional<AccessLog> findLog(UUID id, String producer, int sequence) {
@@ -139,39 +137,25 @@ public class DetectorRepository {
 
     /** Caller owns a read transaction and closes the cursor; the complete run is immutable. */
     public Stream<Observation> observations(UUID id) {
-        return template.queryForStream(connection -> {
-            var statement = connection.prepareStatement("""
-                    SELECT producer, sequence, request_id, payload FROM detector.access_logs WHERE run_id = ?
-                    ORDER BY event_time, event_nanos, producer, sequence
-                    """);
-            statement.setObject(1, id);
-            statement.setFetchSize(256);
-            return statement;
-        }, (rs, row) -> {
-            JsonNode payload = json.readTree(rs.getString("payload"));
-            return new Observation(rs.getString("producer"), rs.getInt("sequence"),
-                    rs.getObject("request_id", UUID.class),
-                    OffsetDateTime.parse(payload.get("time").asString()).toInstant(), payload);
-        });
+        return jdbc.sql("""
+                SELECT producer, sequence, request_id, payload::text AS payload
+                FROM detector.access_logs WHERE run_id = :id
+                ORDER BY event_time, event_nanos, producer, sequence
+                """).withFetchSize(256).param("id", id).query(Observation.Row.class).stream()
+                .map(row -> row.toObservation(json));
     }
 
     public void insertIncident(UUID id, Incident incident) {
         Instant time = incident.getDetectedAt().toInstant();
-        template.update(connection -> {
-            var statement = connection.prepareStatement("""
-                    INSERT INTO detector.incidents
-                        (run_id, incident_id, detected_at, detected_nanos, family, request_ids, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """);
-            statement.setObject(1, id);
-            statement.setObject(2, incident.getIncidentId());
-            statement.setObject(3, databaseTime(time));
-            statement.setInt(4, time.getNano());
-            statement.setObject(5, incident.getFamily() == null ? null : incident.getFamily().name(), Types.VARCHAR);
-            statement.setArray(6, connection.createArrayOf("uuid", incident.getRequestIds().toArray(UUID[]::new)));
-            statement.setString(7, incident.getDescription());
-            return statement;
-        });
+        jdbc.sql("""
+                INSERT INTO detector.incidents
+                    (run_id, incident_id, detected_at, detected_nanos, family, request_ids, description)
+                VALUES (:id, :incidentId, :time, :nanos, :family, :requestIds, :description)
+                """).param("id", id).param("incidentId", incident.getIncidentId())
+                .param("time", databaseTime(time)).param("nanos", time.getNano())
+                .param("family", incident.getFamily() == null ? null : incident.getFamily().name(), Types.VARCHAR)
+                .param("requestIds", new SqlArrayValue("uuid", incident.getRequestIds().toArray()))
+                .param("description", incident.getDescription()).update();
     }
 
     public List<Incident> incidents(UUID id, int limit, int offset) {

@@ -140,12 +140,16 @@ class DetectorFinalizationIntegrationTest extends AbstractDetectorApiIntegration
     void observationsUseEventTimeThenProducerAndSequenceRegardlessOfArrivalOrder() throws Exception {
         UUID id = prepare();
         ObjectNode later = log(1, id).put("time", "2026-11-16T10:00:00.123456002Z");
-        ObjectNode earlier = log(2, id).put("time", "2026-11-16T10:00:00.123456001Z");
+        ObjectNode earlier = log(2, id).put("time", "2026-11-16T13:00:00.123456001+03:00");
         assertThat(ingest(id, "GATEWAY", later, earlier).statusCode()).isEqualTo(204);
         assertThat(ingest(id, "SHOP", earlier.deepCopy().put("sequence", 1)).statusCode()).isEqualTo(204);
         control("PUT", path(id) + "/finish", finishBody(2, 1));
         completed(id);
         assertThat(engine.observations.stream().map(log -> log.producer() + "/" + log.sequence()).toList())
                 .containsExactly("GATEWAY/2", "SHOP/1", "GATEWAY/1");
+        assertThat(engine.observations).extracting(AnalysisEngine.Observation::time)
+                .containsExactly(Instant.parse("2026-11-16T10:00:00.123456001Z"),
+                        Instant.parse("2026-11-16T10:00:00.123456001Z"),
+                        Instant.parse("2026-11-16T10:00:00.123456002Z"));
     }
 }

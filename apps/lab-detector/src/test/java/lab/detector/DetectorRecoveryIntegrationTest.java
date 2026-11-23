@@ -36,7 +36,7 @@ class DetectorRecoveryIntegrationTest {
         UUID completed = UUID.randomUUID();
         UUID request = UUID.randomUUID();
         String logs = batch("GATEWAY", log(1, request));
-        String boundaries = finishBody(2, 0);
+        String boundaries;
         String originalInstance;
         try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
             try (var app = start()) {
@@ -45,6 +45,7 @@ class DetectorRecoveryIntegrationTest {
                 originalInstance = body(prepared).get("instanceId").asString();
                 assertThat(send(app, client, "PUT", path(finishing), "control", null).statusCode()).isEqualTo(201);
                 assertThat(send(app, client, "POST", path(finishing) + "/log-batches", "gateway", logs).statusCode()).isEqualTo(204);
+                boundaries = finishBody(2, 0);
                 assertThat(send(app, client, "PUT", path(finishing) + "/finish", "control", boundaries).statusCode()).isEqualTo(202);
                 assertThat(send(app, client, "PUT", path(completed), "control", null).statusCode()).isEqualTo(201);
                 assertThat(send(app, client, "POST", path(completed) + "/log-batches", "gateway", logs).statusCode()).isEqualTo(204);
