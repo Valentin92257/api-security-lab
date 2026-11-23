@@ -1,17 +1,12 @@
 package lab.shop.api;
 
-import lab.shop.logging.DecisionLog;
-import lab.shop.logging.DecisionLog.Decision;
-import lab.shop.logging.DecisionLog.Kind;
-
-import java.io.IOException;
-import java.util.Collections;
-import java.util.UUID;
-
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lab.shop.logging.DecisionLog;
+import lab.shop.logging.DecisionLog.Decision;
+import lab.shop.logging.DecisionLog.Kind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -20,9 +15,14 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import java.io.IOException;
+import java.util.Collections;
+import java.util.UUID;
+
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class RequestLoggingFilter extends OncePerRequestFilter {
+
     static final String REQUEST_ID = RequestLoggingFilter.class.getName() + ".requestId";
     private static final Logger ACCESS = LoggerFactory.getLogger("lab.access");
 

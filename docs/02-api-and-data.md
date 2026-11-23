@@ -33,7 +33,7 @@ JSON UTF-8, camelCase, даты UTC RFC 3339. Все поля описанных
 
 ## Аутентификация и заголовки
 
-`Authorization: Bearer <accessToken>` обязателен, кроме register/login. JWT подписан локальным RS256-ключом target; проверяются фиксированный alg, signature, iss, aud, exp и nbf. Claims: sub=userId строкой, iat/nbf/exp, уникальный jti. TTL по умолчанию 15 минут, clock skew 5 секунд; время реальное. Ключ/issuer/audience выбираются по listener, token другого target отклоняется. Shop также проверяет JWT. Повторное использование действительного access JWT разрешено.
+`Authorization: Bearer <accessToken>` обязателен, кроме register/login. JWT подписан HS256 локальным секретом target (app.jwt.secret, не короче 32 байт); проверяются подпись, iss, aud, exp и nbf, допуск по времени 5 секунд. Claims: sub=userId строкой, iss, aud, iat, nbf, exp, уникальный jti. TTL по умолчанию 15 минут (не более 900 секунд). У каждого target свой секрет, issuer и audience; токен другого target отклоняется. Shop также проверяет JWT.
 
 Runner создаёт `X-Request-Id` до каждой отправки, Gateway сохраняет его при передаче в Shop и возвращает в ответе. Retry получает новый UUID; trace context распространяется отдельно. RunId берётся из активного контекста Runtime API. В `X-Forwarded-For` Runner передаёт один IP виртуального клиента: Gateway доверяет только генератору, Shop - только Gateway. Вычисленный IP используется в access-логах и limiter. Пользовательские role/owner/target headers полномочий не дают. Чужой и отсутствующий profile/order возвращают одинаковый 404.
 
@@ -74,7 +74,7 @@ Login: 3…32 ASCII-символа `[a-z0-9_]+` после trim/lowercase; од�
 | `Cart` | id:Id, userId:Id, revision:Revision, items:LineItem[], coupon:CartCoupon/null, subtotal:Money, discount:Money, total:Money, currency:"RUB", updatedAt:Time |
 | `Order` | id:Id, userId:Id, cartId:Id, cartRevision:Revision, items:LineItem[] непустой, coupon:OrderCoupon/null, subtotal:Money, discount:Money, total:Money, currency:"RUB", createdAt:Time |
 
-В Cart цены из неизменяемого каталога; в Order цена позиции сохранена в unit_price. LineTotal всегда quantity × unitPrice. Пустая корзина имеет items=[], subtotal=discount=total=0. CartCoupon выбирается без резерва: PUT проверяет доступность сейчас, checkout проверяет повторно. Если купон стал недоступен, GET cart сохраняет code и percent, показывает соответствующий eligibility и discount=0. Оформление с недоступным купоном отклоняется.
+В Cart цены из неизменяемого каталога; в Order цена позиции сохранена в unit_price. LineTotal всегда quantity × unitPrice. Пустая корзина имеет items=[], subtotal=discount=total=0. CartCoupon выбирается без резерва: PUT принимает любой существующий купон без блокировки по доступности, а срок и лимит проверяет checkout (зафиксирован вариант из [документа 05](05-scenarios-and-experiments.md) для совместимости со сценарием BL-01, вместо исходного отклонения на этапе PUT). Если купон недоступен, GET/PUT cart сохраняют code и percent, показывают соответствующий eligibility и discount=0. Оформление с недоступным купоном в protected отклоняется.
 
 Количество 0 не означает удаление: это отрицательный security-кейс, protected возвращает 400. Для пустой корзины используется отдельный fixture-пользователь либо очистка при успешном protected checkout. Сброс фикстуры разрешён только после завершения run.
 

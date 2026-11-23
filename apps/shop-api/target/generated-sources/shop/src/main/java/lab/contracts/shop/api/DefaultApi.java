@@ -11,7 +11,6 @@ import lab.contracts.shop.model.LoginRequest;
 import lab.contracts.shop.model.LoginResult;
 import org.springframework.lang.Nullable;
 import lab.contracts.shop.model.Order;
-import lab.contracts.shop.model.Problem;
 import lab.contracts.shop.model.Product;
 import lab.contracts.shop.model.RegisterRequest;
 import lab.contracts.shop.model.SelectCouponRequest;

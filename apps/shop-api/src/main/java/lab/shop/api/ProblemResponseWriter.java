@@ -1,10 +1,11 @@
 package lab.shop.api;
 
-import java.io.IOException;
-
 import jakarta.servlet.http.HttpServletResponse;
 
+import java.io.IOException;
+
 final class ProblemResponseWriter {
+
     static void write(HttpServletResponse response, String requestId, int status, String code, String title)
             throws IOException {
         response.setStatus(status);

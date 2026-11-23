@@ -1,15 +1,16 @@
 package lab.shop.api;
 
-import java.util.UUID;
-
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RequestLoggingFilterTest {
+
     @Test
     void restoresPreviousMdcAfterRequest() throws Exception {
         String id = UUID.randomUUID().toString();

@@ -2,9 +2,11 @@ package lab.shop.api;
 
 import lab.contracts.shop.api.DefaultApi;
 import lab.contracts.shop.model.*;
+import lab.shop.application.model.CheckoutResult;
 import lab.shop.application.service.*;
 import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,7 +30,7 @@ public class ShopApiController implements DefaultApi {
 
     @Override
     public ResponseEntity<User> registerUser(UUID xRequestId, RegisterRequest registerRequest, @Nullable String xForwardedFor) {
-        return ResponseEntity.ok(authService.register(registerRequest));
+        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(registerRequest));
     }
 
     @Override
@@ -58,7 +60,11 @@ public class ShopApiController implements DefaultApi {
 
     @Override
     public ResponseEntity<Order> checkoutOrder(String idempotencyKey, UUID xRequestId, CheckoutRequest checkoutRequest, @Nullable String xForwardedFor) {
-        return ResponseEntity.ok(orderService.checkout(idempotencyKey, checkoutRequest));
+        CheckoutResult result = orderService.checkout(idempotencyKey, checkoutRequest);
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .header("Idempotency-Replayed", Boolean.toString(result.replayed()))
+                .body(result.order());
     }
 
     @Override

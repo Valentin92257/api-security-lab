@@ -9,11 +9,21 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import lab.detector.storage.DetectorRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "lab.detector.control-token=health-control", "lab.detector.gateway-token=health-gateway",
+        "lab.detector.shop-token=health-shop", "lab.detector.worker-enabled=false", "lab.detector.recovery-enabled=false",
+        "spring.flyway.enabled=false",
+        "spring.autoconfigure.exclude=org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"
+})
 class HealthEndpointTest {
+    @MockitoBean
+    private DetectorRepository repository;
+
     @LocalServerPort
     private int port;
 

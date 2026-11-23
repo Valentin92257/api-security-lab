@@ -1,30 +1,69 @@
 # API Security Lab
 
-Java 25 / Spring Boot 4.0.8. Четыре Maven-модуля: `apps/shop-api`, `apps/lab-gateway`,
-`apps/lab-detector`, `apps/lab-control`. Runner - пакет `lab.control.runner` внутри control.
+Java 25 / Spring Boot 4.0.8. Maven-модули: общая библиотека контрактов `libs/lab-contracts`
+и четыре приложения `apps/shop-api`, `apps/lab-gateway`, `apps/lab-detector`, `apps/lab-control`.
+Runner - пакет `lab.control.runner` внутри control.
 Shop запускается в двух контейнерах с профилями `vulnerable` и `protected`.
 
 ## Запуск
 
-Нужен Docker с Compose. Скопируй `.env.example` в `.env`: `cp .env.example .env`.
-Замени три `replace-with-*` на случайные секреты (`openssl rand -hex 32`) и запусти стенд:
+Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).
+Одна команда из корня репозитория:
 
 ```sh
-docker compose build
-docker compose up -d --wait
-docker compose exec lab-control curl --fail http://127.0.0.1:8080/health
+./scripts/start.sh
 ```
 
+При первом запуске скрипт создаёт `.env` из `.env.example` со случайными секретами, собирает образы,
+запускает все сервисы и проверяет health Control. Первая сборка занимает несколько минут. Остановка: `docker compose down`.
+Если volume с БД уже есть, а `.env` нет, скрипт останавливается: новые пароли не подойдут к созданным ролям.
+
+То же вручную:
+
+```sh
+cp .env.example .env   # замени все replace-with-* на случайные секреты: openssl rand -hex 32
+docker compose up -d --build --wait
+curl --fail http://127.0.0.1:8080/health
+```
+
+### Переменные окружения
+
+Настройки задаются в `.env` (образец - `.env.example`), файл `.env` не коммитится.
+
+| Переменная                 | Обязательна | По умолчанию                 | Назначение                                                                |
+|----------------------------|-------------|------------------------------|---------------------------------------------------------------------------|
+| `LAB_OPERATOR_TOKEN`       | да          | -                            | Bearer-токен оператора Control                                            |
+| `POSTGRES_PASSWORD`        | да          | -                            | Пароль администратора БД                                                  |
+| `LAB_CONTROL_DB_PASSWORD`  | да          | -                            | Пароль рабочей роли `control_app`                                         |
+| `LAB_DETECTOR_CONTROL_TOKEN` | да | - | Управление и чтение Detector из Control |
+| `LAB_DETECTOR_GATEWAY_TOKEN` | да | - | Запись логов только producer GATEWAY |
+| `LAB_DETECTOR_SHOP_TOKEN` | да | - | Запись логов только producer SHOP |
+| `LAB_DETECTOR_DB_PASSWORD` | да | - | Пароль рабочей роли `detector_app` |
+| `LAB_DETECTOR_MIGRATION_PASSWORD` | да | - | Пароль роли миграций `detector_migrator` |
+| `POSTGRES_USER`            | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
+| `LAB_CONTROL_PORT`         | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
+| `SHOP_PROTECTED_URL`       | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
+| `GATEWAY_CONNECT_TIMEOUT`  | нет         | `2s`                         | Таймаут соединения Gateway                                                |
+| `GATEWAY_UPSTREAM_TIMEOUT` | нет         | `5s`                         | Таймаут ответа магазина                                                   |
+| `GATEWAY_MAX_BODY_BYTES`   | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
+| `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет для авторизации защищенной версии API                          |
+| `JWT_SECRET_VULNERABLE`    | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
+| `IDEMPOTENCY_SECRET`       | да          | -                            | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
+
+Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
+
 Локальные Maven и JDK не нужны: сборка и модульные тесты выполняются в Docker.
-Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`), остальные сервисы доступны внутри Docker.
-Внутренние сети могут мешать доступу с хоста, поэтому примеры используют `docker compose exec`.
-Health Control проверяет БД. Shop содержит каркас API и миграции; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector пока предоставляет health.
+Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`) через отдельную сеть `control-public`.
+Остальные сервисы подключены только к internal-сетям и с хоста недоступны.
+Health Control проверяет БД. Shop реализует все девять операций API (регистрацию, вход с JWT, профиль, каталог, корзину
+и заказы) в обоих режимах; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector принимает
+LogBatch и завершает анализ по границам последовательностей; правила обнаружения ещё не подключены.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
 ## БД
 
-PostgreSQL 17 хранит `lab_control`, `vulnerable` и `protected` в volume `control-data`.
+PostgreSQL 17 хранит `lab_control`, `lab_detector`, `vulnerable` и `protected` в volume `control-data`.
 `docker compose down` сохраняет данные, `docker compose down --volumes` удаляет их.
 
 PostgreSQL создаёт базы данных через скрипты в `/docker-entrypoint-initdb.d/` при первом запуске с пустым volume. При старте Control Flyway применяет миграции из `db/control/migrations`, включённые в JAR, с отдельными административными credentials. Рабочие запросы используют DML-роль `control_app`. Shop также применяет миграции при старте. Отдельного контейнера миграций нет.
@@ -38,6 +77,90 @@ docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" 
 ```
 
 Новые миграции таблиц применяются при следующем запуске соответствующего приложения.
+
+Detector владеет схемой `detector` в `lab_detector`. Bootstrap
+`db/detector/bootstrap.sql` создаёт собственные роли, Flyway применяет
+`db/detector/migrations` от `detector_migrator`; запросы приложения работают от
+`detector_app`, без DDL и без UPDATE/DELETE логов и incidents. Пароли администратора,
+Control и Shop в Detector не передаются. Последующие изменения схемы добавляются
+как V2, V3 и далее, применённые миграции не редактируются.
+
+Для volume, созданного до появления Detector, добавь пять `LAB_DETECTOR_*` секретов
+из `.env.example`, затем создай недостающую БД и роли без удаления старых данных:
+
+```sh
+docker compose up -d db
+docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -f /docker-entrypoint-initdb.d/15-detector.sql'
+docker compose up -d --build lab-detector
+```
+
+Повтор bootstrap сохраняет существующие роли/пароли и данные. Новая БД и миграции
+создаются автоматически на пустом volume.
+
+## Detector
+
+[ADR-0002](docs/adr/0002-detector-ingestion-and-storage.md) описывает схему, транзакции
+и завершение анализа. API доступен внутри сети `lab-ingest` по
+`http://lab-detector:8080/internal/v1`; порт на хост не публикуется.
+
+| Операция | Роль и результат |
+|---|---|
+| PUT `/runs/{runId}` | Control: 201 для нового run, 200 для повтора |
+| GET `/runs/{runId}` | Control: состояние и instanceId; observedRequestIds только после COMPLETED |
+| POST `/runs/{runId}/log-batches` | Gateway/Shop: только свой producer; 204 после сохранения всей пачки |
+| PUT `/runs/{runId}/finish` | Control: фиксация обоих lastSequence и deadlineAt, 202 |
+| GET `/runs/{runId}/incidents` | Control: итоговые страницы после COMPLETED, до него 409 |
+
+Три токена должны быть непустыми, разными и без пробелов. Producer не может управлять
+run или читать результаты; токен Control не пишет логи. Ключ доставки —
+`(runId, producer, sequence)`; повторы сравниваются по всем значениям DTO AccessLog
+после штатной десериализации и не увеличивают счётчики. Разные числовые литералы,
+дающие один double, считаются одинаковыми. Конфликт отклоняет пачку целиком с 409.
+
+Служебные токены имеют область действия всего Detector: Control управляет всеми
+runs, Gateway/Shop пишут своего producer в любой подготовленный run. Владельцев runs
+и привязки токена к одному run в контракте нет. UUID не заменяет проверку роли;
+чтение результатов и запись чужого producer запрещены независимо от знания runId.
+
+Токены проверяются в `ServiceAccessFilter`: заголовок Authorization не копируется
+в состояние run, access-логи или ответы. В текущем Compose используется HTTP без TLS;
+internal-сеть ограничивает доступ, но не шифрует трафик. Секреты доступны в окружении
+контейнера и памяти JVM, поэтому доступ к Docker, процессу и дампам памяти остаётся
+доверенной административной границей.
+
+Finish ждёт все номера 1..N отдельно у каждого producer, включая N=0. Поздние пачки
+допустимы внутри объявленных границ. Изменённый повтор finish даёт 409; идентичный
+возвращает текущее состояние. Ошибка или deadline переводят анализ в FAILED.
+После COMPLETED/FAILED допустимы только сохранённые идентичные повторы логов.
+При рестарте незавершённые runs становятся FAILED, instanceId меняется; resume нет.
+
+Сейчас `EmptyAnalysisEngine` читает полный поток и возвращает пустые incidents.
+Это проверка транспорта и протокола; правила и оценка качества обнаружения — S2-20.
+Доставка полного AccessLog из Gateway/Shop и вызовы оркестрации из Control пока
+остаются отдельными задачами.
+
+Интеграционные тесты протокола запускаются с Java 25, Maven и Docker:
+
+```sh
+mvn --batch-mode --no-transfer-progress -pl apps/lab-detector -am verify
+```
+
+Новые Spring-тесты Detector с БД могут наследоваться от `AbstractDetectorDatabaseTest`
+и выбирать нужный режим `@SpringBootTest`. Базовый класс управляет контейнером PostgreSQL,
+передаёт настройки runtime/Flyway, предоставляет `runtime` и `admin` JDBC-клиенты и очищает
+таблицы перед каждым тестом. После каждого класса Spring-контекст закрывается, чтобы
+следующий класс не использовал подключения к уже остановленному контейнеру.
+`DetectorTestDatabase` остаётся фабрикой для тестов, которые управляют приложением вручную,
+например `DetectorRecoveryIntegrationTest`.
+
+HTTP-тесты наследуются от `AbstractDetectorApiIntegrationTest`: он добавляет общий
+`@SpringBootTest`, явно подключённую конфигурацию тестового движка, HTTP-запросы и ожидание
+результатов. `HttpClient` принадлежит Spring-контексту конкретного класса и закрывается
+вместе с ним. Сценарии разделены на `DetectorRunsIntegrationTest`,
+`DetectorIngestionIntegrationTest`, `DetectorFinalizationIntegrationTest`,
+`DetectorIncidentsIntegrationTest` и `DetectorSecurityIntegrationTest`.
+Фабрики логов, пачек, finish и incidents находятся в `DetectorTestData`; их использует
+и recovery-тест. Базовые классы не содержат тестовых сценариев.
 
 ## Создание эксперимента
 
@@ -95,13 +218,43 @@ lab.shop
 Дополнительные профили, например `test`, допустимы. Клиент не выбирает реализацию.
 HTTP-контроллеры реализуют lab.contracts.shop.api.DefaultApi и делегируют операции в application; secured/vulnerable не вызывают друг друга.
 Проверки владельца, SQL, checkout и идемпотентность реализуются отдельно в каждом варианте.
-Сейчас созданы структура, выбор варианта и проверки запуска; бизнес-операций ещё нет.
+Реализованы все девять операций Shop API: `register`, `login`, `getUser`, `searchProducts`, `getCart`, `setCartQuantity`,
+`selectCartCoupon`, `checkoutOrder` и `getOrder`. Access JWT (HS256) выдаёт и проверяет сам Shop: подпись, `iss`, `aud`,
+`exp`, `nbf`; у каждого режима свои секрет, issuer и audience, поэтому токен другого режима отклоняется.
+В `protected` действуют owner-check на профиль и заказ (чужой и отсутствующий дают 404), параметризованный поиск каталога,
+строчная блокировка и ограничения корзины (`quantity 1..99`, до 100 позиций), а также транзакционный checkout с порядком
+блокировок `key → cart → coupon`, проверкой `Idempotency-Key`/`cartRevision`/`quotedTotal`, атомарным списанием купона и
+очисткой корзины. В `vulnerable` эти проверки намеренно отключены для учебных сценариев (`BO-01/02`, `IJ-01`, `RP-01/02`,
+`BL-01..04`).
 `ShopImplementation.mode()` обозначает вариант, а не наличие работающей защиты.
 `/health` предоставляет Actuator; тесты охватывают оба профиля и неверные конфигурации.
 Настроены `Flyway` миграции в зависимости от активного Spring профиля. Настроены интеграционные тесты с использованием
 `Testcontainers`. Каждый режим API обращается к собственной БД.
 По умолчанию тесты запускаются без DataSource, `PostgreSQLIntegrationTest` позволяет проводить тесты с контейнером
 PostgreSQL и настроенным окружением.
+
+Для интеграционных тестов нужны Java 25, Maven и Docker:
+
+```sh
+mvn --batch-mode --no-transfer-progress -pl apps/shop-api -am verify
+```
+
+### JWT
+
+| Параметр                         | Где задаётся                                                | Назначение                                                 |
+|----------------------------------|-------------------------------------------------------------|------------------------------------------------------------|
+| JWT_SECRET                       | compose: `JWT_SECRET_VULNERABLE` / `JWT_SECRET_PROTECTED`   | Секрет HS256, не короче 32 символов, свой у каждого режима |
+| app.jwt.issuer, app.jwt.audience | `application-vulnerable.yaml`, `application-protected.yaml` | Различают токены режимов; значения в профилях разные       |
+| app.jwt.ttl                      | `application.yaml`                                          | Срок токена, по умолчанию 15m, допустимо 1…900 секунд      |
+
+Интеграционные и e2e-тесты Shop задают свои значения в `src/test/resources/config/application.yaml`.
+
+### Checkout
+
+| Параметр                      | Где задаётся                                        | Назначение                                                         |
+|-------------------------------|-----------------------------------------------------|--------------------------------------------------------------------|
+| IDEMPOTENCY_SECRET            | compose: `IDEMPOTENCY_SECRET` (оба экземпляра Shop) | HMAC-ключ для `idempotency_key_hash`, не короче 32 символов        |
+| app.checkout.key-lock-timeout | `application.yaml`                                  | Ожидание advisory lock по ключу идемпотентности, по умолчанию `2s` |
 
 ## Генерация кода из OpenAPI
 
@@ -117,12 +270,16 @@ docker run --rm -v "$PWD:/workspace" -w /workspace \
 
 | Модуль | Контракты |
 |---|---|
-| `apps/shop-api` | `shop`, `runtime` |
-| `apps/lab-gateway` | `runtime` |
-| `apps/lab-detector` | `detector` |
-| `apps/lab-control` | `control` |
+| `libs/lab-contracts` | модели `common`, `control`, `detector`, `runtime` + сериализация/валидация (`lab.contracts.json`) |
+| `apps/shop-api` | `shop` (API и модели), `runtime` (API) |
+| `apps/lab-gateway` | `runtime` (API) |
+| `apps/lab-detector` | `detector` (API) |
+| `apps/lab-control` | `control` (API) |
 
 Пакеты `lab.contracts.<контракт>.api` содержат интерфейсы API с HTTP-аннотациями, `lab.contracts.<контракт>.model` - DTO и enum.
+
+Общий `Problem` находится в `lab.contracts.common.model`, общий `Incident` — в `lab.contracts.detector.model`.
+Работа с JSON вне контроллеров и область автоматической MVC-валидации описаны в [lab-contracts](libs/lab-contracts/README.md).
 
 У Shop API отключена генерация Bean Validation: ограничения спецификации применяются реализацией с учётом режима. Protected отклоняет нарушения, vulnerable допускает учебные quantity/quotedTotal. Runtime и остальные API сохраняют Bean Validation.
 
