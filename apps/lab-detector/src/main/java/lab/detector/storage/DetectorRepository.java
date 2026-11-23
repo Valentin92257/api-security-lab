@@ -8,16 +8,21 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 import lab.contracts.detector.model.AccessLog;
+import lab.contracts.detector.model.EventItem;
 import lab.contracts.detector.model.Incident;
 import lab.contracts.json.ContractJsonCodec;
+import lab.detector.analysis.EventCursor;
+import lab.detector.analysis.EventFilter;
 import lab.detector.analysis.FinishSpec;
 import lab.detector.analysis.RunSnapshot;
 import lab.detector.engine.AnalysisEngine.Observation;
@@ -70,7 +75,64 @@ public class DetectorRepository {
                 SELECT payload FROM detector.access_logs
                 WHERE run_id = :id AND producer = :producer AND sequence = :sequence
                 """).param("id", id).param("producer", producer).param("sequence", sequence)
-                .query((rs, row) -> json.readValue(rs.getString("payload"), AccessLog.class)).optional();
+                .query(this::mapLog).optional();
+    }
+
+    public List<EventItem> events(EventFilter filter, EventCursor cursor, int limit) {
+        var sql = new StringBuilder("SELECT run_id, producer, payload FROM detector.access_logs WHERE TRUE");
+        var parameters = new HashMap<String, Object>();
+        filter(sql, parameters, "run_id = :runId", "runId", filter.runId());
+        filter(sql, parameters, "producer = :producer", "producer", filter.producer());
+        filter(sql, parameters, "request_id = :requestId", "requestId", filter.requestId());
+        filter(sql, parameters, "payload->>'method' = :method", "method", filter.method());
+        filter(sql, parameters, "payload->>'route' = :route", "route", filter.route());
+        filter(sql, parameters, "payload->>'remote_addr' = :remoteAddr", "remoteAddr", filter.remoteAddr());
+        filter(sql, parameters, "(payload->>'user')::bigint = :userId", "userId", filter.userId());
+        if (filter.from() != null) {
+            sql.append(" AND (event_time, event_nanos) >= (:from, :fromNanos)");
+            parameters.put("from", databaseTime(filter.from()));
+            parameters.put("fromNanos", filter.from().getNano());
+        }
+        if (filter.to() != null) {
+            sql.append(" AND (event_time, event_nanos) < (:to, :toNanos)");
+            parameters.put("to", databaseTime(filter.to()));
+            parameters.put("toNanos", filter.to().getNano());
+        }
+        if (!filter.status().isEmpty()) {
+            sql.append(" AND (payload->>'status')::integer IN (:status)");
+            parameters.put("status", filter.status());
+        }
+        if (filter.statusClass() != null) {
+            sql.append(" AND (payload->>'status')::integer BETWEEN :statusMin AND :statusMax");
+            int min = (filter.statusClass().charAt(0) - '0') * 100;
+            parameters.put("statusMin", min);
+            parameters.put("statusMax", min + 99);
+        }
+        if (cursor != null) {
+            sql.append(" AND (event_time, event_nanos, run_id, producer, sequence)")
+                    .append(" < (:cursorTime, :cursorNanos, :cursorRun, :cursorProducer, :cursorSequence)");
+            parameters.put("cursorTime", databaseTime(cursor.time()));
+            parameters.put("cursorNanos", cursor.time().getNano());
+            parameters.put("cursorRun", cursor.runId());
+            parameters.put("cursorProducer", cursor.producer());
+            parameters.put("cursorSequence", cursor.sequence());
+        }
+        sql.append(" ORDER BY event_time DESC, event_nanos DESC, run_id DESC, producer DESC, sequence DESC LIMIT :limit");
+        parameters.put("limit", limit);
+        return jdbc.sql(sql.toString()).params(parameters).query((rs, row) -> new EventItem(
+                rs.getObject("run_id", UUID.class), EventItem.ProducerEnum.valueOf(rs.getString("producer")),
+                mapLog(rs, row))).list();
+    }
+
+    private static void filter(StringBuilder sql, Map<String, Object> parameters, String condition, String name, Object value) {
+        if (value != null) {
+            sql.append(" AND ").append(condition);
+            parameters.put(name, value);
+        }
+    }
+
+    private AccessLog mapLog(ResultSet rs, int row) throws SQLException {
+        return json.readValue(rs.getString("payload"), AccessLog.class);
     }
 
     public void insertLog(UUID id, String producer, AccessLog entry) {

@@ -6,10 +6,13 @@
 package lab.contracts.detector.api;
 
 import lab.contracts.detector.model.AnalysisStatus;
+import org.springframework.format.annotation.DateTimeFormat;
+import lab.contracts.detector.model.EventPage;
 import lab.contracts.detector.model.FinishAnalysisRequest;
 import lab.contracts.detector.model.IncidentPage;
 import lab.contracts.detector.model.LogBatch;
 import org.springframework.lang.Nullable;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -88,6 +91,49 @@ public interface DefaultApi {
     ResponseEntity<Void> ingestLogs(
          @PathVariable("runId") UUID runId,
          @Valid @RequestBody LogBatch logBatch
+    );
+
+
+    String PATH_LIST_EVENTS = "/events";
+    /**
+     * GET /events
+     * Сохранённые AccessLog всех runs либо одного runId; чтение разрешено только Control. Фильтры объединяются через AND, значения status через OR. status и statusClass несовместимы. Порядок убывания: time (с наносекундами), runId, producer, sequence. Курсор привязан к фильтрам; их нужно повторять на следующих страницах. limit можно менять. Между запросами нет общего снимка: поздние события требуют нового просмотра с первой страницы. Неизвестные, пустые и повторные скалярные параметры дают 400. Неизвестный явно заданный runId даёт 404; пустая выборка — 200.
+     *
+     * @param runId  (optional)
+     * @param from Включительная нижняя граница времени события; from должен быть меньше to. (optional)
+     * @param to Исключительная верхняя граница времени события. (optional)
+     * @param producer  (optional)
+     * @param requestId  (optional)
+     * @param method  (optional)
+     * @param status Один или несколько кодов, например status&#x3D;401&amp;status&#x3D;403. (optional)
+     * @param statusClass  (optional)
+     * @param route  (optional)
+     * @param remoteAddr  (optional)
+     * @param userId  (optional)
+     * @param limit  (optional, default to 20)
+     * @param cursor Непрозрачный nextCursor предыдущей страницы с теми же фильтрами. (optional)
+     * @return Страница сохранённых событий. (status code 200)
+     *         or Ошибка (status code 200)
+     */
+    @RequestMapping(
+        method = RequestMethod.GET,
+        value = DefaultApi.PATH_LIST_EVENTS,
+        produces = { "application/json", "application/problem+json" }
+    )
+    ResponseEntity<EventPage> listEvents(
+         @Valid @RequestParam(value = "runId", required = false) @Nullable UUID runId,
+         @Valid @RequestParam(value = "from", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @Nullable OffsetDateTime from,
+         @Valid @RequestParam(value = "to", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) @Nullable OffsetDateTime to,
+         @Valid @RequestParam(value = "producer", required = false) @Nullable String producer,
+         @Valid @RequestParam(value = "requestId", required = false) @Nullable UUID requestId,
+        @Pattern(regexp = "^[A-Z][A-Z0-9!#$%&'*+.^_`|~-]*$") @Size(min = 1, max = 32)  @Valid @RequestParam(value = "method", required = false) @Nullable String method,
+        @Size(min = 1, max = 500)  @RequestParam(value = "status", required = false) @Nullable List<@Min(100) @Max(599)Integer> status,
+        @Pattern(regexp = "^[1-5]xx$")  @Valid @RequestParam(value = "statusClass", required = false) @Nullable String statusClass,
+        @Pattern(regexp = "^/.*$") @Size(min = 1, max = 200)  @Valid @RequestParam(value = "route", required = false) @Nullable String route,
+        @Size(min = 2, max = 45)  @Valid @RequestParam(value = "remoteAddr", required = false) @Nullable String remoteAddr,
+        @Min(value = 1L) @Max(value = 9007199254740991L)  @Valid @RequestParam(value = "userId", required = false) @Nullable Long userId,
+        @Min(value = 1) @Max(value = 100)  @Valid @RequestParam(value = "limit", required = false, defaultValue = "20") Integer limit,
+        @Pattern(regexp = "^[A-Za-z0-9_-]+$") @Size(min = 1, max = 1024)  @Valid @RequestParam(value = "cursor", required = false) @Nullable String cursor
     );
 
 

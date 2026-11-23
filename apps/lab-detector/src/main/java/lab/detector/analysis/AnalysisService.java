@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import lab.contracts.detector.model.AccessLog;
 import lab.contracts.detector.model.AnalysisStatus;
+import lab.contracts.detector.model.EventPage;
 import lab.contracts.detector.model.Incident;
 import lab.contracts.detector.model.IncidentPage;
 import lab.contracts.detector.model.LogBatch;
@@ -114,6 +115,21 @@ public class AnalysisService {
             throw conflict("Итоговые инциденты доступны только после COMPLETED");
         }
         return new IncidentPage(repository.incidents(id, limit, offset), repository.incidentCount(id));
+    }
+
+    @Transactional(readOnly = true, timeout = 5)
+    public EventPage events(EventFilter filter, int limit, String cursor) {
+        if (limit < 1 || limit > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Размер страницы должен быть от 1 до 100");
+        }
+        var position = EventCursor.decode(cursor, filter, codec.jsonMapper());
+        if (filter.runId() != null) {
+            require(filter.runId(), false);
+        }
+        var rows = repository.events(filter, position, limit + 1);
+        var items = rows.size() > limit ? rows.subList(0, limit) : rows;
+        String next = rows.size() > limit ? EventCursor.encode(items.getLast(), filter, codec.jsonMapper()) : null;
+        return new EventPage(items, next);
     }
 
     @Transactional
