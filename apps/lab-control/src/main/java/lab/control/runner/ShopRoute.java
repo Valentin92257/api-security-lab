@@ -4,32 +4,26 @@ import java.net.URI;
 import java.util.regex.Pattern;
 
 enum ShopRoute {
-    REGISTER("POST", "/auth/register", "RegisterRequest", 201, "User"),
-    LOGIN("POST", "/auth/login", "LoginRequest", 200, "LoginResult"),
-    USER("GET", "/users/([1-9][0-9]{0,15})", null, 200, "User"),
-    PRODUCTS("GET", "/products", null, 200, "Products"),
-    CART("GET", "/cart", null, 200, "Cart"),
-    CART_ITEM("PUT", "/cart/items/([1-9][0-9]{0,15})", "SetQuantityRequest", 200, "Cart"),
-    CART_COUPON("PUT", "/cart/coupon", "SelectCouponRequest", 200, "Cart"),
-    CHECKOUT("POST", "/orders", "CheckoutRequest", 201, "Order"),
-    ORDER("GET", "/orders/([1-9][0-9]{0,15})", null, 200, "Order5");
+    REGISTER("POST", "/auth/register", 201, "User"),
+    LOGIN("POST", "/auth/login", 200, "LoginResult"),
+    USER("GET", "/users/([1-9][0-9]{0,15})", 200, "User"),
+    PRODUCTS("GET", "/products", 200, "Products"),
+    CART("GET", "/cart", 200, "Cart"),
+    CART_ITEM("PUT", "/cart/items/([1-9][0-9]{0,15})", 200, "Cart"),
+    CART_COUPON("PUT", "/cart/coupon", 200, "Cart"),
+    CHECKOUT("POST", "/orders", 201, "Order"),
+    ORDER("GET", "/orders/([1-9][0-9]{0,15})", 200, "Order5");
 
     private final String method;
     private final Pattern path;
-    private final String requestSchema;
     private final int successStatus;
     private final String responseSchema;
 
-    ShopRoute(String method, String path, String requestSchema, int successStatus, String responseSchema) {
+    ShopRoute(String method, String path, int successStatus, String responseSchema) {
         this.method = method;
         this.path = Pattern.compile("/api/v1" + path);
-        this.requestSchema = requestSchema;
         this.successStatus = successStatus;
         this.responseSchema = responseSchema;
-    }
-
-    String requestSchema() {
-        return requestSchema;
     }
 
     int successStatus() {

@@ -4,20 +4,25 @@ import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 import lab.contracts.json.ContractJsonCodec;
+import lab.contracts.json.ContractValidationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class ShopContractValidatorTest {
     private static final UUID REQUEST_ID = UUID.fromString("e0729341-b0d3-40e1-9870-4b9e41c8af8a");
@@ -36,14 +41,14 @@ class ShopContractValidatorTest {
 
     private final ShopContractValidator validator = new ShopContractValidator(new ContractJsonCodec());
 
-    @ParameterizedTest
-    @MethodSource("requests")
-    void validatesRequestSchemas(ShopRoute route, String body) {
-        validator.validateRequest(route, body);
+    @Test
+    void validatesLoginRequestSchema() {
+        validator.validateLoginRequest("{\"login\":\"test_user\",\"password\":\"password\"}");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {
+            " \n", "null", "[]",
             "{}",
             "{\"login\":1,\"password\":\"password-secret\"}",
             "{\"login\":\"test_user\",\"password\":null}",
@@ -53,18 +58,17 @@ class ShopContractValidatorTest {
             "{\"login\":\"test_user\",\"password\":\"password-secret\",}"
     })
     void rejectsInvalidRequestsWithoutExposingPayload(String body) {
-        assertThatThrownBy(() -> validator.validateRequest(ShopRoute.LOGIN, body))
-                .isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> validator.validateLoginRequest(body))
+                .isInstanceOf(ContractValidationException.class)
                 .hasMessage("Shop request violates contract").hasNoCause();
     }
 
-    @Test
-    void rejectsMissingAndUnexpectedRequestBodies() {
-        assertThatThrownBy(() -> validator.validateRequest(ShopRoute.LOGIN, null))
-                .hasMessage("Shop request violates contract").hasNoCause();
-        assertThatThrownBy(() -> validator.validateRequest(ShopRoute.PRODUCTS, "{}"))
-                .hasMessage("Shop request violates contract").hasNoCause();
-        assertThatThrownBy(() -> validator.validateRequest(ShopRoute.CART_ITEM, "{\"quantity\":0}"))
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\n"})
+    void rejectsMissingLoginRequestBody(String body) {
+        assertThatThrownBy(() -> validator.validateLoginRequest(body))
+                .isInstanceOf(ContractValidationException.class)
                 .hasMessage("Shop request violates contract").hasNoCause();
     }
 
@@ -87,8 +91,38 @@ class ShopContractValidatorTest {
         assertThat(json.get("code").asString()).isEqualTo(code);
     }
 
+    @Test
+    void acceptsUppercaseProblemRequestId() {
+        String body = problem(401, "UNAUTHORIZED", REQUEST_ID)
+                .replace(REQUEST_ID.toString(), REQUEST_ID.toString().toUpperCase(Locale.ROOT));
+
+        validator.validateResponse(ShopRoute.LOGIN, 401, headers("application/problem+json"), bytes(body), REQUEST_ID);
+    }
+
+    @Test
+    void propagatesUnexpectedFailures() {
+        var codec = mock(ContractJsonCodec.class);
+        var failure = new IllegalStateException("JSON mapper unavailable");
+        when(codec.jsonMapper()).thenThrow(failure);
+        var broken = new ShopContractValidator(codec);
+
+        assertThatThrownBy(() -> broken.validateLoginRequest("{\"login\":\"test_user\",\"password\":\"password\"}"))
+                .isSameAs(failure);
+        assertThatThrownBy(() -> broken.validateResponse(ShopRoute.LOGIN, 200, headers("application/json"),
+                bytes(LOGIN), REQUEST_ID)).isSameAs(failure);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    void rejectsMissingResponseBody(byte[] body) {
+        assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 200, headers("application/json"),
+                body, REQUEST_ID)).isInstanceOf(ContractValidationException.class)
+                .hasMessage("Shop response violates contract").hasNoCause();
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
+            " \n", "null", "[]",
             "{}",
             "{\"accessToken\":\"token-secret\",\"tokenType\":\"bearer\",\"expiresIn\":900}",
             "{\"accessToken\":\"token-secret\",\"tokenType\":\"Bearer\",\"expiresIn\":901}",
@@ -98,7 +132,7 @@ class ShopContractValidatorTest {
     })
     void rejectsMalformedResponsesWithoutExposingToken(String body) {
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 200, headers("application/json"),
-                bytes(body), REQUEST_ID)).isInstanceOf(IllegalArgumentException.class)
+                bytes(body), REQUEST_ID)).isInstanceOf(ContractValidationException.class)
                 .hasMessage("Shop response violates contract").hasNoCause();
     }
 
@@ -107,20 +141,22 @@ class ShopContractValidatorTest {
         String tooManyProducts = "[" + String.join(",", Collections.nCopies(101, PRODUCT)) + "]";
 
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.PRODUCTS, 200, headers("application/json"),
-                bytes(tooManyProducts), REQUEST_ID)).hasMessage("Shop response violates contract");
+                bytes(tooManyProducts), REQUEST_ID)).isInstanceOf(ContractValidationException.class)
+                .hasMessage("Shop response violates contract");
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.PRODUCTS, 200, headers("application/json"),
                 bytes("[" + PRODUCT.replace("\"id\":1", "\"id\":0") + "]"), REQUEST_ID))
-                .hasMessage("Shop response violates contract");
+                .isInstanceOf(ContractValidationException.class).hasMessage("Shop response violates contract");
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.USER, 200, headers("application/json"),
                 bytes(USER.replace("user@example.com", "invalid-email")), REQUEST_ID))
-                .hasMessage("Shop response violates contract");
+                .isInstanceOf(ContractValidationException.class).hasMessage("Shop response violates contract");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"text/html", "application/problem+json", "application/*", "*/*", "invalid"})
     void rejectsUnexpectedResponseContentType(String mediaType) {
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 200, headers(mediaType),
-                bytes(LOGIN), REQUEST_ID)).hasMessage("Shop response violates contract").hasNoCause();
+                bytes(LOGIN), REQUEST_ID)).isInstanceOf(ContractValidationException.class)
+                .hasMessage("Shop response violates contract").hasNoCause();
     }
 
     @Test
@@ -133,7 +169,8 @@ class ShopContractValidatorTest {
                 HttpHeaders.of(Map.of("Content-Type", List.of("application/json"),
                         "X-Request-Id", List.of(UUID.randomUUID().toString())), (name, value) -> true))) {
             assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 200, headers,
-                    bytes(LOGIN), REQUEST_ID)).hasMessage("Shop response violates contract").hasNoCause();
+                    bytes(LOGIN), REQUEST_ID)).isInstanceOf(ContractValidationException.class)
+                    .hasMessage("Shop response violates contract").hasNoCause();
         }
     }
 
@@ -141,23 +178,13 @@ class ShopContractValidatorTest {
     void checksProblemCorrelationAndHttpStatus() {
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 401, headers("application/problem+json"),
                 bytes(problem(429, "RATE_LIMITED", REQUEST_ID)), REQUEST_ID))
-                .hasMessage("Shop response violates contract").hasNoCause();
+                .isInstanceOf(ContractValidationException.class).hasMessage("Shop response violates contract").hasNoCause();
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 401, headers("application/problem+json"),
                 bytes(problem(401, "UNAUTHORIZED", UUID.randomUUID())), REQUEST_ID))
-                .hasMessage("Shop response violates contract").hasNoCause();
+                .isInstanceOf(ContractValidationException.class).hasMessage("Shop response violates contract").hasNoCause();
         assertThatThrownBy(() -> validator.validateResponse(ShopRoute.LOGIN, 201, headers("application/json"),
-                bytes(LOGIN), REQUEST_ID)).hasMessage("Shop response violates contract").hasNoCause();
-    }
-
-    private static Stream<Arguments> requests() {
-        return Stream.of(
-                Arguments.of(ShopRoute.REGISTER, "{\"login\":\"test_user\",\"password\":\"password\",\"name\":\"Test\",\"email\":\"user@example.com\"}"),
-                Arguments.of(ShopRoute.LOGIN, "{\"login\":\"test_user\",\"password\":\"password\"}"),
-                Arguments.of(ShopRoute.CART_ITEM, "{\"quantity\":1}"),
-                Arguments.of(ShopRoute.CART_COUPON, "{\"code\":\"WELCOME\"}"),
-                Arguments.of(ShopRoute.CHECKOUT, "{\"cartRevision\":0,\"quotedTotal\":100}"),
-                Arguments.of(ShopRoute.USER, null), Arguments.of(ShopRoute.PRODUCTS, null),
-                Arguments.of(ShopRoute.CART, null), Arguments.of(ShopRoute.ORDER, null));
+                bytes(LOGIN), REQUEST_ID)).isInstanceOf(ContractValidationException.class)
+                .hasMessage("Shop response violates contract").hasNoCause();
     }
 
     private static Stream<Arguments> responses() {

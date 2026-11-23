@@ -42,32 +42,41 @@ public class CredentialStuffingScenario {
             if (Thread.currentThread().isInterrupted()) {
                 break;
             }
-            var body = json.jsonMapper().createObjectNode()
-                    .put("login", attempt.actor().login()).put("password", attempt.password());
-            String payload = json.jsonMapper().writeValueAsString(body);
-            validator.validateRequest(ShopRoute.LOGIN, payload);
-            var login = steps.execute(trialId, runId, new StepRequest(target, "POST", "/api/v1/auth/login",
-                    Map.of("Content-Type", "application/json", "X-Forwarded-For", CLIENT_IP), payload));
-            results.add(login.result());
-            if (login.result().outcome() == StepOutcome.INTERRUPTED || Thread.currentThread().isInterrupted()) {
+            StepRequest request = loginRequest(target, attempt);
+            if (Thread.currentThread().isInterrupted()) {
                 break;
             }
-            if (login.result().outcome() == StepOutcome.RESPONSE
-                    && Integer.valueOf(200).equals(login.result().status()) && login.body() != null) {
-                String token = login.body().get("accessToken").asString();
-                if (Thread.currentThread().isInterrupted()) {
-                    break;
-                }
-                var profile = steps.execute(trialId, runId, new StepRequest(target, "GET",
-                        "/api/v1/users/" + attempt.actor().userId(),
-                        Map.of("Authorization", "Bearer " + token, "X-Forwarded-For", CLIENT_IP), null));
-                results.add(profile.result());
-                if (profile.result().outcome() == StepOutcome.INTERRUPTED) {
-                    break;
-                }
+            var login = steps.execute(trialId, runId, request);
+            results.add(login.result());
+            if (login.result().outcome() == StepOutcome.INTERRUPTED) {
+                break;
+            }
+            if (login.result().outcome() != StepOutcome.RESPONSE
+                    || !Integer.valueOf(200).equals(login.result().status()) || login.body() == null) {
+                continue;
+            }
+            String token = login.body().get("accessToken").asString();
+            if (Thread.currentThread().isInterrupted()) {
+                break;
+            }
+            var profile = steps.execute(trialId, runId, new StepRequest(target, "GET",
+                    "/api/v1/users/" + attempt.actor().userId(),
+                    Map.of("Authorization", "Bearer " + token, "X-Forwarded-For", CLIENT_IP), null));
+            results.add(profile.result());
+            if (profile.result().outcome() == StepOutcome.INTERRUPTED) {
+                break;
             }
         }
         return List.copyOf(results);
+    }
+
+    private StepRequest loginRequest(GatewayTarget target, LoginAttempt attempt) {
+        var body = json.jsonMapper().createObjectNode()
+                .put("login", attempt.actor().login()).put("password", attempt.password());
+        String payload = json.jsonMapper().writeValueAsString(body);
+        validator.validateLoginRequest(payload);
+        return new StepRequest(target, "POST", "/api/v1/auth/login",
+                Map.of("Content-Type", "application/json", "X-Forwarded-For", CLIENT_IP), payload);
     }
 
     private List<LoginAttempt> prepare(long seed, List<Actor> actors) {

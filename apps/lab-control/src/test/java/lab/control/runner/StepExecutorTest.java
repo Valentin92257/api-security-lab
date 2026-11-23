@@ -13,6 +13,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
+import lab.contracts.json.ContractValidationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -24,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -35,7 +37,8 @@ import static org.mockito.Mockito.when;
 class StepExecutorTest {
     private final HttpClient client = mock(HttpClient.class);
     private final StepResultSink results = mock(StepResultSink.class);
-    private final StepExecutor executor = new StepExecutor(client, results, mock(ShopContractValidator.class));
+    private final ShopContractValidator contracts = mock(ShopContractValidator.class);
+    private final StepExecutor executor = new StepExecutor(client, results, contracts);
     private final UUID trialId = UUID.randomUUID();
     private final UUID runId = UUID.randomUUID();
 
@@ -229,6 +232,33 @@ class StepExecutorTest {
         assertThat(result.outcome()).isEqualTo(outcome);
         assertThat(result.toString()).doesNotContain("private-token");
         verify(results).save(result);
+    }
+
+    @Test
+    void savesContractViolationWithoutResponseBodyOrErrorDetails() throws Exception {
+        responds(200);
+        when(contracts.validateResponse(any(), anyInt(), any(), any(), any()))
+                .thenThrow(new ContractValidationException("private-token"));
+
+        var response = executor.execute(trialId, runId, step(GatewayTarget.PROTECTED, "GET", "/api/v1/products"));
+
+        assertThat(response.result().outcome()).isEqualTo(StepOutcome.CONTRACT_VIOLATION);
+        assertThat(response.result().status()).isEqualTo(200);
+        assertThat(response.body()).isNull();
+        assertThat(response.toString()).doesNotContain("private-token");
+        verify(results).save(response.result());
+    }
+
+    @Test
+    void doesNotClassifyValidatorFailuresAsShopContractViolations() throws Exception {
+        responds(200);
+        var failure = new IllegalArgumentException("Validator configuration unavailable");
+        when(contracts.validateResponse(any(), anyInt(), any(), any(), any())).thenThrow(failure);
+
+        assertThatThrownBy(() -> executor.execute(trialId, runId,
+                step(GatewayTarget.PROTECTED, "GET", "/api/v1/products"))).isSameAs(failure);
+
+        verifyNoInteractions(results);
     }
 
     @Test

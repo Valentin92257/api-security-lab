@@ -7,6 +7,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import lab.contracts.json.ContractJsonCodec;
+import lab.contracts.json.ContractValidationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -60,7 +61,7 @@ class CredentialStuffingScenarioTest {
                         && actor.password().equals(body.get("password").asString())))
                 .count();
         assertThat(valid).isEqualTo(3);
-        verify(validator, times(200)).validateRequest(eq(ShopRoute.LOGIN), anyString());
+        verify(validator, times(200)).validateLoginRequest(anyString());
     }
 
     @Test
@@ -124,11 +125,11 @@ class CredentialStuffingScenarioTest {
 
     @Test
     void validatesTheRequestBeforeSending() {
-        doThrow(new IllegalArgumentException("Request rejected"))
-                .when(validator).validateRequest(eq(ShopRoute.LOGIN), anyString());
+        doThrow(new ContractValidationException("Request rejected"))
+                .when(validator).validateLoginRequest(anyString());
 
         assertThatThrownBy(() -> scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(ContractValidationException.class);
 
         verifyNoInteractions(steps);
     }
@@ -171,6 +172,22 @@ class CredentialStuffingScenarioTest {
             assertThat(scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
 
             verifyNoInteractions(steps, validator);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void doesNotSendWhenInterruptedDuringRequestValidation() {
+        doAnswer(call -> {
+            Thread.currentThread().interrupt();
+            return null;
+        }).when(validator).validateLoginRequest(anyString());
+
+        try {
+            assertThat(scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
+
+            verifyNoInteractions(steps);
         } finally {
             Thread.interrupted();
         }

@@ -18,6 +18,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import lab.contracts.json.ContractValidationException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -81,7 +82,7 @@ public class StepExecutor {
                 try {
                     responseBody = contracts.validateResponse(operation, status, response.headers(),
                             response.body(), requestId);
-                } catch (IllegalArgumentException error) {
+                } catch (ContractValidationException error) {
                     outcome = StepOutcome.CONTRACT_VIOLATION;
                 }
             }
