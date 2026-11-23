@@ -4,25 +4,37 @@ import java.net.URI;
 import java.util.regex.Pattern;
 
 enum ShopRoute {
-    REGISTER("POST", "/auth/register"),
-    LOGIN("POST", "/auth/login"),
-    USER("GET", "/users/([1-9][0-9]{0,15})"),
-    PRODUCTS("GET", "/products"),
-    CART("GET", "/cart"),
-    CART_ITEM("PUT", "/cart/items/([1-9][0-9]{0,15})"),
-    CART_COUPON("PUT", "/cart/coupon"),
-    CHECKOUT("POST", "/orders"),
-    ORDER("GET", "/orders/([1-9][0-9]{0,15})");
+    REGISTER("POST", "/auth/register", 201, "User"),
+    LOGIN("POST", "/auth/login", 200, "LoginResult"),
+    USER("GET", "/users/([1-9][0-9]{0,15})", 200, "User"),
+    PRODUCTS("GET", "/products", 200, "Products"),
+    CART("GET", "/cart", 200, "Cart"),
+    CART_ITEM("PUT", "/cart/items/([1-9][0-9]{0,15})", 200, "Cart"),
+    CART_COUPON("PUT", "/cart/coupon", 200, "Cart"),
+    CHECKOUT("POST", "/orders", 201, "Order"),
+    ORDER("GET", "/orders/([1-9][0-9]{0,15})", 200, "Order5");
 
     private final String method;
     private final Pattern path;
+    private final int successStatus;
+    private final String responseSchema;
 
-    ShopRoute(String method, String path) {
+    ShopRoute(String method, String path, int successStatus, String responseSchema) {
         this.method = method;
         this.path = Pattern.compile("/api/v1" + path);
+        this.successStatus = successStatus;
+        this.responseSchema = responseSchema;
     }
 
-    static URI validate(String method, String value) {
+    int successStatus() {
+        return successStatus;
+    }
+
+    String responseSchema() {
+        return responseSchema;
+    }
+
+    static URI parse(String value) {
         URI route;
         try {
             route = URI.create(value);
@@ -32,6 +44,10 @@ enum ShopRoute {
         if (route.isAbsolute() || route.getRawAuthority() != null || route.getRawFragment() != null) {
             throw new IllegalArgumentException("Step route must be a local catalog path");
         }
+        return route;
+    }
+
+    static ShopRoute match(String method, URI route) {
         for (ShopRoute entry : values()) {
             var match = entry.path.matcher(route.getRawPath());
             if (entry.method.equals(method) && match.matches()) {
@@ -42,7 +58,7 @@ enum ShopRoute {
                 if (query != null && (entry != PRODUCTS || !query.startsWith("q=") || query.contains("&"))) {
                     break;
                 }
-                return route;
+                return entry;
             }
         }
         throw new IllegalArgumentException("Step route is not in the catalog");

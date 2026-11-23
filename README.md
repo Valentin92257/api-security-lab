@@ -5,6 +5,51 @@ Java 25 / Spring Boot 4.0.8. Maven-модули: общая библиотека
 Runner - пакет `lab.control.runner` внутри control.
 Shop запускается в двух контейнерах с профилями `vulnerable` и `protected`.
 
+## Credential stuffing
+
+`ScenarioRunner` запускает сценарий в отдельном потоке внутри Control. Нужны существующий trial,
+runId, режим Gateway, seed и три подготовленных пользователя выбранного режима:
+
+```java
+var actors = List.of(
+        new CredentialStuffingScenario.Actor(1, "alice", "fixture-alice"),
+        new CredentialStuffingScenario.Actor(2, "bob", "fixture-bob"),
+        new CredentialStuffingScenario.Actor(3, "carol", "fixture-carol"));
+RunHandle handle = runner.start(trialId, runId,
+        run -> scenario.run(run, GatewayTarget.PROTECTED, 42, actors));
+CompletionStage<RunResult> completion = handle.completion();
+```
+
+Один запуск делает 200 login: три с верными парами и 197 с неверными паролями.
+Seed определяет пары и порядок попыток. Одинаковые seed и пользователи дают одинаковые
+login-запросы независимо от порядка пользователей во входном списке. После каждого
+успешного login идет GET своего профиля с полученным JWT. RequestId, время и JWT могут отличаться.
+
+Runner проверяет login-запросы сценария и ответы Shop по существующим OpenAPI/JSON Schema.
+Некорректный ответ сохраняется как `CONTRACT_VIOLATION` с HTTP-статусом, без тела и деталей ошибки.
+Общей проверки схемы исходящих запросов нет: другим атакам нужны намеренно некорректные данные.
+Ответ ограничен 2 MiB, получение HTTP-ответа - 5 секундами; редиректы запрещены.
+В `control.step_results` сохраняются только метаданные. Пароли и JWT используются в памяти.
+
+Каждый запуск создает свое состояние сценария. Login и чтение профиля не меняют бизнес-данные.
+Fixture/Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
+
+Runner принимает один активный прогон; повторный запуск до завершения дает `RejectedExecutionException`.
+На прогон разрешено до 400 отправок, результаты хранятся в ограниченном списке метаданных.
+Общий deadline задается `lab.runner.run-timeout`, по умолчанию `PT5M` (5 минут).
+Он включает подготовку и сохранение шагов. Отмена и deadline запрещают новые отправки
+и отменяют ожидаемый HTTP-запрос, сохраняя его исход как `INTERRUPTED` или `TIMEOUT`.
+Запись результата в БД не прерывается; итог может прийти позже deadline, после окончания записи.
+
+`handle.cancel()` только запрашивает остановку. `completion()` возвращает защищенный `CompletionStage`:
+отмена его копии `CompletableFuture` не отменяет прогон и не подтверждает остановку.
+`RunResult` содержит исход (`COMPLETED`, `CANCELLED`, `TIMED_OUT`, `FAILED`), число начатых шагов
+и сохраненные метаданные. Ошибка сохранения дает `FAILED` и запрещает следующие отправки.
+`COMPLETED` означает выполнение сценария, оценку успеха атаки делает Evaluator.
+Сценарии передаются только доверенным Java-кодом Control, без пользовательского кода и HTTP endpoints.
+Продолжение orchestration после `completion()` выполняется на собственном executor Control.
+Отмена HTTP не подтверждает завершение SQL в Shop; это проверяется отдельно через Runtime.
+
 ## Запуск
 
 Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).
