@@ -26,7 +26,9 @@ class DetectorRunsIntegrationTest extends AbstractDetectorApiIntegrationTest {
         assertThat(body(repeated)).isEqualTo(body(created));
         assertThat(body(control("GET", path(id), null))).isEqualTo(body(created));
         assertThat(count("producer_progress", id)).isEqualTo(2);
-        assertProblem(control("GET", path(id) + "/incidents", null), 409, "CONFLICT");
+        var incidents = control("GET", path(id) + "/incidents", null);
+        assertThat(incidents.statusCode()).isEqualTo(200);
+        assertThat(body(incidents).get("items")).isEmpty();
         assertThat(engine.calls.get()).isZero();
     }
 

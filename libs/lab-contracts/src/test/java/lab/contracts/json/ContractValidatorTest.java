@@ -4,6 +4,7 @@ import lab.contracts.control.model.CreateTrialRequest;
 import lab.contracts.control.model.RunReport;
 import lab.contracts.control.model.TrialPage;
 import lab.contracts.detector.model.AccessLog;
+import lab.contracts.detector.model.EventPage;
 import lab.contracts.detector.model.IncidentPage;
 import lab.contracts.detector.model.LogBatch;
 import lab.contracts.runtime.model.RuntimeStatus;
@@ -39,6 +40,9 @@ class ContractValidatorTest {
                 Arguments.of(IncidentPage.class, "{\"total\":0}", "items"),
                 Arguments.of(TrialPage.class, "{\"total\":0}", "items"),
                 Arguments.of(IncidentPage.class, "{\"items\":[null],\"total\":1}", "items"),
+                Arguments.of(EventPage.class, "{\"items\":[]}", "nextCursor"),
+                Arguments.of(EventPage.class, "{\"items\":[null],\"nextCursor\":null}", "items"),
+                Arguments.of(EventPage.class, "{\"items\":[],\"nextCursor\":\"\"}", "nextCursor"),
                 Arguments.of(RunReport.class, """
                         {"runId":"00000000-0000-4000-8000-000000000020",
                          "mode":"VULNERABLE","state":"INCONCLUSIVE","incidents":null}

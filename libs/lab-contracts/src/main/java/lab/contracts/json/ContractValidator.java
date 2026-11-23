@@ -16,6 +16,8 @@ import lab.contracts.control.model.TrialPage;
 import lab.contracts.control.model.TrialReport;
 import lab.contracts.detector.model.AccessLog;
 import lab.contracts.detector.model.AnalysisStatus;
+import lab.contracts.detector.model.EventItem;
+import lab.contracts.detector.model.EventPage;
 import lab.contracts.detector.model.FinishAnalysisRequest;
 import lab.contracts.detector.model.Incident;
 import lab.contracts.detector.model.IncidentPage;
@@ -54,6 +56,8 @@ public class ContractValidator {
             Map.entry(AccessLog.class, "logs.yaml"),
             Map.entry(LogBatch.class, "logs.yaml"),
             Map.entry(AnalysisStatus.class, "detector.yaml"),
+            Map.entry(EventItem.class, "detector.yaml"),
+            Map.entry(EventPage.class, "detector.yaml"),
             Map.entry(FinishAnalysisRequest.class, "detector.yaml"),
             Map.entry(Incident.class, "detector.yaml"),
             Map.entry(IncidentPage.class, "detector.yaml"),

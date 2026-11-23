@@ -1,16 +1,21 @@
 package lab.detector.http;
 
+import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
 import jakarta.servlet.http.HttpServletRequest;
 import lab.contracts.detector.api.DefaultApi;
 import lab.contracts.detector.model.AnalysisStatus;
+import lab.contracts.detector.model.EventPage;
 import lab.contracts.detector.model.FinishAnalysisRequest;
 import lab.contracts.detector.model.IncidentPage;
 import lab.contracts.detector.model.LogBatch;
 import lab.detector.analysis.AnalysisService;
+import lab.detector.analysis.EventFilter;
 import lab.detector.analysis.FinishSpec;
 import lab.detector.security.ServiceAccessFilter;
 import org.springframework.http.HttpStatus;
@@ -26,6 +31,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 public class DetectorController implements DefaultApi {
+    private static final Set<String> EVENT_PARAMETERS = Set.of("runId", "from", "to", "producer", "requestId",
+            "method", "status", "statusClass", "route", "remoteAddr", "userId", "limit", "cursor");
     private final AnalysisService analyses;
     private final HttpServletRequest request;
 
@@ -83,6 +90,27 @@ public class DetectorController implements DefaultApi {
     public ResponseEntity<IncidentPage> listFinalIncidents(UUID runId, Integer limit, Integer offset) {
         return execute(runId, () -> ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON)
                 .body(analyses.incidents(runId, limit, offset)));
+    }
+
+    @Override
+    public ResponseEntity<EventPage> listEvents(UUID runId, OffsetDateTime from, OffsetDateTime to, String producer,
+                                               UUID requestId, String method, List<Integer> status, String statusClass,
+                                               String route, String remoteAddr, Long userId, Integer limit, String cursor) {
+        request.getParameterMap().forEach((name, values) -> {
+            if (!EVENT_PARAMETERS.contains(name)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Неизвестный параметр просмотра событий");
+            }
+            if (!name.equals("status") && values.length != 1) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Параметр " + name + " нельзя повторять");
+            }
+            if (Arrays.stream(values).anyMatch(String::isBlank)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Параметр " + name + " не должен быть пустым");
+            }
+        });
+        var filter = new EventFilter(runId, from == null ? null : from.toInstant(), to == null ? null : to.toInstant(),
+                producer, requestId, method, status, statusClass, route, remoteAddr, userId);
+        // Reading events must never fail an analysis through execute().
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(analyses.events(filter, limit, cursor));
     }
 
     private <T> T execute(UUID id, Supplier<T> operation) {

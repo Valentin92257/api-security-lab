@@ -33,5 +33,5 @@ lab:
     control-token: ${LAB_DETECTOR_CONTROL_TOKEN:}
     gateway-token: ${LAB_DETECTOR_GATEWAY_TOKEN:}
     shop-token: ${LAB_DETECTOR_SHOP_TOKEN:}
-    poll-interval-ms: 100
+    poll-interval-ms: 500
     max-incidents: 10000

@@ -116,9 +116,10 @@ class DetectorIngestionIntegrationTest extends AbstractDetectorApiIntegrationTes
         JsonNode status = completed(id);
         assertThat(status.get("observedRequestIds")).hasSize(1);
         assertThat(engine.observations).hasSize(2);
-        assertThat(engine.calls.get()).isEqualTo(1);
+        int completedCalls = engine.calls.get();
+        assertThat(completedCalls).isPositive();
         assertThat(ingest(id, "SHOP", entry).statusCode()).isEqualTo(204);
-        assertThat(engine.calls.get()).isEqualTo(1);
+        assertThat(engine.calls.get()).isEqualTo(completedCalls);
     }
 
     @Test

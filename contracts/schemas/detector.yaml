@@ -1,5 +1,30 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $defs:
+  EventItem:
+    title: EventItem
+    type: object
+    properties:
+      runId: {type: string, format: uuid}
+      producer: {$ref: ./logs.yaml#/$defs/Producer}
+      log: {$ref: ./logs.yaml#/$defs/AccessLog}
+    required: [runId, producer, log]
+    additionalProperties: false
+  EventPage:
+    title: EventPage
+    type: object
+    properties:
+      items:
+        type: array
+        items: {$ref: '#/$defs/EventItem'}
+        minItems: 0
+        maxItems: 100
+      nextCursor:
+        type: [string, 'null']
+        minLength: 1
+        maxLength: 1024
+        pattern: '^[A-Za-z0-9_-]+$'
+    required: [items, nextCursor]
+    additionalProperties: false
   AnalysisStatus:
     title: AnalysisStatus
     type: object
