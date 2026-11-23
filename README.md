@@ -5,6 +5,32 @@ Java 25 / Spring Boot 4.0.8. Maven-модули: общая библиотека
 Runner - пакет `lab.control.runner` внутри control.
 Shop запускается в двух контейнерах с профилями `vulnerable` и `protected`.
 
+## Credential stuffing
+
+`CredentialStuffingScenario` запускается внутри Control. Ему нужны существующий trial,
+runId, режим Gateway, seed и три подготовленных пользователя выбранного режима:
+
+```java
+scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, List.of(
+        new CredentialStuffingScenario.Actor(1, "alice", "fixture-alice"),
+        new CredentialStuffingScenario.Actor(2, "bob", "fixture-bob"),
+        new CredentialStuffingScenario.Actor(3, "carol", "fixture-carol")));
+```
+
+Один запуск делает 200 login: три с верными парами и 197 с неверными паролями.
+Seed определяет пары и порядок попыток. Одинаковые seed и пользователи дают одинаковые
+login-запросы независимо от порядка пользователей во входном списке. После каждого
+успешного login идет GET своего профиля с полученным JWT. RequestId, время и JWT могут отличаться.
+
+Runner проверяет login-запросы сценария и ответы Shop по существующим OpenAPI/JSON Schema.
+Некорректный ответ сохраняется как `CONTRACT_VIOLATION` с HTTP-статусом, без тела и деталей ошибки.
+Общей проверки схемы исходящих запросов нет: другим атакам нужны намеренно некорректные данные.
+Ответ ограничен 2 MiB, получение HTTP-ответа - 5 секундами; редиректы запрещены.
+В `control.step_results` сохраняются только метаданные. Пароли и JWT используются в памяти.
+
+Каждый запуск создает свое состояние сценария. Login и чтение профиля не меняют бизнес-данные.
+Fixture/Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
+
 ## Запуск
 
 Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).

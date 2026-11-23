@@ -20,25 +20,31 @@ import java.util.concurrent.TimeoutException;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 @Component
 public class StepExecutor {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
+    private static final long MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private static final Set<String> HEADERS = Set.of(
             "authorization", "content-type", "idempotency-key", "x-forwarded-for");
 
     private final HttpClient client;
     private final StepResultSink results;
+    private final ShopContractValidator contracts;
 
-    public StepExecutor(@Qualifier("runnerClient") HttpClient client, StepResultSink results) {
+    public StepExecutor(@Qualifier("runnerClient") HttpClient client, StepResultSink results,
+                        ShopContractValidator contracts) {
         this.client = client;
         this.results = results;
+        this.contracts = contracts;
     }
 
-    public StepResult execute(UUID trialId, UUID runId, StepRequest step) {
+    public StepResponse execute(UUID trialId, UUID runId, StepRequest step) {
         Objects.requireNonNull(trialId);
         Objects.requireNonNull(runId);
-        URI route = ShopRoute.validate(step.method(), step.route());
+        URI route = ShopRoute.parse(step.route());
+        ShopRoute operation = ShopRoute.match(step.method(), route);
         UUID requestId = UUID.randomUUID();
         var builder = HttpRequest.newBuilder(step.target().resolve(route))
                 .timeout(TIMEOUT)
@@ -50,7 +56,11 @@ public class StepExecutor {
             if (!HEADERS.contains(normalized) || !names.add(normalized)) {
                 throw new IllegalArgumentException("Unsupported step header");
             }
-            builder.header(name, value);
+            try {
+                builder.header(name, value);
+            } catch (IllegalArgumentException error) {
+                throw new IllegalArgumentException("Invalid step header");
+            }
         });
         var body = step.body() == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofString(step.body());
@@ -59,12 +69,22 @@ public class StepExecutor {
         long started = System.nanoTime();
         Integer status = null;
         StepOutcome outcome;
+        JsonNode responseBody = null;
         boolean interrupted = false;
-        var pending = client.sendAsync(request, HttpResponse.BodyHandlers.discarding());
+        var pending = client.sendAsync(request, HttpResponse.BodyHandlers.limiting(
+                HttpResponse.BodyHandlers.ofByteArray(), MAX_RESPONSE_BYTES));
         try {
             var response = pending.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             status = response.statusCode();
             outcome = status >= 300 && status < 400 ? StepOutcome.REDIRECT_REJECTED : StepOutcome.RESPONSE;
+            if (outcome == StepOutcome.RESPONSE) {
+                try {
+                    responseBody = contracts.validateResponse(operation, status, response.headers(),
+                            response.body(), requestId);
+                } catch (IllegalArgumentException error) {
+                    outcome = StepOutcome.CONTRACT_VIOLATION;
+                }
+            }
         } catch (TimeoutException error) {
             pending.cancel(true);
             outcome = StepOutcome.TIMEOUT;
@@ -80,7 +100,7 @@ public class StepExecutor {
                 Duration.ofNanos(System.nanoTime() - started).toMillis());
         try {
             results.save(result);
-            return result;
+            return new StepResponse(result, responseBody);
         } finally {
             if (interrupted) {
                 Thread.currentThread().interrupt();

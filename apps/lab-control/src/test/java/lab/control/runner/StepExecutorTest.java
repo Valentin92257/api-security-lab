@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 class StepExecutorTest {
     private final HttpClient client = mock(HttpClient.class);
     private final StepResultSink results = mock(StepResultSink.class);
-    private final StepExecutor executor = new StepExecutor(client, results);
+    private final StepExecutor executor = new StepExecutor(client, results, mock(ShopContractValidator.class));
     private final UUID trialId = UUID.randomUUID();
     private final UUID runId = UUID.randomUUID();
 
@@ -45,7 +45,7 @@ class StepExecutorTest {
         responds(200);
         var before = OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS);
 
-        var result = executor.execute(trialId, runId, step(target, "GET", "/api/v1/products"));
+        var result = executor.execute(trialId, runId, step(target, "GET", "/api/v1/products")).result();
 
         var request = request();
         assertThat(request.uri().toString()).isEqualTo("http://lab-gateway:" + port + "/api/v1/products");
@@ -81,7 +81,7 @@ class StepExecutorTest {
     void acceptsCatalogRoutes(String method, String route) throws Exception {
         responds(200);
 
-        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, method, route));
+        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, method, route)).result();
 
         assertThat(request().uri().getRawPath()).isEqualTo(route.split("\\?", 2)[0]);
         assertThat(result.route()).isEqualTo(route.split("\\?", 2)[0]);
@@ -106,7 +106,7 @@ class StepExecutorTest {
     })
     void rejectsAddressesAndRoutesOutsideTheCatalogBeforeSending(String route) {
         assertThatThrownBy(() -> executor.execute(trialId, runId,
-                step(GatewayTarget.VULNERABLE, "GET", route)))
+                step(GatewayTarget.VULNERABLE, "GET", route)).result())
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(client, results);
@@ -121,7 +121,7 @@ class StepExecutorTest {
     })
     void rejectsMethodsAndQueriesOutsideTheCatalog(String method, String route) {
         assertThatThrownBy(() -> executor.execute(trialId, runId,
-                step(GatewayTarget.VULNERABLE, method, route)))
+                step(GatewayTarget.VULNERABLE, method, route)).result())
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(client, results);
@@ -133,8 +133,19 @@ class StepExecutorTest {
     void rejectsCallerHeadersOutsideTheAllowlist(String name) {
         assertThatThrownBy(() -> executor.execute(trialId, runId,
                 new StepRequest(GatewayTarget.PROTECTED, "GET", "/api/v1/products",
-                        Map.of(name, "forbidden"), null)))
+                        Map.of(name, "forbidden"), null)).result())
                 .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(client, results);
+    }
+
+    @Test
+    void rejectsInvalidHeaderValuesWithoutExposingCredentials() {
+        assertThatThrownBy(() -> executor.execute(trialId, runId,
+                new StepRequest(GatewayTarget.PROTECTED, "GET", "/api/v1/products",
+                        Map.of("Authorization", "Bearer private-token\r\nvalue"), null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Invalid step header").hasNoCause();
 
         verifyNoInteractions(client, results);
     }
@@ -149,7 +160,7 @@ class StepExecutorTest {
         var result = executor.execute(trialId, runId,
                 new StepRequest(GatewayTarget.PROTECTED, "POST", "/api/v1/auth/login",
                         Map.of("authorization", authorization, "content-type", "application/json",
-                                "idempotency-key", key, "x-forwarded-for", "192.0.2.1"), body));
+                                "idempotency-key", key, "x-forwarded-for", "192.0.2.1"), body)).result();
 
         var request = request();
         assertThat(request.headers().firstValue("Authorization")).contains(authorization);
@@ -168,7 +179,7 @@ class StepExecutorTest {
         responds(200);
 
         var result = executor.execute(trialId, runId,
-                step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products?q=private-search"));
+                step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products?q=private-search")).result();
 
         assertThat(request().uri().getRawQuery()).isEqualTo("q=private-search");
         assertThat(result.route()).isEqualTo("/api/v1/products");
@@ -181,8 +192,8 @@ class StepExecutorTest {
         responds(200);
         var step = step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products");
 
-        var first = executor.execute(trialId, runId, step);
-        var second = executor.execute(trialId, runId, step);
+        var first = executor.execute(trialId, runId, step).result();
+        var second = executor.execute(trialId, runId, step).result();
 
         var requests = ArgumentCaptor.forClass(HttpRequest.class);
         verify(client, times(2)).sendAsync(requests.capture(), any());
@@ -198,7 +209,7 @@ class StepExecutorTest {
     void savesRedirectAsRejectedWithoutAnotherAttempt(int status) throws Exception {
         responds(status);
 
-        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products"));
+        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
 
         assertThat(result.status()).isEqualTo(status);
         assertThat(result.outcome()).isEqualTo(StepOutcome.REDIRECT_REJECTED);
@@ -209,10 +220,10 @@ class StepExecutorTest {
     @ParameterizedTest
     @MethodSource("transportFailures")
     void savesTransportFailureWithoutExceptionDetails(IOException failure, StepOutcome outcome) {
-        when(client.<Void>sendAsync(any(HttpRequest.class), any()))
+        when(client.<byte[]>sendAsync(any(HttpRequest.class), any()))
                 .thenReturn(CompletableFuture.failedFuture(failure));
 
-        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products"));
+        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
 
         assertThat(result.status()).isNull();
         assertThat(result.outcome()).isEqualTo(outcome);
@@ -222,8 +233,8 @@ class StepExecutorTest {
 
     @Test
     void cancelsPendingRequestOnInterruptionAndRestoresTheInterruptFlagAfterSaving() {
-        var pending = new CompletableFuture<HttpResponse<Void>>();
-        when(client.<Void>sendAsync(any(HttpRequest.class), any())).thenAnswer(invocation -> {
+        var pending = new CompletableFuture<HttpResponse<byte[]>>();
+        when(client.<byte[]>sendAsync(any(HttpRequest.class), any())).thenAnswer(invocation -> {
             Thread.currentThread().interrupt();
             return pending;
         });
@@ -234,7 +245,7 @@ class StepExecutorTest {
 
         try {
             var result = executor.execute(trialId, runId,
-                    step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products"));
+                    step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
 
             assertThat(pending.isCancelled()).isTrue();
             assertThat(result.status()).isNull();
@@ -253,7 +264,7 @@ class StepExecutorTest {
         doThrow(failure).when(results).save(any(StepResult.class));
 
         assertThatThrownBy(() -> executor.execute(trialId, runId,
-                step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")))
+                step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result())
                 .isSameAs(failure);
 
         verify(client).sendAsync(any(HttpRequest.class), any());
@@ -278,9 +289,9 @@ class StepExecutorTest {
 
     @SuppressWarnings("unchecked")
     private void responds(int status) throws Exception {
-        HttpResponse<Void> response = mock(HttpResponse.class);
+        HttpResponse<byte[]> response = mock(HttpResponse.class);
         when(response.statusCode()).thenReturn(status);
-        when(client.<Void>sendAsync(any(HttpRequest.class), any()))
+        when(client.<byte[]>sendAsync(any(HttpRequest.class), any()))
                 .thenReturn(CompletableFuture.completedFuture(response));
     }
 }
