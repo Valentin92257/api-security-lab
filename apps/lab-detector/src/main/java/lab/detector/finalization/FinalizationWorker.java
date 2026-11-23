@@ -18,6 +18,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
@@ -39,9 +40,10 @@ public class FinalizationWorker implements DisposableBean {
         this.engine = engine;
         readTransaction = new TransactionTemplate(transactions);
         readTransaction.setReadOnly(true);
+        readTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
     }
 
-    @Scheduled(fixedDelayString = "${lab.detector.poll-interval-ms:100}")
+    @Scheduled(fixedDelayString = "${lab.detector.poll-interval-ms:500}")
     public void tick() {
         boolean claimed = false;
         try {
@@ -69,15 +71,18 @@ public class FinalizationWorker implements DisposableBean {
 
     private void process(UUID id) {
         try {
-            if (!analyses.ready(id)) {
-                return;
-            }
-            List<Incident> incidents = readTransaction.execute(status -> {
+            Result result = readTransaction.execute(status -> {
+                AnalysisService.Input input = analyses.input(id);
+                if (input == null) {
+                    return null;
+                }
                 try (var observations = repository.observations(id)) {
-                    return List.copyOf(engine.analyze(id, observations));
+                    return new Result(input, List.copyOf(engine.analyze(id, observations)));
                 }
             });
-            analyses.publish(id, incidents);
+            if (result != null) {
+                analyses.publish(id, result.input(), result.incidents());
+            }
         } catch (RuntimeException error) {
             LOG.error("Detector analysis failed for run {}: {}", id, error.getClass().getSimpleName());
             try {
@@ -88,6 +93,9 @@ public class FinalizationWorker implements DisposableBean {
         } finally {
             busy.set(false);
         }
+    }
+
+    private record Result(AnalysisService.Input input, List<Incident> incidents) {
     }
 
     @Override

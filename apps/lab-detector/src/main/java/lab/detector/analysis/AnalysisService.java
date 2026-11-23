@@ -19,6 +19,7 @@ import lab.detector.storage.DetectorRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -109,12 +110,14 @@ public class AnalysisService {
         return status(require(id, false));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public IncidentPage incidents(UUID id, int limit, int offset) {
-        if (!require(id, false).state().equals("COMPLETED")) {
-            throw conflict("Итоговые инциденты доступны только после COMPLETED");
+        RunSnapshot run = require(id, false);
+        if (run.state().equals("FAILED")) {
+            throw conflict("Анализ завершился ошибкой; итоговые инциденты недоступны");
         }
-        return new IncidentPage(repository.incidents(id, limit, offset), repository.incidentCount(id));
+        boolean live = !run.state().equals("COMPLETED");
+        return new IncidentPage(repository.incidents(id, limit, offset, live), repository.incidentCount(id, live));
     }
 
     @Transactional(readOnly = true, timeout = 5)
@@ -132,37 +135,61 @@ public class AnalysisService {
         return new EventPage(items, next);
     }
 
-    @Transactional
-    public boolean ready(UUID id) {
-        RunSnapshot run = require(id, true);
-        if (!run.state().equals("FINISHING")) {
-            return false;
+    /** Called inside the worker's repeatable-read transaction, before opening the log cursor. */
+    @Transactional(readOnly = true)
+    public Input input(UUID id) {
+        RunSnapshot run = require(id, false);
+        if (!run.active() || expired(run)) {
+            return null;
         }
-        if (expired(run)) {
-            repository.failed(id, "Analysis deadline exceeded");
-            return false;
+        boolean finalResult = run.state().equals("FINISHING") && repository.completeRanges(id);
+        if (!finalResult && run.inputRevision() == run.processedRevision()) {
+            return null;
         }
-        if (!repository.completeRanges(id)) {
-            return false;
-        }
-        checkedObserved(id);
-        return true;
+        return new Input(run.inputRevision(), finalResult, checkedObserved(id));
     }
 
     @Transactional
-    public void publish(UUID id, List<Incident> incidents) {
+    public void publish(UUID id, Input input, List<Incident> incidents) {
         RunSnapshot run = require(id, true);
-        if (!run.state().equals("FINISHING")) {
+        if (!run.active()) {
             return;
         }
         if (expired(run)) {
             repository.failed(id, "Analysis deadline exceeded");
             return;
         }
-        if (!repository.completeRanges(id)) {
-            throw new IllegalStateException("Cannot publish incomplete ranges");
+        if (input.revision() < run.processedRevision()
+                || input.revision() == run.processedRevision() && !input.finalResult()) {
+            return;
         }
-        Set<UUID> observed = checkedObserved(id);
+        if (input.revision() > run.inputRevision()) {
+            throw new IllegalStateException("Analysis revision exceeds saved input");
+        }
+        validateIncidents(incidents, input.observedRequestIds());
+        List<Incident> stable = IncidentIdentityResolver.reconcile(repository.liveIncidents(id), incidents);
+        validateIncidents(stable, input.observedRequestIds());
+        boolean finalResult = input.finalResult() && run.state().equals("FINISHING")
+                && input.revision() == run.inputRevision() && repository.completeRanges(id);
+        if (finalResult) {
+            for (Incident incident : stable) {
+                repository.insertIncident(id, incident);
+            }
+            repository.replaceLiveIncidents(id, List.of());
+        } else {
+            repository.replaceLiveIncidents(id, stable);
+        }
+        repository.processed(id, input.revision());
+        if (expired(run)) {
+            // Roll back the entire snapshot; the worker records FAILED separately.
+            throw new IllegalStateException("Analysis deadline exceeded during publication");
+        }
+        if (finalResult) {
+            repository.completed(id);
+        }
+    }
+
+    private void validateIncidents(List<Incident> incidents, Set<UUID> observed) {
         if (incidents.size() > maxIncidents) {
             throw new IllegalStateException("Incident limit exceeded");
         }
@@ -172,13 +199,7 @@ public class AnalysisService {
             if (!incidentIds.add(incident.getIncidentId()) || !observed.containsAll(incident.getRequestIds())) {
                 throw new IllegalStateException("Invalid incident evidence or repeated incidentId");
             }
-            repository.insertIncident(id, incident);
         }
-        if (expired(run)) {
-            // Roll back all incidents; the worker records FAILED in a separate transaction.
-            throw new IllegalStateException("Analysis deadline exceeded during publication");
-        }
-        repository.completed(id);
     }
 
     @Transactional
@@ -218,7 +239,7 @@ public class AnalysisService {
     }
 
     private boolean expired(RunSnapshot run) {
-        return !clock.instant().isBefore(run.finish().deadlineAt());
+        return run.finish() != null && !clock.instant().isBefore(run.finish().deadlineAt());
     }
 
     private static ResponseStatusException conflict(String message) {
@@ -226,5 +247,11 @@ public class AnalysisService {
     }
 
     public record Prepared(AnalysisStatus status, boolean created) {
+    }
+
+    public record Input(long revision, boolean finalResult, Set<UUID> observedRequestIds) {
+        public Input {
+            observedRequestIds = Set.copyOf(observedRequestIds);
+        }
     }
 }

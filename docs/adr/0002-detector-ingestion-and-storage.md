@@ -5,7 +5,8 @@
 ## Контекст и объём
 
 Detector получает access-логи Gateway и Shop напрямую по HTTP, хранит их и публикует
-результат только после получения полных последовательностей обоих producers.
+текущие инциденты по мере анализа поступающих логов. Итоговый результат фиксируется
+после получения полных последовательностей обоих producers.
 Источники требований:
 
 - [Detector API](../../contracts/detector-api.openapi.yaml) и
@@ -17,7 +18,9 @@ Detector получает access-логи Gateway и Shop напрямую по 
 В объём входят prepare/status, приём пачек, идемпотентность, finish с границами,
 ожидание полноты, публикация и чтение incidents. Правила обнаружения относятся к
 S2-20. HTTP API, миграции, подключение окружения в Compose и интеграционные тесты
-реализованы. На границе анализа используется явный `EmptyAnalysisEngine`.
+реализованы. На момент принятия ADR на границе анализа использовался явный
+`EmptyAnalysisEngine`. Сейчас его заменяет `RuleBasedAnalysisEngine` с фиксированными
+правилами входа CS-01–CS-05; [условия правил](../04-events-and-detection.md#реализованные-правила-входа).
 
 ## Компоненты
 
@@ -37,7 +40,7 @@ flowchart LR
     H --> A[AnalysisService]
     A --> DB[(lab_detector)]
     W[FinalizationWorker + deadline watchdog] --> DB
-    W --> E[AnalysisEngine: интерфейс для S2-20]
+    W --> E[AnalysisEngine: RuleBasedAnalysisEngine]
 ```
 
 Пакеты внутри `lab.detector`:
@@ -49,7 +52,7 @@ flowchart LR
 | `analysis` | Подготовка run, статус, атомарный ingest и сравнение повторов, фиксация finish и переходы состояний |
 | `storage` | JDBC repositories и транзакции; физическая схема принадлежит Detector |
 | `finalization` | Проверка полноты, дедлайны, фоновый анализ и публикация результата |
-| `engine` | Интерфейс анализа и пустая реализация; правила добавляются в S2-20 |
+| `engine` | Анализ согласованного снимка наблюдений, правила CS-01–CS-05 и объединение evidence в incidents |
 
 Общие DTO, строгий JSON и проверка схем переиспользуются из `libs/lab-contracts`.
 Detector не читает бизнес-БД, сценарии, labels и эталон Control.
@@ -113,6 +116,13 @@ producers или в Loki; архивный `docs/data/legacy-lab/lab-detector-ac
 | `producer_progress` | PK `(run_id, producer)`, FK на run; `received_count`, `max_sequence`, `last_sequence NULL`; ровно две строки GATEWAY/SHOP на run |
 | `access_logs` | PK `(run_id, producer, sequence)`, FK на progress; `payload jsonb`, `request_id uuid`, `event_time timestamptz`, `event_nanos`, `received_at` |
 | `incidents` | PK `(run_id, incident_id)`, FK на run; `detected_at timestamptz`, `detected_nanos`, nullable `family`, `request_ids uuid[]`, `description varchar(1000)` |
+| `live_incidents` | Такая же форма строки для изменяемого текущего снимка; отдельные права SELECT/INSERT/DELETE |
+
+Миграция V3 добавляет в analysis_runs input_revision, processed_revision и analyzed_at,
+таблицу live_incidents и индексы. Одна пачка с новыми записями увеличивает input_revision
+в той же транзакции, что и логи; processed_revision отмечает опубликованный снимок.
+Изменения действующих V1/V2 не требуются. Неизменяемые incidents и access_logs сохраняют
+прежние права без UPDATE/DELETE.
 
 CHECK ограничивает state четырьмя контрактными значениями, producer двумя значениями,
 sequence диапазоном 1..100000, счётчик и last_sequence диапазоном 0..100000.
@@ -176,7 +186,7 @@ COMPLETED/FAILED терминальны; повтор prepare их не сбра
 | GET `/runs/{runId}` | 200 с instanceId, state, error и observedRequestIds; неизвестный run — 404 |
 | POST `log-batches` | 204 только после commit всей пачки; означает сохранение, не завершение анализа |
 | PUT `finish` | Фиксирует неизменяемые границы и deadline; 202 с текущим состоянием, включая идентичные повторы |
-| GET `incidents` | Только COMPLETED; иначе 409. `items` и `total`, порядок detectedAt, incidentId; limit 1..100, offset 0..100000 |
+| GET `incidents` | ACCEPTING/FINISHING — текущий снимок; COMPLETED — итоговый; FAILED — 409. `items` и `total`, порядок detectedAt, incidentId; limit 1..100, offset 0..100000 |
 
 Для всех операций неизвестный run даёт 404, кроме создающего PUT. Ошибки HTTP имеют
 общий `application/problem+json` с допустимыми Problem.code/status и техническим
@@ -257,25 +267,33 @@ requestId связывает два наблюдения запроса, но н
 полон только пустой поток. `{1, 3}` при N=3 остаётся неполным до получения 2;
 ни max_sequence, ни присутствие последнего номера сами по себе не завершают run.
 
-FinalizationWorker периодически находит FINISHING в БД. БД является источником
+FinalizationWorker каждые 500 мс находит изменившиеся ACCEPTING/FINISHING runs
+и FINISHING с полными диапазонами для окончательного прохода. БД является источником
 работы; корректность не зависит от доставки внутрипроцессного уведомления после
 commit. Отдельный ограниченный executor выполняет анализ, watchdog независимо
 проверяет дедлайны. Для одного run одновременно выполняется не более одной задачи.
 DB lease, fencing и несколько экземпляров Detector не входят в MVP.
 
-Когда оба диапазона полны, новые ключи уже невозможны: все допустимые sequence
-сохранены. Worker проверяет это в короткой транзакции, затем читает неизменяемый
-набор вне блокировки и запускает AnalysisEngine. Логи подаются потоково в порядке
+Worker читает состояние run, input_revision, observed requestIds и логи в одной
+read-only REPEATABLE READ транзакции без row lock. Новые логи могут приниматься
+параллельно. AnalysisEngine пересчитывает полный текущий снимок. Логи подаются в порядке
 `time, producer, sequence`; при совпадении времени фиксируется GATEWAY перед SHOP.
 Для точного порядка используется время AccessLog из payload, если его точность выше
 точности индекса event_time. Объединение наблюдений выполняется по requestId.
-Финальный проход после полноты учитывает и поздно доставленные меньшие sequence;
-инкрементальные окна и пересчёт предварительных выводов можно добавить в S2-20.
+Поздно доставленные меньшие sequence меняют input_revision и вызывают пересчёт.
+Неизменившиеся runs повторно не анализируются, кроме окончательного прохода после finish.
+
+Текущий снимок заменяется в live_incidents транзакционно под row lock run.
+IncidentIdentityResolver сохраняет ID/время первого обнаружения по общей evidence,
+при слиянии выбирает наиболее раннюю существующую идентичность. processed_revision
+равна ревизии рассчитанного снимка; новые данные остаются основанием следующего расчёта.
+Старый результат не может заменить уже обработанную более новую ревизию.
 
 Публикация происходит одной транзакцией под блокировкой run: повторно проверить
 FINISHING, полноту и точный deadline, проверить лимиты результата и связь evidence
 с наблюдавшимися requestIds, вставить все incidents и установить COMPLETED.
-До commit incidents не доступны; после него логи, границы и результат неизменяемы.
+До commit итогового результата API возвращает текущий снимок; транзакция также
+очищает live_incidents. После commit логи, границы и итоговый результат неизменяемы.
 observedRequestIds и все страницы incidents читаются из этого зафиксированного набора.
 
 Если диапазоны не заполнены или анализ не завершён к deadline, watchdog переводит
@@ -288,11 +306,12 @@ run в FAILED с безопасным error. Просроченный worker н�
 
 ## Граница с S2-20 и сбои
 
-`AnalysisEngine` получает только runId и полные access-наблюдения и возвращает итоговые
-Incident. API, хранение и finish не зависят от конкретных правил. Для проверки
+`AnalysisEngine` получает только runId и согласованный снимок сохранённых access-наблюдений
+и возвращает Incident. API, хранение и finish не зависят от конкретных правил. Для проверки
 транспортного контура допустима явная пустая реализация, возвращающая `[]` после
-проверки полноты; она не подтверждает качество обнаружения. Реальные ruleset,
-валидация правил при prepare, event-time окна и построение incidents входят в S2-20.
+проверки полноты; она не подтверждает качество обнаружения. В текущей реализации
+event-time окна и incidents для CS-01–CS-05 вычисляет `RuleBasedAnalysisEngine`.
+Загрузка внешнего ruleset и его валидация при prepare остаются отдельными задачами.
 
 instanceId — UUID процесса, генерируемый один раз при старте и возвращаемый во всех
 AnalysisStatus. В БД отдельно сохраняется created_instance_id. При старте прежние
@@ -331,7 +350,7 @@ readiness закрывается, Control фиксирует INCONCLUSIVE. Не�
   превышение границы и только идентичные повторы после COMPLETED/FAILED;
 - deadline при пропуске и при долгом engine, запрет поздней публикации;
 - null observedRequestIds до завершения, объединение ID producers после него,
-  лимит 100000 без усечения, 409 на incidents до COMPLETED и стабильные страницы;
+  лимит 100000 без усечения, текущие incidents до finish, 409 в FAILED и стабильные итоговые страницы;
 - restart с новым instanceId, отсутствие resume, раздельные DB-роли и миграция
   новой/существующей БД без изменения данных Control/Shop.
 

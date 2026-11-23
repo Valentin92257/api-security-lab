@@ -1,8 +1,10 @@
 package lab.detector;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -13,6 +15,7 @@ import lab.detector.engine.AnalysisEngine;
 final class DetectorTestEngine implements AnalysisEngine {
     final AtomicInteger calls = new AtomicInteger();
     volatile List<Incident> results = List.of();
+    final Map<UUID, List<Incident>> resultsByRun = new ConcurrentHashMap<>();
     volatile List<Observation> observations = List.of();
     volatile boolean block;
     volatile boolean throwError;
@@ -24,6 +27,7 @@ final class DetectorTestEngine implements AnalysisEngine {
     void reset() {
         calls.set(0);
         results = List.of();
+        resultsByRun.clear();
         observations = List.of();
         block = false;
         throwError = false;
@@ -37,15 +41,17 @@ final class DetectorTestEngine implements AnalysisEngine {
     public List<Incident> analyze(UUID id, Stream<Observation> logs) {
         calls.incrementAndGet();
         observations = logs.toList();
+        List<Incident> snapshot = resultsByRun.getOrDefault(id, results);
+        boolean wait = block;
         entered.countDown();
         try {
-            if (block && !release.await(10, TimeUnit.SECONDS)) {
+            if (wait && !release.await(10, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("Engine test latch timed out");
             }
             if (throwError) {
                 throw new IllegalStateException(failureMessage);
             }
-            return results;
+            return snapshot;
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(error);

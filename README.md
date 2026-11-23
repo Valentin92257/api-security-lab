@@ -107,7 +107,7 @@ docker compose up -d --build lab-detector
 | GET `/runs/{runId}` | Control: состояние и instanceId; observedRequestIds только после COMPLETED |
 | POST `/runs/{runId}/log-batches` | Gateway/Shop: только свой producer; 204 после сохранения всей пачки |
 | PUT `/runs/{runId}/finish` | Control: фиксация обоих lastSequence и deadlineAt, 202 |
-| GET `/runs/{runId}/incidents` | Control: итоговые страницы после COMPLETED, до него 409 |
+| GET `/runs/{runId}/incidents` | Control: текущие страницы в ACCEPTING/FINISHING, итоговые в COMPLETED; FAILED — 409 |
 | GET `/events` | Control: access-события всех runs или одного runId, фильтры и курсорная пагинация |
 
 `GET /internal/v1/events` принимает необязательные фильтры `runId`, `from`, `to`,
@@ -159,8 +159,21 @@ Finish ждёт все номера 1..N отдельно у каждого prod
 После COMPLETED/FAILED допустимы только сохранённые идентичные повторы логов.
 При рестарте незавершённые runs становятся FAILED, instanceId меняется; resume нет.
 
-Сейчас `EmptyAnalysisEngine` читает полный поток и возвращает пустые incidents.
-Это проверка транспорта и протокола; правила и оценка качества обнаружения — S2-20.
+Каждые 500 мс worker выбирает изменившийся run и пересчитывает согласованный снимок
+его логов через `RuleBasedAnalysisEngine`. Инциденты доступны уже в ACCEPTING/FINISHING:
+новые запросы дополняют evidence и правила, поздние записи могут объединить серии.
+ID и detectedAt первого обнаружения сохраняются; при слиянии остаётся наиболее ранняя
+идентичность (при равном времени — минимальный UUID). Предварительность определяется
+состоянием run; до COMPLETED страницы нужно обновлять с начала. Finish запускает
+окончательный проход после получения полных диапазонов; итог фиксируется атомарно.
+Период опроса не включает время ожидания очереди и выполнения анализа.
+
+Движок создаёт incidents по пяти
+правилам подозрительных входов CS-01–CS-05: всплеск отказов, разные тела запросов,
+успех после всплеска, длительная серия и серия с ограничением входа. Пороги,
+корреляция и evidence описаны в [правилах Detector](docs/04-events-and-detection.md#реализованные-правила-входа).
+Движок использует текущие AccessLog и Incident; ruleset `credential-stuffing-v1`
+зафиксирован в коде. Оценку качества обнаружения выполняет Control отдельно.
 Доставка полного AccessLog из Gateway/Shop и вызовы оркестрации из Control пока
 остаются отдельными задачами.
 

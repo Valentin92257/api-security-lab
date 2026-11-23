@@ -2,6 +2,7 @@ package lab.detector;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -21,6 +22,7 @@ import static lab.detector.DetectorTestData.finishBody;
 import static lab.detector.DetectorTestData.log;
 import static lab.detector.DetectorTestData.path;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 class DetectorEventsIntegrationTest extends AbstractDetectorApiIntegrationTest {
     private final ContractJsonCodec codec = new ContractJsonCodec();
@@ -190,6 +192,10 @@ class DetectorEventsIntegrationTest extends AbstractDetectorApiIntegrationTest {
     void readFailureDoesNotFailTheAnalysis() throws Exception {
         UUID id = prepare();
         assertThat(ingest(id, "GATEWAY", log(1, id)).statusCode()).isEqualTo(204);
+        // Isolate the HTTP read failure from a background analysis read failure.
+        await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> assertThat(admin.sql("""
+                SELECT processed_revision = input_revision FROM detector.analysis_runs WHERE run_id = :id
+                """).param("id", id).query(Boolean.class).single()).isTrue());
         admin.sql("REVOKE SELECT ON detector.access_logs FROM detector_app").update();
         try {
             assertProblem(control("GET", "/events?runId=" + id, null), 503, "UNAVAILABLE");

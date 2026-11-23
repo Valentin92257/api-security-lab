@@ -57,7 +57,8 @@ public class DetectorRepository {
 
     public Optional<RunSnapshot> find(UUID id, boolean lock) {
         return jdbc.sql("""
-                SELECT run_id AS id, state, error, finish_request::text AS finish
+                SELECT run_id AS id, state, error, finish_request::text AS finish,
+                    input_revision, processed_revision
                 FROM detector.analysis_runs WHERE run_id = :id
                 """ + (lock ? " FOR UPDATE" : ""))
                 .param("id", id).query(RunSnapshot.class).optional();
@@ -152,6 +153,8 @@ public class DetectorRepository {
                 SET received_count = received_count + :count, max_sequence = GREATEST(max_sequence, :max)
                 WHERE run_id = :id AND producer = :producer
                 """).param("id", id).param("producer", producer).param("count", count).param("max", max).update();
+        jdbc.sql("UPDATE detector.analysis_runs SET input_revision = input_revision + 1 WHERE run_id = :id")
+                .param("id", id).update();
     }
 
     public void finish(UUID id, FinishSpec finish) {
@@ -183,10 +186,13 @@ public class DetectorRepository {
 
     public Optional<UUID> nextReady() {
         return jdbc.sql("""
-                SELECT r.run_id FROM detector.analysis_runs r WHERE r.state = 'FINISHING'
-                AND (SELECT count(*) FROM detector.producer_progress p WHERE p.run_id = r.run_id
-                    AND p.received_count = p.last_sequence AND p.max_sequence <= p.last_sequence) = 2
-                ORDER BY r.deadline_at, r.run_id LIMIT 1
+                SELECT r.run_id FROM detector.analysis_runs r
+                WHERE r.state IN ('ACCEPTING', 'FINISHING') AND (
+                    r.input_revision > r.processed_revision OR
+                    r.state = 'FINISHING' AND
+                    (SELECT count(*) FROM detector.producer_progress p WHERE p.run_id = r.run_id
+                        AND p.received_count = p.last_sequence AND p.max_sequence <= p.last_sequence) = 2)
+                ORDER BY r.analyzed_at NULLS FIRST, r.created_at, r.run_id LIMIT 1
                 """).query(UUID.class).optional();
     }
 
@@ -197,7 +203,7 @@ public class DetectorRepository {
                 """).param("id", id).query(UUID.class).list());
     }
 
-    /** Caller owns a read transaction and closes the cursor; the complete run is immutable. */
+    /** Caller owns a repeatable-read transaction and closes the cursor. */
     public Stream<Observation> observations(UUID id) {
         return jdbc.sql("""
                 SELECT producer, sequence, request_id, payload::text AS payload
@@ -208,28 +214,54 @@ public class DetectorRepository {
     }
 
     public void insertIncident(UUID id, Incident incident) {
+        insertIncident(id, incident, false);
+    }
+
+    private void insertIncident(UUID id, Incident incident, boolean live) {
         Instant time = incident.getDetectedAt().toInstant();
         jdbc.sql("""
-                INSERT INTO detector.incidents
+                INSERT INTO %s
                     (run_id, incident_id, detected_at, detected_nanos, family, request_ids, description)
                 VALUES (:id, :incidentId, :time, :nanos, :family, :requestIds, :description)
-                """).param("id", id).param("incidentId", incident.getIncidentId())
+                """.formatted(incidentTable(live))).param("id", id).param("incidentId", incident.getIncidentId())
                 .param("time", databaseTime(time)).param("nanos", time.getNano())
                 .param("family", incident.getFamily() == null ? null : incident.getFamily().name(), Types.VARCHAR)
                 .param("requestIds", new SqlArrayValue("uuid", incident.getRequestIds().toArray()))
                 .param("description", incident.getDescription()).update();
     }
 
-    public List<Incident> incidents(UUID id, int limit, int offset) {
+    public List<Incident> incidents(UUID id, int limit, int offset, boolean live) {
         return jdbc.sql("""
-                SELECT * FROM detector.incidents WHERE run_id = :id
+                SELECT * FROM %s WHERE run_id = :id
                 ORDER BY detected_at, detected_nanos, incident_id LIMIT :limit OFFSET :offset
-                """).param("id", id).param("limit", limit).param("offset", offset).query(this::mapIncident).list();
+                """.formatted(incidentTable(live))).param("id", id).param("limit", limit).param("offset", offset)
+                .query(this::mapIncident).list();
     }
 
-    public long incidentCount(UUID id) {
-        return jdbc.sql("SELECT count(*) FROM detector.incidents WHERE run_id = :id")
+    public long incidentCount(UUID id, boolean live) {
+        return jdbc.sql("SELECT count(*) FROM " + incidentTable(live) + " WHERE run_id = :id")
                 .param("id", id).query(Long.class).single();
+    }
+
+    public List<Incident> liveIncidents(UUID id) {
+        return jdbc.sql("SELECT * FROM detector.live_incidents WHERE run_id = :id")
+                .param("id", id).query(this::mapIncident).list();
+    }
+
+    public void replaceLiveIncidents(UUID id, List<Incident> incidents) {
+        jdbc.sql("DELETE FROM detector.live_incidents WHERE run_id = :id").param("id", id).update();
+        incidents.forEach(incident -> insertIncident(id, incident, true));
+    }
+
+    public void processed(UUID id, long revision) {
+        jdbc.sql("""
+                UPDATE detector.analysis_runs SET processed_revision = :revision, analyzed_at = clock_timestamp()
+                WHERE run_id = :id
+                """).param("id", id).param("revision", revision).update();
+    }
+
+    private static String incidentTable(boolean live) {
+        return live ? "detector.live_incidents" : "detector.incidents";
     }
 
     public void completed(UUID id) {

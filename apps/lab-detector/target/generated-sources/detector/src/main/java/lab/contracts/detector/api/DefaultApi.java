@@ -140,7 +140,7 @@ public interface DefaultApi {
     String PATH_LIST_FINAL_INCIDENTS = "/runs/{runId}/incidents";
     /**
      * GET /runs/{runId}/incidents
-     * Только итоговые после COMPLETED; иначе 409. Порядок: detectedAt, incidentId.
+     * В ACCEPTING/FINISHING возвращает текущий изменяемый снимок инцидентов; после COMPLETED — неизменяемый итоговый результат. В FAILED возвращает 409. Предварительность определяется состоянием run через getAnalysisStatus. До COMPLETED список может объединяться и меняться между страницами; требуется обновление просмотра. Порядок: detectedAt, incidentId.
      *
      * @param runId  (required)
      * @param limit  (optional, default to 20)

@@ -10,7 +10,7 @@ import lab.contracts.detector.model.Incident;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-/** S2-20 supplies rules; the engine only sees complete HTTP observations for one run. */
+/** Analyzes a consistent snapshot of the HTTP observations currently saved for one run. */
 public interface AnalysisEngine {
     List<Incident> analyze(UUID runId, Stream<Observation> observations);
 

@@ -116,7 +116,7 @@ class DetectorSecurityIntegrationTest extends AbstractDetectorApiIntegrationTest
             responses.add(send("POST", path(id) + "/log-batches", "gateway-test", "{\"producer\":"));
             assertProblem(responses.getLast(), 400, "INVALID_REQUEST");
             responses.add(control("GET", path(id) + "/incidents", null));
-            assertProblem(responses.getLast(), 409, "CONFLICT");
+            assertThat(responses.getLast().statusCode()).isEqualTo(200);
             for (String endpoint : List.of("/env", "/configprops")) {
                 var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + endpoint))
                         .timeout(Duration.ofSeconds(10)).header("Authorization", "Bearer control-test").GET().build();
@@ -160,24 +160,27 @@ class DetectorSecurityIntegrationTest extends AbstractDetectorApiIntegrationTest
         UUID secondRequest = UUID.randomUUID();
         ObjectNode firstLog = log(1, firstRequest);
         ObjectNode secondLog = log(1, secondRequest);
+        UUID incidentId = UUID.randomUUID();
+        engine.resultsByRun.put(first, List.of(incident(incidentId, firstRequest, "2026-11-16T10:00:00Z")
+                .description("First run")));
+        engine.resultsByRun.put(second, List.of());
         assertThat(ingest(first, "GATEWAY", firstLog).statusCode()).isEqualTo(204);
         assertThat(ingest(second, "GATEWAY", secondLog).statusCode()).isEqualTo(204);
         assertThat(ingest(first, "GATEWAY", firstLog).statusCode()).isEqualTo(204);
         assertThat(progress(first, "received_count")).isEqualTo(1);
         assertThat(progress(second, "received_count")).isEqualTo(1);
 
-        UUID incidentId = UUID.randomUUID();
-        engine.results = List.of(incident(incidentId, firstRequest, "2026-11-16T10:00:00Z").description("First run"));
         assertThat(control("PUT", path(first) + "/finish", finishBody(1, 0)).statusCode()).isEqualTo(202);
         assertThat(completed(first).get("observedRequestIds").get(0).asString()).isEqualTo(firstRequest.toString());
         assertThat(state(second)).isEqualTo("ACCEPTING");
-        assertProblem(control("GET", path(second) + "/incidents", null), 409, "CONFLICT");
+        assertThat(control("GET", path(second) + "/incidents", null).statusCode()).isEqualTo(200);
         JsonNode firstPage = body(control("GET", path(first) + "/incidents", null));
         assertThat(firstPage.get("total").asLong()).isEqualTo(1);
         assertThat(firstPage.get("items").get(0).get("description").asString()).isEqualTo("First run");
 
         // The same sequence and incidentId in another run must stay scoped to that run.
-        engine.results = List.of(incident(incidentId, secondRequest, "2026-11-16T10:00:00Z").description("Second run"));
+        engine.resultsByRun.put(second, List.of(incident(incidentId, secondRequest, "2026-11-16T10:00:00Z")
+                .description("Second run")));
         assertThat(control("PUT", path(second) + "/finish", finishBody(1, 0)).statusCode()).isEqualTo(202);
         assertThat(completed(second).get("observedRequestIds").get(0).asString()).isEqualTo(secondRequest.toString());
         JsonNode secondPage = body(control("GET", path(second) + "/incidents", null));

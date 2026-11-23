@@ -35,7 +35,10 @@ public abstract class AbstractDetectorDatabaseTest {
     protected final void resetDatabase() {
         admin = DetectorTestDatabase.admin(POSTGRES);
         // Match the worker's lock order: runs before progress, logs, and incidents.
-        admin.sql("TRUNCATE detector.analysis_runs, detector.producer_progress, detector.access_logs, detector.incidents")
+        admin.sql("""
+                TRUNCATE detector.analysis_runs, detector.producer_progress, detector.access_logs,
+                    detector.incidents, detector.live_incidents
+                """)
                 .update();
     }
 }

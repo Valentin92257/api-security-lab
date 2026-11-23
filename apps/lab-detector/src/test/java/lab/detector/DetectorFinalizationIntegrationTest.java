@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class DetectorFinalizationIntegrationTest extends AbstractDetectorApiIntegrationTest {
     @Test
-    void waitsForEverySequenceAndPublishesOnlyAfterLateGapIsFilled() throws Exception {
+    void exposesCurrentIncidentsButFinalizesOnlyAfterLateGapIsFilled() throws Exception {
         UUID id = prepare();
         ObjectNode one = log(1, UUID.randomUUID());
         ObjectNode two = log(2, UUID.randomUUID());
@@ -28,7 +28,8 @@ class DetectorFinalizationIntegrationTest extends AbstractDetectorApiIntegration
         assertThat(control("PUT", path(id) + "/finish", finish).statusCode()).isEqualTo(202);
         assertThat(state(id)).isEqualTo("FINISHING");
         assertThat(body(control("GET", path(id), null)).get("observedRequestIds").isNull()).isTrue();
-        assertProblem(control("GET", path(id) + "/incidents", null), 409, "CONFLICT");
+        assertThat(control("GET", path(id) + "/incidents", null).statusCode()).isEqualTo(200);
+        assertThat(count("incidents", id)).isZero();
         assertProblem(ingest(id, "GATEWAY", two, log(4, id)), 409, "CONFLICT");
         assertThat(count("access_logs", id)).isEqualTo(3);
         assertThat(ingest(id, "GATEWAY", two).statusCode()).isEqualTo(204);
@@ -80,7 +81,7 @@ class DetectorFinalizationIntegrationTest extends AbstractDetectorApiIntegration
         String finish = finishBody(2, 0, Instant.now().plusMillis(250).toString());
         assertThat(control("PUT", path(id) + "/finish", finish).statusCode()).isEqualTo(202);
         failed(id);
-        assertThat(engine.calls.get()).isZero();
+        assertThat(count("incidents", id)).isZero();
         assertThat(ingest(id, "GATEWAY", one).statusCode()).isEqualTo(204);
         assertProblem(ingest(id, "GATEWAY", one, log(2, id)), 409, "CONFLICT");
         assertProblem(ingest(id, "GATEWAY", one.deepCopy().put("status", 500)), 409, "CONFLICT");
@@ -98,7 +99,7 @@ class DetectorFinalizationIntegrationTest extends AbstractDetectorApiIntegration
                 finishBody(0, 0, Instant.now().plusSeconds(1).toString())).statusCode()).isEqualTo(202);
         assertThat(engine.entered.await(5, TimeUnit.SECONDS)).isTrue();
         assertThat(state(id)).isEqualTo("FINISHING");
-        assertProblem(control("GET", path(id) + "/incidents", null), 409, "CONFLICT");
+        assertThat(control("GET", path(id) + "/incidents", null).statusCode()).isEqualTo(200);
         failed(id); // The engine is still blocked: deadline checking must use another thread.
         engine.release.countDown();
         assertThat(engine.exited.await(5, TimeUnit.SECONDS)).isTrue();

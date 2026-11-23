@@ -124,7 +124,12 @@ paths:
     - {$ref: '#/components/parameters/runId'}
     get:
       operationId: listFinalIncidents
-      description: 'Только итоговые после COMPLETED; иначе 409. Порядок: detectedAt, incidentId.'
+      description: >-
+        В ACCEPTING/FINISHING возвращает текущий изменяемый снимок инцидентов;
+        после COMPLETED — неизменяемый итоговый результат. В FAILED возвращает 409.
+        Предварительность определяется состоянием run через getAnalysisStatus.
+        До COMPLETED список может объединяться и меняться между страницами; требуется обновление просмотра.
+        Порядок: detectedAt, incidentId.
       parameters:
       - {$ref: '#/components/parameters/limit'}
       - {$ref: '#/components/parameters/offset'}
