@@ -1,6 +1,18 @@
 spring:
   application:
     name: lab-detector
+  datasource:
+    url: ${LAB_DETECTOR_DB_URL:jdbc:postgresql://db:5432/lab_detector}
+    username: detector_app
+    password: ${LAB_DETECTOR_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 8
+      connection-timeout: 5000
+  flyway:
+    user: detector_migrator
+    password: ${LAB_DETECTOR_MIGRATION_PASSWORD:}
+    default-schema: detector
+    locations: classpath:db/detector/migrations
   threads:
     virtual:
       enabled: true
@@ -16,3 +28,10 @@ management:
   endpoint:
     health:
       show-details: never
+lab:
+  detector:
+    control-token: ${LAB_DETECTOR_CONTROL_TOKEN:}
+    gateway-token: ${LAB_DETECTOR_GATEWAY_TOKEN:}
+    shop-token: ${LAB_DETECTOR_SHOP_TOKEN:}
+    poll-interval-ms: 100
+    max-incidents: 10000

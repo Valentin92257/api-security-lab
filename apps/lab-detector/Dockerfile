@@ -4,6 +4,7 @@ COPY pom.xml ./
 COPY libs/ libs/
 COPY apps/ apps/
 COPY contracts/ contracts/
+COPY db/detector/ db/detector/
 RUN mvn -B -ntp -pl apps/lab-detector -am package
 
 FROM eclipse-temurin:25-jre-alpine
