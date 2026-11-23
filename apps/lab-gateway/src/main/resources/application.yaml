@@ -33,6 +33,14 @@ lab:
       connect-timeout: ${GATEWAY_CONNECT_TIMEOUT:2s}
       timeout: ${GATEWAY_UPSTREAM_TIMEOUT:5s}
       max-body-bytes: ${GATEWAY_MAX_BODY_BYTES:8388608}
+    jwt:
+      secret: ${GATEWAY_JWT_SECRET}
+      issuer: urn:lab:shop:protected
+      audience: shop-protected
+      clock-skew: 5s
+      public-paths:
+        - /api/v1/auth/login
+        - /api/v1/auth/register
 logging:
   structured:
     format:

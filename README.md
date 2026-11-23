@@ -91,7 +91,7 @@ curl --fail http://127.0.0.1:8080/health
 | `GATEWAY_CONNECT_TIMEOUT`  | нет         | `2s`                         | Таймаут соединения Gateway                                                |
 | `GATEWAY_UPSTREAM_TIMEOUT` | нет         | `5s`                         | Таймаут ответа магазина                                                   |
 | `GATEWAY_MAX_BODY_BYTES`   | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
-| `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет для авторизации защищенной версии API                          |
+| `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет защищенной версии API: подпись в Shop и проверка в Gateway    |
 | `JWT_SECRET_VULNERABLE`    | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
 | `IDEMPOTENCY_SECRET`       | да          | -                            | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
 
@@ -101,8 +101,8 @@ curl --fail http://127.0.0.1:8080/health
 Control опубликован на `127.0.0.1:8080` (`LAB_CONTROL_PORT`) через отдельную сеть `control-public`.
 Остальные сервисы подключены только к internal-сетям и с хоста недоступны.
 Health Control проверяет БД. Shop реализует все девять операций API (регистрацию, вход с JWT, профиль, каталог, корзину
-и заказы) в обоих режимах; Gateway проксирует protected-запросы со сквозным ID и access-логами. Detector принимает
-LogBatch и завершает анализ по границам последовательностей; правила обнаружения ещё не подключены.
+и заказы) в обоих режимах; Gateway проверяет JWT и проксирует protected-запросы со сквозным ID и access-логами. Detector принимает
+LogBatch, применяет правила входа CS-01-CS-05 и завершает анализ по границам последовательностей.
 Java-контейнеры работают без root с read-only файловой системой и временными файлами в `/tmp`.
 Состояние и логи: `docker compose ps`, `docker compose logs --tail=100`.
 
@@ -378,7 +378,7 @@ docker run --rm -v "$PWD:/workspace" -w /workspace \
 
 `/api/v1/**` на listener `8082` проксируется в `SHOP_PROTECTED_URL` (по умолчанию `http://shop-protected:8080`). Listener `8081` пока возвращает 404 для бизнес-запросов; vulnerable-маршрут добавится отдельной задачей. `/health` работает на обоих портах без X-Request-Id и проверяет сам процесс, а не доступность Shop.
 
-Прокси сохраняет метод, исходный path/query, тело и прикладные заголовки, включая Authorization, Content-Type и Idempotency-Key. Ответ магазина передаётся с исходным статусом и телом; сохраняются Retry-After, WWW-Authenticate, Location, Idempotency-Replayed и повторяющиеся заголовки. Hop-by-hop заголовки (включая перечисленные в Connection) удаляются, Host/Content-Length формируются транспортом. Автоматические retries, redirects, cookie storage и распаковка ответа отключены. Gateway не валидирует JWT или бизнес-схему и не применяет login limiter.
+Прокси сохраняет метод, исходный path/query, тело и прикладные заголовки, включая Authorization, Content-Type и Idempotency-Key. Ответ магазина передаётся с исходным статусом и телом; сохраняются Retry-After, WWW-Authenticate, Location, Idempotency-Replayed и повторяющиеся заголовки. Hop-by-hop заголовки (включая перечисленные в Connection) удаляются, Host/Content-Length формируются транспортом. Автоматические retries, redirects, cookie storage и распаковка ответа отключены. Gateway не валидирует бизнес-схему и не применяет login limiter; JWT проверяется до проксирования (см. ниже).
 
 Обязателен ровно один `X-Request-Id` в полном UUID-формате. Корректный ID передаётся в Shop и возвращается клиенту. Отсутствующий/неверный/повторяющийся заголовок даёт 400/INVALID_REQUEST без обращения к upstream; для самого отказа создаётся один UUID, общий для ответа и лога. В Shop действует тот же контракт. `/internal/**` не проксируется; служебный Runtime API пока не реализован.
 
@@ -393,8 +393,28 @@ Gateway и оба Shop пишут JSON-логи `http_request`: `service`, `trac
 
 Недоступный upstream даёт 502/UNAVAILABLE, таймаут — 504/UNAVAILABLE. Слишком большой запрос — 413/INVALID_REQUEST, ответ upstream сверх бюджета — 502/UNAVAILABLE. Все эти ответы содержат X-Request-Id и Problem.requestId. Таймаут не означает откат заказа, proxy не повторяет операцию. Бюджеты — технические ограничения транспорта, а не экспериментальные политики.
 
-Тесты запускаются при Docker-сборке. Gateway integration tests используют локальный тестовый HTTP upstream: методы, query/body/headers, ID, ответы 429/redirect, disconnect без retry, timeout заголовков/тела, ограничения буфера и listener. Shop HTTP-тесты проверяют тот же ID в ответе/логе обоих профилей, 400/500, отсутствие секретов и восстановление MDC. Тестовые ручки существуют только в `src/test`.
+Тесты запускаются при Docker-сборке. Gateway integration tests используют локальный тестовый HTTP upstream: методы, query/body/headers, ID, ответы 429/redirect, disconnect без retry, timeout заголовков/тела, ограничения буфера и listener, отказ JWT без обращения к upstream и без токена в логах. `JwtVerifierTest` проверяет каждую причину отказа. Shop HTTP-тесты проверяют тот же ID в ответе/логе обоих профилей, 400/500, отсутствие секретов и восстановление MDC. Тестовые ручки существуют только в `src/test`.
 
+### Проверка JWT в Gateway
+
+На listener `8082` Gateway проверяет `Authorization: Bearer <JWT>` до чтения тела и обращения к upstream. Правила те же, что у protected Shop: только HS256, подпись секретом `JWT_SECRET_PROTECTED`, обязательный `exp`, `nbf`, допуск часов 5 секунд, `iss` равен `urn:lab:shop:protected`, `aud` содержит `shop-protected`. Issuer и audience заданы в `apps/lab-gateway/src/main/resources/application.yaml` и должны совпадать с `application-protected.yaml` Shop.
+
+Без токена проходят только точные пути `/api/v1/auth/login` и `/api/v1/auth/register`. Сравнивается исходный URI, поэтому варианты с `%`-кодированием, `;` или `..` требуют токен. Невалидный токен даёт 401/UNAUTHORIZED с `WWW-Authenticate: Bearer`, запрос в Shop не уходит. Gateway не извлекает userId и не заменяет проверку в Shop: валидный токен передаётся без изменений, и Shop проверяет его повторно.
+
+Каждое решение пишется в [журнал решений](#журнал-решений) с `policyId=gateway.jwt` и `kind=SECURITY`: ALLOW с причиной `VALID_TOKEN` или `PUBLIC_ROUTE`, BLOCK с одной из причин ниже. Значение токена и заголовка Authorization не записывается, причина в ответ не попадает.
+
+| reason | Когда |
+|---|---|
+| MISSING_TOKEN | Нет заголовка Authorization |
+| INVALID_AUTHORIZATION_HEADER | Несколько заголовков, схема не Bearer или недопустимые символы |
+| MALFORMED_TOKEN | Значение не разбирается как JWT |
+| UNSUPPORTED_ALGORITHM | `alg` не HS256, в том числе `none` и JWE |
+| INVALID_SIGNATURE | Подпись не совпадает, например токен vulnerable Shop |
+| MISSING_EXPIRATION | Нет `exp` |
+| TOKEN_EXPIRED | `exp` в прошлом с учётом допуска |
+| TOKEN_NOT_YET_VALID | `nbf` в будущем с учётом допуска |
+| INVALID_ISSUER | `iss` отсутствует или другой |
+| INVALID_AUDIENCE | `aud` не содержит `shop-protected` |
 
 ## Журнал решений
 
@@ -408,4 +428,4 @@ docker compose exec -T shop-vulnerable tail -n 20 /app/logs/decisions.jsonl
 
 Каталог сохраняется при пересоздании контейнера; `docker compose down --volumes` удаляет журналы вместе с данными БД. Ротация: 10 MB/день, архивы до 7 дней и 100 MB. `DECISION_LOG_PATH` задаёт полный путь файла; каталог должен быть доступен на запись пользователю сервиса.
 
-Сейчас журнал охватывает технические проверки request ID, маршрута и размера запроса. Экспериментальные политики Shop подключаются через `DecisionLog.record` по мере реализации. ALLOW относится к одной проверке, а итоговый HTTP-ответ смотрят в access-логе.
+Сейчас журнал охватывает технические проверки request ID, маршрута и размера запроса и проверку JWT в Gateway. Экспериментальные политики Shop подключаются через `DecisionLog.record` по мере реализации. ALLOW относится к одной проверке, а итоговый HTTP-ответ смотрят в access-логе.

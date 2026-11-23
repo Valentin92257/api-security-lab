@@ -9,6 +9,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.UUID;
 
+import lab.gateway.jwt.TestJwt;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -41,6 +42,7 @@ class UnavailableUpstreamTest {
                             URI.create("http://127.0.0.1:" + port + "/api/v1/orders"))
                     .timeout(Duration.ofSeconds(5))
                     .header("X-Request-Id", id)
+                    .header("Authorization", "Bearer " + TestJwt.valid())
                     .POST(HttpRequest.BodyPublishers.ofString("{}"))
                     .build(), HttpResponse.BodyHandlers.ofString());
             assertThat(response.statusCode()).isEqualTo(502);

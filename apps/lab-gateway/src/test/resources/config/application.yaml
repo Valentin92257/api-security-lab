@@ -1,0 +1,4 @@
+lab:
+  gateway:
+    jwt:
+      secret: test-gateway-jwt-secret-0123456789abcdef

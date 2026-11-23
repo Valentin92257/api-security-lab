@@ -28,7 +28,7 @@ Control создаёт и читает trial в PostgreSQL; запуск и пр
 | Область | Обязательная проверка |
 |---|---|
 | API/schema | Один spec для обоих режимов; positive examples, unknown/duplicate fields, types/bounds/nullability/query, body forwarding |
-| Gateway | Передача метода/path/query/body/Authorization/Idempotency-Key/requestId и ответа; отсутствие JWT/schema/rate enforcement в proxy; 502/504; отсутствие автоматических retries; user=null в логе |
+| Gateway | Передача метода/path/query/body/Authorization/Idempotency-Key/requestId и ответа; проверка JWT на protected-маршруте (401 без обращения к Shop, причина в логе без токена); отсутствие schema/rate enforcement в proxy; 502/504; отсутствие автоматических retries; user=null в логе |
 | JWT/BOLA | Неверные alg/signature/iss/aud/exp/nbf; valid token многократен; чужие profile/order и отсутствующие дают 404, свои доступны |
 | Login limits | Параллельный consume/backoff; ограничение только в protected Shop и run isolation; безопасный TTL; overflow 503 + INCONCLUSIVE; старый callback не меняет новый run; restart не продолжает опыт |
 | Replay | Same key/body, altered body, оформленная cart revision/new key, параллельные key, expiry купона, cart revision, retry после потери ответа/commit |
@@ -58,7 +58,7 @@ Regression падает при нарушении обещанного protected
 | FR-4-FR-9 (сокращённый scope) | Поиск каталога, GET cart, PUT количества/купона, checkout и заказ по ID; карточка товара, история и удаления исключены; один контракт двух режимов |
 | FR-10-FR-16 | Активы/угрозы/меры/остаточные риски; credential stuffing, BOLA profile/order, replay, injection, четыре business subcases; отдельный критерий эффекта и инвариант |
 | FR-17-FR-20 | Создание trial с families/seed; автоматические vulnerable/protected runs; подготовка/шаги/результаты; безопасный reset модулем Control |
-| FR-21-FR-22 | Обязательный gateway-прокси; JWT claims/signature внутри Shop и одноразовость бизнес-операции при многократном access JWT |
+| FR-21-FR-22 | Обязательный gateway-прокси; JWT claims/signature в Gateway (protected-маршрут) и внутри Shop и одноразовость бизнес-операции при многократном access JWT |
 | FR-23-FR-28 | Schema и неизвестные поля; owner-check; source/account limits/backoff; SQL-параметризация; серверная цена/idempotency/atomic coupon; итоговые access-логи; причины решений - во внутренней диагностике |
 | FR-29 | Два фиксированных приложения: vulnerable с учебными слабостями и protected со всеми защитами; Gateway одинаковый нейтральный прокси |
 | FR-30-FR-35 | AccessLog; независимый Detector и итоговые incidents; UI/progress/cases/reasons; TP/FP/FN; сравнение эффектов/детекции/FP; JSON-отчёт |

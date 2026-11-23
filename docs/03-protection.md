@@ -2,11 +2,11 @@
 
 ## Граница ответственности
 
-Все экспериментальные защитные проверки выполняет Shop. Gateway — HTTP-прокси: 8081 ведёт в shop-vulnerable, 8082 — в shop-protected. Он не проверяет пользовательский JWT, бизнес-схему, частоту входов, владельцев объектов или содержимое запросов на признаки атак. Backend определяется фиксированным listener, а не Host/query/заголовком клиента.
+Все экспериментальные защитные проверки выполняет Shop. Gateway — HTTP-прокси: 8081 ведёт в shop-vulnerable, 8082 — в shop-protected. На protected-маршруте он проверяет JWT (подпись, срок, issuer/audience) до передачи в Shop. Бизнес-схему, частоту входов, владельцев объектов и содержимое запросов на признаки атак он не проверяет. Backend определяется фиксированным listener, а не Host/query/заголовком клиента.
 
 | Компонент | Ответственность |
 |---|---|
-| Gateway | Маршрутизация, сквозные X-Request-Id/trace context, передача HTTP, access-логи, таймауты и Runtime admission |
+| Gateway | Маршрутизация, сквозные X-Request-Id/trace context, передача HTTP, access-логи, таймауты, Runtime admission и проверка JWT на protected-маршруте |
 | Оба Shop | JWT для bearer-маршрутов, разбор JSON и типов, инфраструктурные ресурсные пределы, access-логи |
 | Protected Shop | Валидация схемы, login limits/backoff, object-level authorization, безопасный SQL, бизнес-инварианты и идемпотентность |
 | Vulnerable Shop | Те же маршруты и данные, намеренные пропуски проверок по каталогу сценариев; login limiter отключён |
@@ -19,7 +19,7 @@ ServiceBearer служебного Runtime API, OPEN/CLOSED, конечные т
 
 ## Порядок обработки
 
-1. Gateway проверяет доступность Runtime-контекста и фиксированного маршрута, передаёт запрос выбранному Shop. Политик OFF/OBSERVE/ENFORCE на gateway нет.
+1. Gateway проверяет доступность Runtime-контекста и фиксированного маршрута, передаёт запрос выбранному Shop. На protected-маршруте до чтения тела проверяет JWT (кроме register/login): HS256, подпись, exp/nbf, issuer/audience; невалидный токен даёт 401 без обращения к Shop. Политик OFF/OBSERVE/ENFORCE на gateway нет.
 2. Shop регистрирует запрос для access-лога, проверяет Runtime admission и JWT (кроме register/login). JWT: фиксированный допустимый алгоритм, подпись, exp/nbf, issuer/audience.
 3. Protected применяет ограничения OpenAPI: required/type/bounds, неизвестные поля/query, media type. Проверки после нормализации login/email/coupon выполняются согласно API. До обращения к проверке пароля расходуется бюджет попытки входа.
 4. Выбранная реализация application выполняет owner-check, SQL и транзакцию; protected соблюдает инварианты, vulnerable содержит только перечисленные учебные слабости.
@@ -35,7 +35,7 @@ Gateway сохраняет метод, path/query, тело, Authorization, Cont
 
 Runner создаёт X-Request-Id перед каждой отправкой; каждый retry получает новый UUID. Gateway передаёт его Shop и возвращает клиенту, в том числе при ошибках. Trace context распространяется отдельно. Виртуальный IP из X-Forwarded-For принимается только от доверенного Runner; Shop доверяет только Gateway. Это правило атрибуции логов и limiter, не сценарная защита.
 
-Gateway не извлекает доверенный userId из JWT: его AccessLog.user=null. Shop записывает подтверждённый userId после аутентификации. Detector связывает записи по requestId. При отказе транспорта/закрытом Runtime до Shop есть только лог Gateway; это не доказательство блокировки атаки политикой.
+Gateway не извлекает доверенный userId из JWT: его AccessLog.user=null. Проверка JWT в Gateway только отклоняет невалидный токен и не заменяет проверку в Shop. Shop записывает подтверждённый userId после аутентификации. Detector связывает записи по requestId. При отказе транспорта/закрытом Runtime или JWT, отклонённом Gateway, до Shop есть только лог Gateway; это не доказательство блокировки атаки политикой.
 
 ## Ограничение попыток входа
 
