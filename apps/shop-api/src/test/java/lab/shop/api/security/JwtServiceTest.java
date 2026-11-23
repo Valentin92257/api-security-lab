@@ -3,6 +3,7 @@ package lab.shop.api.security;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 
 import java.nio.charset.StandardCharsets;
@@ -111,13 +112,29 @@ class JwtServiceTest {
         assertThatThrownBy(() -> decoder.decode(unsigned)).isInstanceOf(JwtException.class);
     }
 
+    @Test
+    @DisplayName("Токен без exp отклоняется даже при валидной подписи")
+    void tokenWithoutExpIsRejected() {
+        JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(JwtSupport.key(SECRET)));
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(ISSUER)
+                .audience(java.util.List.of(AUDIENCE))
+                .subject("1")
+                .issuedAt(Instant.now())
+                .build();
+        String token = encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
+
+        assertThatThrownBy(() -> decoder.decode(token)).isInstanceOf(JwtException.class);
+    }
+
     private static JwtProperties props(String secret, String issuer, String audience) {
         return new JwtProperties(secret, issuer, audience, TTL);
     }
 
     private static JwtService service(JwtProperties props) {
         JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(JwtSupport.key(props.secret())));
-        return new JwtService(encoder, props);
+        return new JwtService(encoder, props, Clock.systemUTC());
     }
 
     private static JwtDecoder decoderAt(Instant now) {

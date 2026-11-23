@@ -2,6 +2,7 @@ package lab.shop.api;
 
 import lab.contracts.shop.api.DefaultApi;
 import lab.contracts.shop.model.*;
+import lab.shop.application.model.CheckoutResult;
 import lab.shop.application.service.*;
 import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.Nullable;
@@ -59,7 +60,11 @@ public class ShopApiController implements DefaultApi {
 
     @Override
     public ResponseEntity<Order> checkoutOrder(String idempotencyKey, UUID xRequestId, CheckoutRequest checkoutRequest, @Nullable String xForwardedFor) {
-        return ResponseEntity.ok(orderService.checkout(idempotencyKey, checkoutRequest));
+        CheckoutResult result = orderService.checkout(idempotencyKey, checkoutRequest);
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .header("Idempotency-Replayed", Boolean.toString(result.replayed()))
+                .body(result.order());
     }
 
     @Override

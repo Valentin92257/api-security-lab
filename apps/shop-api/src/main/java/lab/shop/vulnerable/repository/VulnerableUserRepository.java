@@ -21,7 +21,7 @@ public class VulnerableUserRepository implements UserRepository {
     public long insert(String login, String name, String email, String passwordHash) {
         String sql = """
                 INSERT INTO users (login, name, email, password_hash)
-                VALUES ('%s', '%s', '%s', :passwordHash)
+                VALUES ('%s', $inj$%s$inj$, '%s', :passwordHash)
                 RETURNING id
                 """.formatted(login, name, email);
 

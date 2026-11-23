@@ -9,6 +9,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+
 @Service
 @Profile("protected")
 public class ProtectedAuthService extends BaseAuthService {
@@ -17,7 +19,8 @@ public class ProtectedAuthService extends BaseAuthService {
                                 CartRepository cartRepository,
                                 PasswordEncoder passwordEncoder,
                                 JwtService jwtService,
-                                JwtProperties jwtProperties) {
-        super(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties);
+                                JwtProperties jwtProperties,
+                                Clock clock) {
+        super(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties, clock);
     }
 }
