@@ -108,7 +108,7 @@ class RequestLoggingTest {
         assertThat(response.statusCode()).isEqualTo(400);
         assertThat(UUID.fromString(id).toString()).isEqualTo(id);
         assertThat(response.body()).contains(id, "INVALID_REQUEST");
-        assertLog(id, "/api/v1/probe", 400);
+        assertLog(id, "/api/v1/probe", 400, false);
     }
 
     @Test
@@ -171,6 +171,10 @@ class RequestLoggingTest {
     }
 
     private void assertLog(String id, String path, int status) throws Exception {
+        assertLog(id, path, status, true);
+    }
+
+    private void assertLog(String id, String path, int status, boolean validId) throws Exception {
         var event = logs.poll(2, TimeUnit.SECONDS);
         assertThat(event).isNotNull();
         assertThat(event.getMDCPropertyMap()).containsEntry("trace_id", id);
@@ -202,9 +206,9 @@ class RequestLoggingTest {
         var requestDecision = decisions.stream()
                 .filter(entry -> entry.get("policyId").asText().equals("http.request-id")).toList();
         assertThat(requestDecision).hasSize(1);
-        assertThat(requestDecision.getFirst().get("decision").asText()).isEqualTo(status == 400 ? "BLOCK" : "ALLOW");
+        assertThat(requestDecision.getFirst().get("decision").asText()).isEqualTo(validId ? "ALLOW" : "BLOCK");
         assertThat(requestDecision.getFirst().get("reason").asText())
-                .isEqualTo(status == 400 ? "INVALID_REQUEST_ID" : "VALID_REQUEST_ID");
+                .isEqualTo(validId ? "VALID_REQUEST_ID" : "INVALID_REQUEST_ID");
         if (status >= 500) {
             assertThat(decisions).allSatisfy(entry ->
                     assertThat(entry.get("decision").asText()).isEqualTo("ALLOW"));
