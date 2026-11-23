@@ -3,6 +3,11 @@ package lab.gateway.http;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import ch.qos.logback.core.FileAppender;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -194,6 +199,7 @@ class ProtectedProxyTest {
         assertThat(response.statusCode()).isEqualTo(404);
         assertThat(CALLS.get()).isZero();
         assertLog(id, "GET", "/api/v1/echo", 404);
+        assertDecision(id, "gateway.route", "BLOCK", "ROUTE_NOT_CONFIGURED");
     }
 
     @Test
@@ -233,12 +239,31 @@ class ProtectedProxyTest {
 
     @Test
     void boundsBufferedBodies() throws Exception {
-        var requestTooLarge = send(request("/api/v1/echo", UUID.randomUUID().toString())
+        String id = UUID.randomUUID().toString();
+        var requestTooLarge = send(request("/api/v1/echo", id)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(new byte[1025])).build());
         assertThat(requestTooLarge.statusCode()).isEqualTo(413);
+        assertDecision(id, "gateway.request-size", "BLOCK", "REQUEST_LIMIT_EXCEEDED");
         assertThat(CALLS.get()).isZero();
         var responseTooLarge = send(request("/api/v1/large", UUID.randomUUID().toString()).GET().build());
         assertThat(responseTooLarge.statusCode()).isEqualTo(502);
+    }
+
+    private void assertDecision(String id, String policyId, String decision, String reason) throws Exception {
+        var decisionLogger = (Logger) LoggerFactory.getLogger("lab.decision");
+        var fileAppender = (FileAppender<?>) decisionLogger.getAppender("DECISIONS");
+        var json = new JsonMapper();
+        var entries = Files.readAllLines(Path.of(fileAppender.getFile())).stream()
+                .map(json::readTree)
+                .filter(entry -> id.equals(entry.get("requestId").asText())
+                        && policyId.equals(entry.get("policyId").asText()))
+                .toList();
+        assertThat(entries).hasSize(1);
+        assertThat(entries.getFirst().get("trace_id").asText()).isEqualTo(id);
+        assertThat(entries.getFirst().get("kind").asText()).isEqualTo("TECHNICAL");
+        assertThat(entries.getFirst().toString()).doesNotContain("body-secret", "token-secret", "query-secret");
+        assertThat(entries.getFirst().get("decision").asText()).isEqualTo(decision);
+        assertThat(entries.getFirst().get("reason").asText()).isEqualTo(reason);
     }
 
     private HttpRequest.Builder request(String path, String id) {
@@ -274,6 +299,12 @@ class ProtectedProxyTest {
         });
         assertThat(event.getFormattedMessage() + event.getKeyValuePairs() + event.getMDCPropertyMap())
                 .doesNotContain("body-secret", "token-secret", "query-secret");
+        assertDecision(id, "http.request-id", status == 400 ? "BLOCK" : "ALLOW",
+                status == 400 ? "INVALID_REQUEST_ID" : "VALID_REQUEST_ID");
+        if (status == 201 || status == 429 || status >= 500) {
+            assertDecision(id, "gateway.route", "ALLOW", "ROUTE_CONFIGURED");
+            assertDecision(id, "gateway.request-size", "ALLOW", "WITHIN_REQUEST_LIMIT");
+        }
     }
 
     private static HttpServer startUpstream() {

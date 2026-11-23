@@ -4,6 +4,9 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lab.shop.logging.DecisionLog;
+import lab.shop.logging.DecisionLog.Decision;
+import lab.shop.logging.DecisionLog.Kind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -42,6 +45,9 @@ public class RequestLoggingFilter extends OncePerRequestFilter {
         MDC.put("trace_id", requestId);
         long started = System.nanoTime();
         try {
+            DecisionLog.record(requestId, "http.request-id", Kind.TECHNICAL,
+                    valid ? Decision.ALLOW : Decision.BLOCK,
+                    valid ? "VALID_REQUEST_ID" : "INVALID_REQUEST_ID");
             if (!valid) {
                 ProblemResponseWriter.write(response, requestId, 400, "INVALID_REQUEST", "X-Request-Id must be one UUID");
                 return;
