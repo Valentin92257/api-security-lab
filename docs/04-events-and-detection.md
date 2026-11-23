@@ -35,7 +35,7 @@ Gateway и оба Shop пишут отдельный operational-журнал `d
 | service | `lab-gateway` или `shop-api`; экземпляры Shop имеют разные файлы/volumes |
 | requestId, trace_id | Один и тот же X-Request-Id; при неверном заголовке — ID отказа из HTTP-ответа |
 | policyId | Стабильный идентификатор проверки, например `http.request-id` |
-| kind | `TECHNICAL` — инфраструктурная проверка; `SECURITY` — экспериментальная защита Shop |
+| kind | `TECHNICAL` — инфраструктурная проверка; `SECURITY` — защитная проверка: JWT в Gateway или экспериментальная защита Shop |
 | decision | `ALLOW` или `BLOCK` |
 | reason | Фиксированный код причины без пользовательских значений |
 
@@ -50,6 +50,7 @@ Gateway и оба Shop пишут отдельный operational-журнал `d
 | `http.request-id` | Gateway и оба Shop | `VALID_REQUEST_ID` / `INVALID_REQUEST_ID` |
 | `gateway.route` | Gateway | `ROUTE_CONFIGURED` / `ROUTE_NOT_CONFIGURED` |
 | `gateway.request-size` | Gateway | `WITHIN_REQUEST_LIMIT` / `REQUEST_LIMIT_EXCEEDED` |
+| `gateway.jwt` (SECURITY) | Gateway, listener 8082 | `VALID_TOKEN` или `PUBLIC_ROUTE` / причина из README, например `TOKEN_EXPIRED`, `INVALID_SIGNATURE` |
 
 Проверка пишет решение до продолжения цепочки или возврата отказа. Невыполненные проверки не создают записей. Один запрос может иметь несколько ALLOW, затем BLOCK. ALLOW означает прохождение только указанной проверки: итоговый HTTP-статус остаётся в access-логе. Ошибки приложения, недоступность upstream, timeout и переданный ответ Shop сами по себе не превращаются в BLOCK. TECHNICAL-отказы не учитываются как предотвращение атаки.
 

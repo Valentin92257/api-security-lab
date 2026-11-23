@@ -3,16 +3,14 @@ package lab.gateway.http;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-import ch.qos.logback.core.FileAppender;
-import tools.jackson.databind.json.JsonMapper;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -23,16 +21,22 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import ch.qos.logback.core.FileAppender;
+import com.nimbusds.jose.JWSAlgorithm;
 import com.sun.net.httpserver.HttpServer;
+import lab.gateway.jwt.TestJwt;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +45,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.tomcat.servlet.TomcatServletWebServerFactory;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -57,6 +63,7 @@ class ProtectedProxyTest {
     private final Logger logger = (Logger) LoggerFactory.getLogger("lab.access");
     private AppenderBase<ILoggingEvent> appender;
     private HttpClient client;
+    private String token;
 
     @Autowired
     private TomcatServletWebServerFactory factory;
@@ -76,6 +83,7 @@ class ProtectedProxyTest {
         RELEASE.set(new CountDownLatch(0));
         client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3))
                 .followRedirects(HttpClient.Redirect.NEVER).build();
+        token = TestJwt.valid();
         appender = new AppenderBase<>() {
             @Override
             protected void append(ILoggingEvent event) {
@@ -107,7 +115,6 @@ class ProtectedProxyTest {
         String id = UUID.randomUUID().toString();
         byte[] body = "{\"password\":\"body-secret\",\"quantity\":-1}".getBytes(StandardCharsets.UTF_8);
         var response = send(request("/api/v1/echo?q=a%2Bb&q=c&token=query-secret", id)
-                .header("Authorization", "Bearer token-secret")
                 .header("Content-Type", "application/json")
                 .header("Idempotency-Key", "checkout-key-12345")
                 .method(method, HttpRequest.BodyPublishers.ofByteArray(body)).build());
@@ -124,10 +131,11 @@ class ProtectedProxyTest {
         assertThat(received.uri()).isEqualTo("/api/v1/echo?q=a%2Bb&q=c&token=query-secret");
         assertThat(received.body()).isEqualTo(body);
         assertThat(received.requestId()).isEqualTo(id);
-        assertThat(received.authorization()).isEqualTo("Bearer token-secret");
+        assertThat(received.authorization()).isEqualTo("Bearer " + token);
         assertThat(received.idempotencyKey()).isEqualTo("checkout-key-12345");
         assertThat(CALLS.get()).isEqualTo(1);
         assertLog(id, method, "/api/v1/echo", 201);
+        assertDecision(id, "gateway.jwt", "SECURITY", "ALLOW", "VALID_TOKEN");
     }
 
     @Test
@@ -200,6 +208,68 @@ class ProtectedProxyTest {
         assertThat(CALLS.get()).isZero();
         assertLog(id, "GET", "/api/v1/echo", 404);
         assertDecision(id, "gateway.route", "BLOCK", "ROUTE_NOT_CONFIGURED");
+        assertThat(decisions(id, "gateway.jwt")).isEmpty();
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidTokens")
+    void rejectsInvalidTokenBeforeCallingUpstream(String reason, String authorization) throws Exception {
+        String id = UUID.randomUUID().toString();
+        var builder = unauthenticated("/api/v1/orders?token=query-secret", id);
+        if (authorization != null) {
+            builder.header("Authorization", authorization);
+        }
+        var response = send(builder.POST(HttpRequest.BodyPublishers.ofString("{\"password\":\"body-secret\"}"))
+                .build());
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.headers().firstValue("WWW-Authenticate")).contains("Bearer");
+        assertThat(response.headers().firstValue("X-Request-Id")).contains(id);
+        assertThat(new String(response.body(), StandardCharsets.UTF_8)).contains(id, "UNAUTHORIZED")
+                .doesNotContain(reason);
+        assertThat(CALLS.get()).isZero();
+        assertLog(id, "POST", "/api/v1/orders", 401);
+        assertDecision(id, "gateway.jwt", "SECURITY", "BLOCK", reason);
+        assertThat(decisions(id, "gateway.request-size")).isEmpty();
+        if (authorization != null) {
+            assertThat(Files.readString(decisionFile()))
+                    .doesNotContain(authorization.substring(authorization.indexOf(' ') + 1));
+        }
+    }
+
+    static Stream<Arguments> invalidTokens() {
+        Instant now = Instant.now();
+        return Stream.of(
+                Arguments.of("MISSING_TOKEN", null),
+                Arguments.of("INVALID_AUTHORIZATION_HEADER", "Basic dXNlcjpwYXNz"),
+                Arguments.of("INVALID_SIGNATURE", "Bearer " + TestJwt.sign(TestJwt.claims(now).build(),
+                        JWSAlgorithm.HS256, "vulnerable-shop-jwt-secret-0123456789abcdef")),
+                Arguments.of("TOKEN_EXPIRED", "Bearer " + TestJwt.sign(TestJwt.claims(now.minus(Duration.ofHours(1)))
+                        .build())),
+                Arguments.of("INVALID_ISSUER", "Bearer " + TestJwt.sign(TestJwt.claims(now)
+                        .issuer("urn:lab:shop:vulnerable").build())),
+                Arguments.of("INVALID_AUDIENCE", "Bearer " + TestJwt.sign(TestJwt.claims(now)
+                        .audience("shop-vulnerable").build())));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/v1/auth/login", "/api/v1/auth/register"})
+    void forwardsPublicAuthRoutesWithoutToken(String path) throws Exception {
+        String id = UUID.randomUUID().toString();
+        var response = send(unauthenticated(path, id)
+                .POST(HttpRequest.BodyPublishers.ofString("{\"login\":\"user\"}")).build());
+        assertThat(response.statusCode()).isEqualTo(201);
+        assertThat(RECEIVED.get().authorization()).isNull();
+        assertThat(CALLS.get()).isEqualTo(1);
+        assertLog(id, "POST", path, 201);
+        assertDecision(id, "gateway.jwt", "SECURITY", "ALLOW", "PUBLIC_ROUTE");
+    }
+
+    @Test
+    void requiresTokenForPathsThatOnlyLookPublic() throws Exception {
+        var response = send(unauthenticated("/api/v1/auth/login/../../users/me", UUID.randomUUID().toString())
+                .GET().build());
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(CALLS.get()).isZero();
     }
 
     @Test
@@ -249,24 +319,11 @@ class ProtectedProxyTest {
         assertThat(responseTooLarge.statusCode()).isEqualTo(502);
     }
 
-    private void assertDecision(String id, String policyId, String decision, String reason) throws Exception {
-        var decisionLogger = (Logger) LoggerFactory.getLogger("lab.decision");
-        var fileAppender = (FileAppender<?>) decisionLogger.getAppender("DECISIONS");
-        var json = new JsonMapper();
-        var entries = Files.readAllLines(Path.of(fileAppender.getFile())).stream()
-                .map(json::readTree)
-                .filter(entry -> id.equals(entry.get("requestId").asText())
-                        && policyId.equals(entry.get("policyId").asText()))
-                .toList();
-        assertThat(entries).hasSize(1);
-        assertThat(entries.getFirst().get("trace_id").asText()).isEqualTo(id);
-        assertThat(entries.getFirst().get("kind").asText()).isEqualTo("TECHNICAL");
-        assertThat(entries.getFirst().toString()).doesNotContain("body-secret", "token-secret", "query-secret");
-        assertThat(entries.getFirst().get("decision").asText()).isEqualTo(decision);
-        assertThat(entries.getFirst().get("reason").asText()).isEqualTo(reason);
+    private HttpRequest.Builder request(String path, String id) {
+        return unauthenticated(path, id).header("Authorization", "Bearer " + token);
     }
 
-    private HttpRequest.Builder request(String path, String id) {
+    private HttpRequest.Builder unauthenticated(String path, String id) {
         int port = factory.getAdditionalConnectors().getFirst().getLocalPort();
         var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .timeout(Duration.ofSeconds(5));
@@ -298,13 +355,42 @@ class ProtectedProxyTest {
             assertThat((Double) pair.value).isGreaterThanOrEqualTo(0);
         });
         assertThat(event.getFormattedMessage() + event.getKeyValuePairs() + event.getMDCPropertyMap())
-                .doesNotContain("body-secret", "token-secret", "query-secret");
+                .doesNotContain("body-secret", "query-secret", token);
         assertDecision(id, "http.request-id", status == 400 ? "BLOCK" : "ALLOW",
                 status == 400 ? "INVALID_REQUEST_ID" : "VALID_REQUEST_ID");
         if (status == 201 || status == 429 || status >= 500) {
             assertDecision(id, "gateway.route", "ALLOW", "ROUTE_CONFIGURED");
             assertDecision(id, "gateway.request-size", "ALLOW", "WITHIN_REQUEST_LIMIT");
         }
+    }
+
+    private void assertDecision(String id, String policyId, String decision, String reason) throws Exception {
+        assertDecision(id, policyId, "TECHNICAL", decision, reason);
+    }
+
+    private void assertDecision(String id, String policyId, String kind, String decision, String reason)
+            throws Exception {
+        var entries = decisions(id, policyId);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.getFirst().get("trace_id").asText()).isEqualTo(id);
+        assertThat(entries.getFirst().get("kind").asText()).isEqualTo(kind);
+        assertThat(entries.getFirst().toString()).doesNotContain("body-secret", "query-secret", token);
+        assertThat(entries.getFirst().get("decision").asText()).isEqualTo(decision);
+        assertThat(entries.getFirst().get("reason").asText()).isEqualTo(reason);
+    }
+
+    private static List<JsonNode> decisions(String id, String policyId) throws IOException {
+        var json = new JsonMapper();
+        return Files.readAllLines(decisionFile()).stream()
+                .map(json::readTree)
+                .filter(entry -> id.equals(entry.get("requestId").asText())
+                        && policyId.equals(entry.get("policyId").asText()))
+                .toList();
+    }
+
+    private static Path decisionFile() {
+        var decisionLogger = (Logger) LoggerFactory.getLogger("lab.decision");
+        return Path.of(((FileAppender<?>) decisionLogger.getAppender("DECISIONS")).getFile());
     }
 
     private static HttpServer startUpstream() {

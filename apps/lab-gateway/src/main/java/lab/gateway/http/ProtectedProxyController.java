@@ -1,5 +1,7 @@
 package lab.gateway.http;
 
+import lab.gateway.jwt.JwtRejection;
+import lab.gateway.jwt.JwtVerifier;
 import lab.gateway.logging.DecisionLog;
 import lab.gateway.logging.DecisionLog.Decision;
 import lab.gateway.logging.DecisionLog.Kind;
@@ -7,6 +9,8 @@ import lab.gateway.logging.DecisionLog.Kind;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.util.Collections;
+import java.util.Optional;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,13 +33,16 @@ class ProtectedProxyController {
     private final CloseableHttpClient client;
     private final ScheduledExecutorService deadlines;
     private final TomcatServletWebServerFactory factory;
+    private final JwtVerifier jwt;
 
     ProtectedProxyController(GatewayProxyProperties properties, CloseableHttpClient client,
-                             ScheduledExecutorService deadlines, TomcatServletWebServerFactory factory) {
+                             ScheduledExecutorService deadlines, TomcatServletWebServerFactory factory,
+                             JwtVerifier jwt) {
         this.properties = properties;
         this.client = client;
         this.deadlines = deadlines;
         this.factory = factory;
+        this.jwt = jwt;
     }
 
     @RequestMapping({"/api/v1", "/api/v1/**"})
@@ -48,6 +55,17 @@ class ProtectedProxyController {
                 protectedListener ? "ROUTE_CONFIGURED" : "ROUTE_NOT_CONFIGURED");
         if (!protectedListener) {
             ProblemResponseWriter.write(outgoing, requestId, 404, "NOT_FOUND", "Route is not configured on this listener");
+            return;
+        }
+        boolean tokenRequired = jwt.requiresToken(incoming.getRequestURI());
+        Optional<JwtRejection> rejection = tokenRequired
+                ? jwt.verify(Collections.list(incoming.getHeaders("Authorization"))) : Optional.empty();
+        DecisionLog.record(requestId, "gateway.jwt", Kind.SECURITY,
+                rejection.isPresent() ? Decision.BLOCK : Decision.ALLOW,
+                rejection.map(JwtRejection::name).orElse(tokenRequired ? "VALID_TOKEN" : "PUBLIC_ROUTE"));
+        if (rejection.isPresent()) {
+            outgoing.setHeader("WWW-Authenticate", "Bearer");
+            ProblemResponseWriter.write(outgoing, requestId, 401, "UNAUTHORIZED", "Bearer token is missing or invalid");
             return;
         }
         byte[] body = incoming.getInputStream().readNBytes(properties.maxBodyBytes() + 1);
