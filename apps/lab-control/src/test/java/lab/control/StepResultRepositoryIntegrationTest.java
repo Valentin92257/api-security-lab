@@ -6,6 +6,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpHeaders;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import lab.contracts.json.ContractJsonCodec;
 import lab.control.result.StepResultRepository;
 import lab.control.runner.GatewayTarget;
+import lab.control.runner.RunContext;
 import lab.control.runner.StepExecutor;
 import lab.control.runner.ShopContractValidator;
 import lab.control.runner.StepOutcome;
@@ -134,12 +136,13 @@ class StepResultRepositoryIntegrationTest {
                 });
         StepExecutor executor = new StepExecutor(client, repository, new ShopContractValidator(new ContractJsonCodec()));
         String body = "{\"login\":\"alice\",\"password\":\"" + password + "\"}";
-        StepResult login = executor.execute(trialId, runId, new StepRequest(GatewayTarget.VULNERABLE,
+        var run = new RunContext(trialId, runId, Duration.ofMinutes(1));
+        StepResult login = executor.execute(run, new StepRequest(GatewayTarget.VULNERABLE,
                 "POST", "/api/v1/auth/login", Map.of("Authorization", "Bearer " + jwt,
                 "Content-Type", "application/json"), body)).result();
-        StepResult failed = executor.execute(trialId, runId, new StepRequest(GatewayTarget.PROTECTED,
+        StepResult failed = executor.execute(run, new StepRequest(GatewayTarget.PROTECTED,
                 "GET", "/api/v1/products?q=" + query, Map.of("Authorization", "Bearer " + jwt), null)).result();
-        var invalid = executor.execute(trialId, runId, new StepRequest(GatewayTarget.PROTECTED,
+        var invalid = executor.execute(run, new StepRequest(GatewayTarget.PROTECTED,
                 "GET", "/api/v1/products", Map.of(), null));
 
         assertThat(repository.find(login.requestId())).contains(login);

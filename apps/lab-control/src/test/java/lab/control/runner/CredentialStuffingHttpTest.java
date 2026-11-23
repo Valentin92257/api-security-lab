@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -56,8 +57,12 @@ class CredentialStuffingHttpTest {
                     contracts, codec);
             UUID trialId = UUID.randomUUID();
 
-            var first = scenario.run(trialId, UUID.randomUUID(), GatewayTarget.PROTECTED, 42, ACTORS);
-            var second = scenario.run(trialId, UUID.randomUUID(), GatewayTarget.PROTECTED, 42, ACTORS.reversed());
+            var firstRun = new RunContext(trialId, UUID.randomUUID(), Duration.ofMinutes(1));
+            scenario.run(firstRun, GatewayTarget.PROTECTED, 42, ACTORS);
+            var first = firstRun.finish().steps();
+            var secondRun = new RunContext(trialId, UUID.randomUUID(), Duration.ofMinutes(1));
+            scenario.run(secondRun, GatewayTarget.PROTECTED, 42, ACTORS.reversed());
+            var second = secondRun.finish().steps();
 
             assertThat(first).hasSize(203);
             assertThat(second).hasSize(203);

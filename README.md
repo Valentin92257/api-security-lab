@@ -7,14 +7,17 @@ Shop запускается в двух контейнерах с профиля
 
 ## Credential stuffing
 
-`CredentialStuffingScenario` запускается внутри Control. Ему нужны существующий trial,
+`ScenarioRunner` запускает сценарий в отдельном потоке внутри Control. Нужны существующий trial,
 runId, режим Gateway, seed и три подготовленных пользователя выбранного режима:
 
 ```java
-scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, List.of(
+var actors = List.of(
         new CredentialStuffingScenario.Actor(1, "alice", "fixture-alice"),
         new CredentialStuffingScenario.Actor(2, "bob", "fixture-bob"),
-        new CredentialStuffingScenario.Actor(3, "carol", "fixture-carol")));
+        new CredentialStuffingScenario.Actor(3, "carol", "fixture-carol"));
+RunHandle handle = runner.start(trialId, runId,
+        run -> scenario.run(run, GatewayTarget.PROTECTED, 42, actors));
+CompletionStage<RunResult> completion = handle.completion();
 ```
 
 Один запуск делает 200 login: три с верными парами и 197 с неверными паролями.
@@ -30,6 +33,22 @@ Runner проверяет login-запросы сценария и ответы 
 
 Каждый запуск создает свое состояние сценария. Login и чтение профиля не меняют бизнес-данные.
 Fixture/Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
+
+Runner принимает один активный прогон; повторный запуск до завершения дает `RejectedExecutionException`.
+На прогон разрешено до 400 отправок, результаты хранятся в ограниченном списке метаданных.
+Общий deadline задается `lab.runner.run-timeout`, по умолчанию `PT5M` (5 минут).
+Он включает подготовку и сохранение шагов. Отмена и deadline запрещают новые отправки
+и отменяют ожидаемый HTTP-запрос, сохраняя его исход как `INTERRUPTED` или `TIMEOUT`.
+Запись результата в БД не прерывается; итог может прийти позже deadline, после окончания записи.
+
+`handle.cancel()` только запрашивает остановку. `completion()` возвращает защищенный `CompletionStage`:
+отмена его копии `CompletableFuture` не отменяет прогон и не подтверждает остановку.
+`RunResult` содержит исход (`COMPLETED`, `CANCELLED`, `TIMED_OUT`, `FAILED`), число начатых шагов
+и сохраненные метаданные. Ошибка сохранения дает `FAILED` и запрещает следующие отправки.
+`COMPLETED` означает выполнение сценария, оценку успеха атаки делает Evaluator.
+Сценарии передаются только доверенным Java-кодом Control, без пользовательского кода и HTTP endpoints.
+Продолжение orchestration после `completion()` выполняется на собственном executor Control.
+Отмена HTTP не подтверждает завершение SQL в Shop; это проверяется отдельно через Runtime.
 
 ## Запуск
 

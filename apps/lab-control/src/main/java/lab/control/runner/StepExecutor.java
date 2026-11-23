@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -41,9 +42,11 @@ public class StepExecutor {
         this.contracts = contracts;
     }
 
-    public StepResponse execute(UUID trialId, UUID runId, StepRequest step) {
-        Objects.requireNonNull(trialId);
-        Objects.requireNonNull(runId);
+    public StepResponse execute(RunContext run, StepRequest step) {
+        Objects.requireNonNull(run);
+        if (run.isStopped()) {
+            throw new CancellationException("Run is stopped");
+        }
         URI route = ShopRoute.parse(step.route());
         ShopRoute operation = ShopRoute.match(step.method(), route);
         UUID requestId = UUID.randomUUID();
@@ -72,37 +75,50 @@ public class StepExecutor {
         StepOutcome outcome;
         JsonNode responseBody = null;
         boolean interrupted = false;
-        var pending = client.sendAsync(request, HttpResponse.BodyHandlers.limiting(
-                HttpResponse.BodyHandlers.ofByteArray(), MAX_RESPONSE_BYTES));
+        var pending = run.dispatch(() -> client.sendAsync(request, HttpResponse.BodyHandlers.limiting(
+                HttpResponse.BodyHandlers.ofByteArray(), MAX_RESPONSE_BYTES)));
         try {
-            var response = pending.get(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            status = response.statusCode();
-            outcome = status >= 300 && status < 400 ? StepOutcome.REDIRECT_REJECTED : StepOutcome.RESPONSE;
-            if (outcome == StepOutcome.RESPONSE) {
-                try {
-                    responseBody = contracts.validateResponse(operation, status, response.headers(),
-                            response.body(), requestId);
-                } catch (ContractValidationException error) {
-                    outcome = StepOutcome.CONTRACT_VIOLATION;
+            try {
+                var response = pending.get(Math.min(TIMEOUT.toNanos(), run.remainingNanos()), TimeUnit.NANOSECONDS);
+                status = response.statusCode();
+                outcome = status >= 300 && status < 400 ? StepOutcome.REDIRECT_REJECTED : StepOutcome.RESPONSE;
+                if (outcome == StepOutcome.RESPONSE) {
+                    try {
+                        responseBody = contracts.validateResponse(operation, status, response.headers(),
+                                response.body(), requestId);
+                    } catch (ContractValidationException error) {
+                        outcome = StepOutcome.CONTRACT_VIOLATION;
+                    }
                 }
+            } catch (TimeoutException error) {
+                pending.cancel(true);
+                if (run.remainingNanos() == 0) {
+                    run.timeout();
+                }
+                outcome = StepOutcome.TIMEOUT;
+            } catch (CancellationException error) {
+                if (!run.isStopped()) {
+                    run.cancel();
+                }
+                outcome = run.timedOut() ? StepOutcome.TIMEOUT : StepOutcome.INTERRUPTED;
+            } catch (ExecutionException error) {
+                outcome = error.getCause() instanceof HttpTimeoutException ? StepOutcome.TIMEOUT : StepOutcome.IO_ERROR;
+            } catch (InterruptedException error) {
+                run.cancel();
+                outcome = StepOutcome.INTERRUPTED;
+                interrupted = true;
             }
-        } catch (TimeoutException error) {
-            pending.cancel(true);
-            outcome = StepOutcome.TIMEOUT;
-        } catch (ExecutionException error) {
-            outcome = error.getCause() instanceof HttpTimeoutException ? StepOutcome.TIMEOUT : StepOutcome.IO_ERROR;
-        } catch (InterruptedException error) {
-            pending.cancel(true);
-            outcome = StepOutcome.INTERRUPTED;
-            interrupted = true;
-        }
-        var result = new StepResult(trialId, runId, requestId, step.target(), step.method(),
-                route.getRawPath(), status, outcome, startedAt,
-                Duration.ofNanos(System.nanoTime() - started).toMillis());
-        try {
+            var result = new StepResult(run.trialId(), run.runId(), requestId, step.target(), step.method(),
+                    route.getRawPath(), status, outcome, startedAt,
+                    Duration.ofNanos(System.nanoTime() - started).toMillis());
             results.save(result);
+            run.record(result);
             return new StepResponse(result, responseBody);
+        } catch (RuntimeException | Error error) {
+            run.fail();
+            throw error;
         } finally {
+            run.release(pending);
             if (interrupted) {
                 Thread.currentThread().interrupt();
             }

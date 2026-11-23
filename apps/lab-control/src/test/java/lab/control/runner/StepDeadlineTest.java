@@ -48,7 +48,8 @@ class StepDeadlineTest {
                 });
                 var executor = new StepExecutor(transport, results, new ShopContractValidator(new ContractJsonCodec()));
 
-                var response = executor.execute(UUID.randomUUID(), UUID.randomUUID(),
+                var run = new RunContext(UUID.randomUUID(), UUID.randomUUID(), Duration.ofMinutes(1));
+                var response = executor.execute(run,
                         new StepRequest(GatewayTarget.PROTECTED, "GET", "/api/v1/products", Map.of(), null));
 
                 assertThat(response.result().outcome()).isEqualTo(StepOutcome.IO_ERROR);
@@ -102,9 +103,10 @@ class StepDeadlineTest {
                 });
                 var executor = new StepExecutor(transport, results, new ShopContractValidator(new ContractJsonCodec()));
                 var step = new StepRequest(GatewayTarget.VULNERABLE, "GET", "/api/v1/products", Map.of(), null);
+                var run = new RunContext(UUID.randomUUID(), UUID.randomUUID(), Duration.ofMinutes(1));
                 long started = System.nanoTime();
 
-                var result = executor.execute(UUID.randomUUID(), UUID.randomUUID(), step).result();
+                var result = executor.execute(run, step).result();
 
                 assertThat(bodyStarted.getCount()).isZero();
                 assertThat(Duration.ofNanos(System.nanoTime() - started).toMillis()).isBetween(4900L, 10000L);

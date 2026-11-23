@@ -41,6 +41,7 @@ class StepExecutorTest {
     private final StepExecutor executor = new StepExecutor(client, results, contracts);
     private final UUID trialId = UUID.randomUUID();
     private final UUID runId = UUID.randomUUID();
+    private final RunContext run = new RunContext(trialId, runId, Duration.ofMinutes(1));
 
     @ParameterizedTest
     @CsvSource({"VULNERABLE,8081", "PROTECTED,8082"})
@@ -48,7 +49,7 @@ class StepExecutorTest {
         responds(200);
         var before = OffsetDateTime.now().truncatedTo(ChronoUnit.MICROS);
 
-        var result = executor.execute(trialId, runId, step(target, "GET", "/api/v1/products")).result();
+        var result = executor.execute(run, step(target, "GET", "/api/v1/products")).result();
 
         var request = request();
         assertThat(request.uri().toString()).isEqualTo("http://lab-gateway:" + port + "/api/v1/products");
@@ -84,7 +85,7 @@ class StepExecutorTest {
     void acceptsCatalogRoutes(String method, String route) throws Exception {
         responds(200);
 
-        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, method, route)).result();
+        var result = executor.execute(run, step(GatewayTarget.VULNERABLE, method, route)).result();
 
         assertThat(request().uri().getRawPath()).isEqualTo(route.split("\\?", 2)[0]);
         assertThat(result.route()).isEqualTo(route.split("\\?", 2)[0]);
@@ -108,7 +109,7 @@ class StepExecutorTest {
             "/api/v1/unknown"
     })
     void rejectsAddressesAndRoutesOutsideTheCatalogBeforeSending(String route) {
-        assertThatThrownBy(() -> executor.execute(trialId, runId,
+        assertThatThrownBy(() -> executor.execute(run,
                 step(GatewayTarget.VULNERABLE, "GET", route)).result())
                 .isInstanceOf(IllegalArgumentException.class);
 
@@ -123,7 +124,7 @@ class StepExecutorTest {
             "GET|/api/v1/cart?q=secret"
     })
     void rejectsMethodsAndQueriesOutsideTheCatalog(String method, String route) {
-        assertThatThrownBy(() -> executor.execute(trialId, runId,
+        assertThatThrownBy(() -> executor.execute(run,
                 step(GatewayTarget.VULNERABLE, method, route)).result())
                 .isInstanceOf(IllegalArgumentException.class);
 
@@ -134,7 +135,7 @@ class StepExecutorTest {
     @ValueSource(strings = {"X-Lab-Run-Id", "x-lab-mode", "X-Request-Id", "x-request-id", "Host",
             "Proxy-Authorization", "Connection", "Accept"})
     void rejectsCallerHeadersOutsideTheAllowlist(String name) {
-        assertThatThrownBy(() -> executor.execute(trialId, runId,
+        assertThatThrownBy(() -> executor.execute(run,
                 new StepRequest(GatewayTarget.PROTECTED, "GET", "/api/v1/products",
                         Map.of(name, "forbidden"), null)).result())
                 .isInstanceOf(IllegalArgumentException.class);
@@ -144,7 +145,7 @@ class StepExecutorTest {
 
     @Test
     void rejectsInvalidHeaderValuesWithoutExposingCredentials() {
-        assertThatThrownBy(() -> executor.execute(trialId, runId,
+        assertThatThrownBy(() -> executor.execute(run,
                 new StepRequest(GatewayTarget.PROTECTED, "GET", "/api/v1/products",
                         Map.of("Authorization", "Bearer private-token\r\nvalue"), null)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -160,7 +161,7 @@ class StepExecutorTest {
         String body = "{\"login\":\"alice\",\"password\":\"private-password\"}";
         String key = UUID.randomUUID().toString();
 
-        var result = executor.execute(trialId, runId,
+        var result = executor.execute(run,
                 new StepRequest(GatewayTarget.PROTECTED, "POST", "/api/v1/auth/login",
                         Map.of("authorization", authorization, "content-type", "application/json",
                                 "idempotency-key", key, "x-forwarded-for", "192.0.2.1"), body)).result();
@@ -181,7 +182,7 @@ class StepExecutorTest {
     void excludesQueryValuesFromTheSavedRoute() throws Exception {
         responds(200);
 
-        var result = executor.execute(trialId, runId,
+        var result = executor.execute(run,
                 step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products?q=private-search")).result();
 
         assertThat(request().uri().getRawQuery()).isEqualTo("q=private-search");
@@ -195,8 +196,8 @@ class StepExecutorTest {
         responds(200);
         var step = step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products");
 
-        var first = executor.execute(trialId, runId, step).result();
-        var second = executor.execute(trialId, runId, step).result();
+        var first = executor.execute(run, step).result();
+        var second = executor.execute(run, step).result();
 
         var requests = ArgumentCaptor.forClass(HttpRequest.class);
         verify(client, times(2)).sendAsync(requests.capture(), any());
@@ -212,7 +213,7 @@ class StepExecutorTest {
     void savesRedirectAsRejectedWithoutAnotherAttempt(int status) throws Exception {
         responds(status);
 
-        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
+        var result = executor.execute(run, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
 
         assertThat(result.status()).isEqualTo(status);
         assertThat(result.outcome()).isEqualTo(StepOutcome.REDIRECT_REJECTED);
@@ -226,7 +227,7 @@ class StepExecutorTest {
         when(client.<byte[]>sendAsync(any(HttpRequest.class), any()))
                 .thenReturn(CompletableFuture.failedFuture(failure));
 
-        var result = executor.execute(trialId, runId, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
+        var result = executor.execute(run, step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
 
         assertThat(result.status()).isNull();
         assertThat(result.outcome()).isEqualTo(outcome);
@@ -240,7 +241,7 @@ class StepExecutorTest {
         when(contracts.validateResponse(any(), anyInt(), any(), any(), any()))
                 .thenThrow(new ContractValidationException("private-token"));
 
-        var response = executor.execute(trialId, runId, step(GatewayTarget.PROTECTED, "GET", "/api/v1/products"));
+        var response = executor.execute(run, step(GatewayTarget.PROTECTED, "GET", "/api/v1/products"));
 
         assertThat(response.result().outcome()).isEqualTo(StepOutcome.CONTRACT_VIOLATION);
         assertThat(response.result().status()).isEqualTo(200);
@@ -255,7 +256,7 @@ class StepExecutorTest {
         var failure = new IllegalArgumentException("Validator configuration unavailable");
         when(contracts.validateResponse(any(), anyInt(), any(), any(), any())).thenThrow(failure);
 
-        assertThatThrownBy(() -> executor.execute(trialId, runId,
+        assertThatThrownBy(() -> executor.execute(run,
                 step(GatewayTarget.PROTECTED, "GET", "/api/v1/products"))).isSameAs(failure);
 
         verifyNoInteractions(results);
@@ -274,7 +275,7 @@ class StepExecutorTest {
         }).when(results).save(any(StepResult.class));
 
         try {
-            var result = executor.execute(trialId, runId,
+            var result = executor.execute(run,
                     step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result();
 
             assertThat(pending.isCancelled()).isTrue();
@@ -293,7 +294,7 @@ class StepExecutorTest {
         var failure = new IllegalStateException("Result storage unavailable");
         doThrow(failure).when(results).save(any(StepResult.class));
 
-        assertThatThrownBy(() -> executor.execute(trialId, runId,
+        assertThatThrownBy(() -> executor.execute(run,
                 step(GatewayTarget.VULNERABLE, "GET", "/api/v1/products")).result())
                 .isSameAs(failure);
 

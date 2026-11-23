@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 import lab.contracts.json.ContractJsonCodec;
@@ -29,26 +28,23 @@ public class CredentialStuffingScenario {
         this.json = json;
     }
 
-    public List<StepResult> run(UUID trialId, UUID runId, GatewayTarget target, long seed, List<Actor> actors) {
-        Objects.requireNonNull(trialId);
-        Objects.requireNonNull(runId);
+    public void run(RunContext run, GatewayTarget target, long seed, List<Actor> actors) {
+        Objects.requireNonNull(run);
         Objects.requireNonNull(target);
         if (seed < 0 || seed > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("Seed must be between 0 and 2147483647");
         }
         List<LoginAttempt> attempts = prepare(seed, actors);
-        List<StepResult> results = new ArrayList<>();
         for (LoginAttempt attempt : attempts) {
-            if (Thread.currentThread().isInterrupted()) {
+            if (run.isStopped()) {
                 break;
             }
             StepRequest request = loginRequest(target, attempt);
-            if (Thread.currentThread().isInterrupted()) {
+            if (run.isStopped()) {
                 break;
             }
-            var login = steps.execute(trialId, runId, request);
-            results.add(login.result());
-            if (login.result().outcome() == StepOutcome.INTERRUPTED) {
+            var login = steps.execute(run, request);
+            if (run.isStopped()) {
                 break;
             }
             if (login.result().outcome() != StepOutcome.RESPONSE
@@ -56,18 +52,13 @@ public class CredentialStuffingScenario {
                 continue;
             }
             String token = login.body().get("accessToken").asString();
-            if (Thread.currentThread().isInterrupted()) {
+            if (run.isStopped()) {
                 break;
             }
-            var profile = steps.execute(trialId, runId, new StepRequest(target, "GET",
+            steps.execute(run, new StepRequest(target, "GET",
                     "/api/v1/users/" + attempt.actor().userId(),
                     Map.of("Authorization", "Bearer " + token, "X-Forwarded-For", CLIENT_IP), null));
-            results.add(profile.result());
-            if (profile.result().outcome() == StepOutcome.INTERRUPTED) {
-                break;
-            }
         }
-        return List.copyOf(results);
     }
 
     private StepRequest loginRequest(GatewayTarget target, LoginAttempt attempt) {

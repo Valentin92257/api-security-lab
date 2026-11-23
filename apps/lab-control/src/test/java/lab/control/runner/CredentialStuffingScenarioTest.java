@@ -1,9 +1,11 @@
 package lab.control.runner;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
 import lab.contracts.json.ContractJsonCodec;
@@ -45,7 +47,7 @@ class CredentialStuffingScenarioTest {
     void generatesTwoHundredLoginsWithExactlyThreeValidPairs() {
         rejectLogins();
 
-        var results = scenario.run(trialId, runId, GatewayTarget.VULNERABLE, 42, ACTORS);
+        var results = run(runId, GatewayTarget.VULNERABLE, 42, ACTORS);
 
         var requests = requests(200);
         assertThat(results).hasSize(200);
@@ -68,10 +70,10 @@ class CredentialStuffingScenarioTest {
     void repeatsTheSameLogicalStepsRegardlessOfActorOrderAndPreviousRuns() {
         rejectLogins();
 
-        var first = scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS);
-        var second = scenario.run(trialId, UUID.randomUUID(), GatewayTarget.PROTECTED, 42,
+        var first = run(runId, GatewayTarget.PROTECTED, 42, ACTORS);
+        var second = run(UUID.randomUUID(), GatewayTarget.PROTECTED, 42,
                 List.of(ACTORS.get(2), ACTORS.get(1), ACTORS.get(0)));
-        scenario.run(trialId, UUID.randomUUID(), GatewayTarget.PROTECTED, 43, ACTORS);
+        run(UUID.randomUUID(), GatewayTarget.PROTECTED, 43, ACTORS);
 
         var requests = requests(600);
         assertThat(requests.subList(0, 200)).isEqualTo(requests.subList(200, 400));
@@ -82,8 +84,8 @@ class CredentialStuffingScenarioTest {
 
     @Test
     void confirmsEachSuccessfulLoginWithItsActorsProfile() {
-        when(steps.execute(any(), any(), any())).thenAnswer(call -> {
-            StepRequest request = call.getArgument(2);
+        when(steps.execute(any(), any())).thenAnswer(call -> {
+            StepRequest request = call.getArgument(1);
             if (request.method().equals("GET")) {
                 return response(call, 200, StepOutcome.RESPONSE, null);
             }
@@ -98,7 +100,7 @@ class CredentialStuffingScenarioTest {
             return response(call, 200, StepOutcome.RESPONSE, token);
         });
 
-        var results = scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS);
+        var results = run(runId, GatewayTarget.PROTECTED, 42, ACTORS);
 
         var requests = requests(203);
         assertThat(results).hasSize(203);
@@ -116,9 +118,9 @@ class CredentialStuffingScenarioTest {
 
     @Test
     void doesNotConfirmAResponseWithoutAValidatedBody() {
-        when(steps.execute(any(), any(), any())).thenAnswer(call -> response(call, 200, StepOutcome.RESPONSE, null));
+        when(steps.execute(any(), any())).thenAnswer(call -> response(call, 200, StepOutcome.RESPONSE, null));
 
-        assertThat(scenario.run(trialId, runId, GatewayTarget.VULNERABLE, 42, ACTORS)).hasSize(200);
+        assertThat(run(runId, GatewayTarget.VULNERABLE, 42, ACTORS)).hasSize(200);
 
         assertThat(requests(200)).allSatisfy(request -> assertThat(request.method()).isEqualTo("POST"));
     }
@@ -128,7 +130,7 @@ class CredentialStuffingScenarioTest {
         doThrow(new ContractValidationException("Request rejected"))
                 .when(validator).validateLoginRequest(anyString());
 
-        assertThatThrownBy(() -> scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS))
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, 42, ACTORS))
                 .isInstanceOf(ContractValidationException.class);
 
         verifyNoInteractions(steps);
@@ -137,7 +139,7 @@ class CredentialStuffingScenarioTest {
     @ParameterizedTest
     @ValueSource(longs = {-1, 2147483648L})
     void rejectsSeedsOutsideTheControlRangeBeforeSending(long seed) {
-        assertThatThrownBy(() -> scenario.run(trialId, runId, GatewayTarget.PROTECTED, seed, ACTORS))
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, seed, ACTORS))
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(steps, validator);
@@ -146,7 +148,7 @@ class CredentialStuffingScenarioTest {
     @ParameterizedTest
     @MethodSource("invalidActors")
     void rejectsIncompleteOrAmbiguousFixturesBeforeSending(List<CredentialStuffingScenario.Actor> actors) {
-        assertThatThrownBy(() -> scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, actors))
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, 42, actors))
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(steps, validator);
@@ -154,10 +156,10 @@ class CredentialStuffingScenarioTest {
 
     @Test
     void stopsAfterAnInterruptedStep() {
-        when(steps.execute(any(), any(), any()))
+        when(steps.execute(any(), any()))
                 .thenAnswer(call -> response(call, null, StepOutcome.INTERRUPTED, null));
 
-        var results = scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS);
+        var results = run(runId, GatewayTarget.PROTECTED, 42, ACTORS);
 
         assertThat(results).hasSize(1);
         assertThat(results.getFirst().outcome()).isEqualTo(StepOutcome.INTERRUPTED);
@@ -169,7 +171,7 @@ class CredentialStuffingScenarioTest {
         try {
             Thread.currentThread().interrupt();
 
-            assertThat(scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
+            assertThat(run(runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
 
             verifyNoInteractions(steps, validator);
         } finally {
@@ -185,7 +187,7 @@ class CredentialStuffingScenarioTest {
         }).when(validator).validateLoginRequest(anyString());
 
         try {
-            assertThat(scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
+            assertThat(run(runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
 
             verifyNoInteractions(steps);
         } finally {
@@ -196,9 +198,9 @@ class CredentialStuffingScenarioTest {
     @Test
     void stopsWhenAStepCannotBeSaved() {
         var failure = new IllegalStateException("Result storage unavailable");
-        when(steps.execute(any(), any(), any())).thenThrow(failure);
+        when(steps.execute(any(), any())).thenThrow(failure);
 
-        assertThatThrownBy(() -> scenario.run(trialId, runId, GatewayTarget.PROTECTED, 42, ACTORS))
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, 42, ACTORS))
                 .isSameAs(failure);
 
         requests(1);
@@ -211,6 +213,12 @@ class CredentialStuffingScenarioTest {
         }
     }
 
+    private List<StepResult> run(UUID id, GatewayTarget target, long seed, List<CredentialStuffingScenario.Actor> actors) {
+        var run = new RunContext(trialId, id, Duration.ofMinutes(1));
+        scenario.run(run, target, seed, actors);
+        return run.finish().steps();
+    }
+
     private static Stream<List<CredentialStuffingScenario.Actor>> invalidActors() {
         return Stream.of(
                 ACTORS.subList(0, 2),
@@ -220,20 +228,27 @@ class CredentialStuffingScenarioTest {
     }
 
     private void rejectLogins() {
-        when(steps.execute(any(), any(), any()))
+        when(steps.execute(any(), any()))
                 .thenAnswer(call -> response(call, 401, StepOutcome.RESPONSE, null));
     }
 
     private StepResponse response(InvocationOnMock call, Integer status, StepOutcome outcome, JsonNode body) {
-        StepRequest request = call.getArgument(2);
-        var result = new StepResult(call.getArgument(0), call.getArgument(1), UUID.randomUUID(), request.target(),
+        StepRequest request = call.getArgument(1);
+        RunContext run = call.getArgument(0);
+        var result = new StepResult(run.trialId(), run.runId(), UUID.randomUUID(), request.target(),
                 request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0);
+        var pending = run.dispatch(() -> CompletableFuture.completedFuture(null));
+        run.record(result);
+        run.release(pending);
+        if (outcome == StepOutcome.INTERRUPTED) {
+            run.cancel();
+        }
         return new StepResponse(result, body);
     }
 
     private List<StepRequest> requests(int count) {
         var requests = ArgumentCaptor.forClass(StepRequest.class);
-        verify(steps, times(count)).execute(any(), any(), requests.capture());
+        verify(steps, times(count)).execute(any(), requests.capture());
         return requests.getAllValues();
     }
 }
