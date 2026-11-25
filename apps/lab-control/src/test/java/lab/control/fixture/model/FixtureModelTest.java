@@ -59,6 +59,6 @@ class FixtureModelTest {
 
     @Test
     void normalizesNullViolationDetailsToEmptyJsonObject() {
-        assertThat(new InvariantViolation("INV-ORDER-TOTAL", "orders", "1", null).detailsJson()).isEqualTo("{}");
+        assertThat(new InvariantViolation("INV-ORDER-TOTAL", "orders", "1", null).details()).isEqualTo("{}");
     }
 }

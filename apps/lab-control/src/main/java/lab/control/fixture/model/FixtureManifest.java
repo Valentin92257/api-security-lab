@@ -2,7 +2,6 @@ package lab.control.fixture.model;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 
 public record FixtureManifest(
         String version,
@@ -28,7 +27,6 @@ public record FixtureManifest(
     }
 
     public FixtureCoupon couponByKind(FixtureCoupon.Kind kind) {
-        Objects.requireNonNull(kind, "kind");
         return coupons.stream()
                 .filter(coupon -> coupon.kind() == kind)
                 .findFirst()
@@ -36,7 +34,6 @@ public record FixtureManifest(
     }
 
     public List<FixtureUser> usersByRole(FixtureUserRole role) {
-        Objects.requireNonNull(role, "role");
         return users.stream().filter(user -> user.role() == role).toList();
     }
 

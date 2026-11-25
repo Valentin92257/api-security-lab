@@ -31,14 +31,14 @@ public class FixtureGenerator {
     private final JsonMapper json;
 
     public FixtureGenerator(ContractJsonCodec codec) {
-        this.json = Objects.requireNonNull(codec, "codec").jsonMapper();
+        this.json = codec.jsonMapper();
     }
 
     public FixtureManifest generate(int seed, Instant businessTimeBase) {
         if (seed < 0) {
             throw new IllegalArgumentException("Seed must be non-negative: " + seed);
         }
-        Instant base = Objects.requireNonNull(businessTimeBase, "businessTimeBase").truncatedTo(ChronoUnit.MICROS);
+        Instant base = businessTimeBase.truncatedTo(ChronoUnit.MICROS);
         Random rnd = new Random(seed);
 
         List<FixtureUser> users = generateUsers(seed, rnd);

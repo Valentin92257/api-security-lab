@@ -5,7 +5,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 
 public record OracleBaseline(
         List<CatalogEntry> catalog,
@@ -14,14 +13,14 @@ public record OracleBaseline(
         List<Long> orderIds
 ) {
     public OracleBaseline {
-        catalog = List.copyOf(Objects.requireNonNull(catalog, "catalog"));
-        coupons = List.copyOf(Objects.requireNonNull(coupons, "coupons"));
-        couponCounters = List.copyOf(Objects.requireNonNull(couponCounters, "couponCounters"));
-        orderIds = List.copyOf(Objects.requireNonNull(orderIds, "orderIds"));
+        catalog = List.copyOf(catalog);
+        coupons = List.copyOf(coupons);
+        couponCounters = List.copyOf(couponCounters);
+        orderIds = List.copyOf(orderIds);
     }
 
     public String toJson(JsonMapper mapper) {
-        return Objects.requireNonNull(mapper, "mapper").writeValueAsString(this);
+        return mapper.writeValueAsString(this);
     }
 
     public record CatalogEntry(
