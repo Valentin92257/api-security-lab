@@ -26,3 +26,8 @@ management:
 lab:
   control:
     operator-token: ${LAB_OPERATOR_TOKEN:}
+  fixture:
+    username: ${LAB_FIXTURE_DB_USER:fixture_admin}
+    password: ${LAB_FIXTURE_DB_PASSWORD:}
+    vulnerable-url: ${LAB_FIXTURE_VULNERABLE_DB_URL:jdbc:postgresql://db:5432/vulnerable}
+    protected-url: ${LAB_FIXTURE_PROTECTED_DB_URL:jdbc:postgresql://db:5432/protected}
