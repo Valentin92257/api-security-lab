@@ -334,6 +334,44 @@ public abstract class OrderFlowIntegrationTest extends PostgreSQLIntegrationTest
     }
 
     @Test
+    @DisplayName("RP-01 (parallel same key): конкурентные повторы одного Idempotency-Key сериализуются")
+    void concurrentSameIdempotencyKeyReplay() throws Exception {
+        Account user = registerAndLogin();
+        assertThat(put("/cart/items/" + lampId, Map.of("quantity", 1), user.token()).statusCode()).isEqualTo(200);
+
+        String sameKey = newKey();
+        int attempts = 5;
+        List<HttpResponse<String>> responses =
+                runConcurrently(attempts, _ -> checkout(user.token(), sameKey, 1L, 1500L));
+
+        if (isProtected()) {
+            List<HttpResponse<String>> created = responses.stream()
+                    .filter(r -> r.statusCode() == 201)
+                    .toList();
+            long freshCount = created.stream()
+                    .filter(r -> r.headers().firstValue("Idempotency-Replayed").equals(java.util.Optional.of("false")))
+                    .count();
+            long replayedCount = created.stream()
+                    .filter(r -> r.headers().firstValue("Idempotency-Replayed").equals(java.util.Optional.of("true")))
+                    .count();
+            List<Long> orderIds = created.stream()
+                    .map(r -> json(r).get("id").asLong())
+                    .distinct()
+                    .toList();
+
+            assertThat(created).hasSize(attempts);
+            assertThat(freshCount).isEqualTo(1);
+            assertThat(replayedCount).isEqualTo(attempts - 1);
+            assertThat(orderIds).hasSize(1);
+            assertThat(ordersCountForUser(user.id())).isEqualTo(1);
+        } else {
+            long createdCount = responses.stream().filter(r -> r.statusCode() == 201).count();
+            assertThat(createdCount).isGreaterThan(1);
+            assertThat(ordersCountForUser(user.id())).isGreaterThan(1);
+        }
+    }
+
+    @Test
     @DisplayName("BL-03 (shared coupon race): конкурентное использование купона с max_uses=1 разными пользователями")
     void concurrentSharedCouponRace() throws Exception {
         long couponId = insertCoupon("RACE10", 10, Instant.now().plusSeconds(3600), 1, 0);

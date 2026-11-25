@@ -7,12 +7,14 @@ import lab.contracts.shop.model.OrderCoupon;
 import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.NotFoundException;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.CheckoutProperties;
 import lab.shop.application.model.*;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.CouponRepository;
 import lab.shop.application.repository.OrderRepository;
 import lab.shop.application.service.CheckoutCrypto;
+import lab.shop.application.service.CheckoutSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,8 +70,8 @@ class VulnerableOrderServiceTest {
                 cartRepository,
                 couponRepository,
                 crypto,
-                jsonMapper,
-                Clock.fixed(T0, ZoneOffset.UTC));
+                new CheckoutSupport(orderRepository, jsonMapper),
+                new BusinessClock(Clock.fixed(T0, ZoneOffset.UTC)));
         authenticate(USER_ID);
     }
 

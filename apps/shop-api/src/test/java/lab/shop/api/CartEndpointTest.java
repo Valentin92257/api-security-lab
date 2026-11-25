@@ -1,26 +1,19 @@
 package lab.shop.api;
 
+import lab.contracts.shop.model.*;
+import lab.shop.api.exception.BadRequestException;
+import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.security.JwtService;
-import lab.shop.application.model.CartItemSnapshot;
-import lab.shop.application.model.CartSnapshot;
-import lab.shop.application.repository.CartRepository;
-import lab.shop.application.repository.CouponRepository;
-import lab.shop.application.repository.ProductRepository;
+import lab.shop.application.service.CartService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.AbstractPlatformTransactionManager;
-import org.springframework.transaction.support.DefaultTransactionStatus;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -30,37 +23,31 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
+@ActiveProfiles("protected")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(CartEndpointTest.NoOpTransactionManagerConfig.class)
-public abstract class CartEndpointTest {
+class CartEndpointTest {
 
-    protected static final long CURRENT_USER_ID = 1L;
-    protected static final long CART_ID = 10L;
-    protected static final Instant T0 = Instant.parse("2026-01-01T10:00:00Z");
-
+    private static final long CURRENT_USER_ID = 1L;
+    private static final long CART_ID = 10L;
+    private static final Instant T0 = Instant.parse("2026-01-01T10:00:00Z");
     private static final String BASE_PATH = "/api/v1";
 
     @LocalServerPort
     private int port;
 
     @MockitoBean
-    protected CartRepository cartRepository;
-
-    @MockitoBean
-    protected ProductRepository productRepository;
-
-    @MockitoBean
-    protected CouponRepository couponRepository;
+    private CartService cartService;
 
     @Autowired
     private JwtService jwtService;
@@ -69,8 +56,6 @@ public abstract class CartEndpointTest {
     private JsonMapper jsonMapper;
 
     private HttpClient client;
-
-    protected abstract boolean locksCartOnMutations();
 
     @BeforeEach
     void setUpClient() {
@@ -83,10 +68,11 @@ public abstract class CartEndpointTest {
     }
 
     @Test
-    @DisplayName("GET /cart возвращает корзину текущего пользователя")
+    @DisplayName("GET /cart возвращает 200 и сериализованную корзину")
     void getCartReturnsCart() throws Exception {
-        CartSnapshot snapshot = new CartSnapshot(CART_ID, CURRENT_USER_ID, 0L, T0, List.of(), null);
-        when(cartRepository.findByUserId(CURRENT_USER_ID)).thenReturn(Optional.of(snapshot));
+        Cart empty = new Cart(CART_ID, CURRENT_USER_ID, 0L, List.of(), null,
+                0L, 0L, 0L, Cart.CurrencyEnum.RUB, T0.atOffset(ZoneOffset.UTC));
+        when(cartService.getCart()).thenReturn(empty);
 
         HttpResponse<String> response = get("/cart", tokenFor(CURRENT_USER_ID));
 
@@ -106,13 +92,13 @@ public abstract class CartEndpointTest {
         HttpResponse<String> response = get("/cart", null);
 
         assertThat(response.statusCode()).isEqualTo(401);
-        verifyNoInteractions(cartRepository);
+        verifyNoInteractions(cartService);
     }
 
     @Test
-    @DisplayName("GET /cart при отсутствии корзины возвращает 404")
+    @DisplayName("GET /cart при NotFoundException возвращает 404 NOT_FOUND")
     void getCartWhenMissingReturns404() throws Exception {
-        when(cartRepository.findByUserId(CURRENT_USER_ID)).thenReturn(Optional.empty());
+        when(cartService.getCart()).thenThrow(new NotFoundException("Корзина не найдена"));
 
         HttpResponse<String> response = get("/cart", tokenFor(CURRENT_USER_ID));
 
@@ -121,14 +107,12 @@ public abstract class CartEndpointTest {
     }
 
     @Test
-    @DisplayName("PUT /cart/items/{productId} устанавливает количество и возвращает обновлённую корзину")
+    @DisplayName("PUT /cart/items/{productId} передаёт productId и quantity, возвращает обновлённую корзину")
     void setCartQuantityUpdatesCart() throws Exception {
-        CartSnapshot before = new CartSnapshot(CART_ID, CURRENT_USER_ID, 0L, T0, List.of(), null);
-        CartSnapshot after = new CartSnapshot(CART_ID, CURRENT_USER_ID, 1L, T0,
-                List.of(new CartItemSnapshot(5L, "Лампа", 2, 1500, true)), null);
-        when(productRepository.existsPublished(5L)).thenReturn(true);
-        stubCartMutationRead(before, after);
-        when(cartRepository.setItemQuantity(CART_ID, 5L, 2)).thenReturn(true);
+        Cart updated = new Cart(CART_ID, CURRENT_USER_ID, 1L,
+                List.of(new LineItem(5L, "Лампа", 2, 1500, 3000L)),
+                null, 3000L, 0L, 3000L, Cart.CurrencyEnum.RUB, T0.atOffset(ZoneOffset.UTC));
+        when(cartService.setCartQuantity(eq(5L), eq(new SetQuantityRequest(2)))).thenReturn(updated);
 
         HttpResponse<String> response = put("/cart/items/5", Map.of("quantity", 2), tokenFor(CURRENT_USER_ID));
 
@@ -137,28 +121,38 @@ public abstract class CartEndpointTest {
         assertThat(body.get("revision").asLong()).isEqualTo(1L);
         assertThat(body.get("subtotal").asLong()).isEqualTo(3000L);
         assertThat(body.get("items").get(0).get("quantity").asInt()).isEqualTo(2);
-        verify(cartRepository).bumpRevision(eq(CART_ID), any(Instant.class));
     }
 
     @Test
-    @DisplayName("PUT /cart/items/{productId} для неизвестного или draft товара возвращает 404")
-    void setCartQuantityForMissingProductReturns404() throws Exception {
-        when(productRepository.existsPublished(99L)).thenReturn(false);
+    @DisplayName("PUT /cart/items/{productId} с BadRequestException возвращает 400 INVALID_REQUEST")
+    void setCartQuantityBadRequestReturns400() throws Exception {
+        when(cartService.setCartQuantity(eq(5L), any())).thenThrow(new BadRequestException("неверный quantity"));
 
-        HttpResponse<String> response = put("/cart/items/99", Map.of("quantity", 1), tokenFor(CURRENT_USER_ID));
-
-        assertThat(response.statusCode()).isEqualTo(404);
-        verifyNoInteractions(cartRepository);
-    }
-
-    @Test
-    @DisplayName("PUT /cart/items/{productId} без quantity возвращает 400 INVALID_REQUEST")
-    void setCartQuantityWithoutQuantityReturns400() throws Exception {
         HttpResponse<String> response = put("/cart/items/5", Map.of(), tokenFor(CURRENT_USER_ID));
 
         assertThat(response.statusCode()).isEqualTo(400);
         assertThat(json(response).get("code").asString()).isEqualTo("INVALID_REQUEST");
-        verifyNoInteractions(cartRepository, productRepository);
+    }
+
+    @Test
+    @DisplayName("PUT /cart/items/{productId} с нечисловым id возвращает 400 до вызова сервиса")
+    void setCartQuantityMalformedIdReturns400() throws Exception {
+        HttpResponse<String> response = put("/cart/items/abc", Map.of("quantity", 1), tokenFor(CURRENT_USER_ID));
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(json(response).get("code").asString()).isEqualTo("INVALID_REQUEST");
+        verifyNoInteractions(cartService);
+    }
+
+    @Test
+    @DisplayName("PUT /cart/items/{productId} при NotFoundException возвращает 404")
+    void setCartQuantityMissingProductReturns404() throws Exception {
+        when(cartService.setCartQuantity(eq(99L), any())).thenThrow(new NotFoundException("Товар не найден"));
+
+        HttpResponse<String> response = put("/cart/items/99", Map.of("quantity", 1), tokenFor(CURRENT_USER_ID));
+
+        assertThat(response.statusCode()).isEqualTo(404);
+        assertThat(json(response).get("code").asString()).isEqualTo("NOT_FOUND");
     }
 
     @Test
@@ -167,7 +161,27 @@ public abstract class CartEndpointTest {
         HttpResponse<String> response = put("/cart/items/5", Map.of("quantity", 1), null);
 
         assertThat(response.statusCode()).isEqualTo(401);
-        verifyNoInteractions(cartRepository, productRepository);
+        verifyNoInteractions(cartService);
+    }
+
+    @Test
+    @DisplayName("PUT /cart/coupon возвращает 200 и корзину с купоном")
+    void selectCartCouponUpdatesCart() throws Exception {
+        Cart updated = new Cart(CART_ID, CURRENT_USER_ID, 2L,
+                List.of(new LineItem(5L, "Лампа", 1, 1000, 1000L)),
+                new CartCoupon("SAVE10", 10, CartCoupon.EligibilityEnum.VALID),
+                1000L, 100L, 900L, Cart.CurrencyEnum.RUB, T0.atOffset(ZoneOffset.UTC));
+        when(cartService.selectCoupon(eq(new SelectCouponRequest(" save10 ")))).thenReturn(updated);
+
+        HttpResponse<String> response = put("/cart/coupon", Map.of("code", " save10 "), tokenFor(CURRENT_USER_ID));
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        JsonNode body = json(response);
+        assertThat(body.get("revision").asLong()).isEqualTo(2L);
+        assertThat(body.get("coupon").get("code").asString()).isEqualTo("SAVE10");
+        assertThat(body.get("coupon").get("eligibility").asString()).isEqualTo("VALID");
+        assertThat(body.get("discount").asLong()).isEqualTo(100L);
+        assertThat(body.get("total").asLong()).isEqualTo(900L);
     }
 
     @Test
@@ -176,33 +190,24 @@ public abstract class CartEndpointTest {
         HttpResponse<String> response = put("/cart/coupon", Map.of("code", "SAVE10"), null);
 
         assertThat(response.statusCode()).isEqualTo(401);
-        verifyNoInteractions(cartRepository, couponRepository);
+        verifyNoInteractions(cartService);
     }
 
     @Test
-    @DisplayName("PUT /cart/coupon для неизвестного кода возвращает 404")
+    @DisplayName("PUT /cart/coupon при NotFoundException возвращает 404")
     void selectUnknownCouponReturns404() throws Exception {
-        when(couponRepository.findByCode("NOPE")).thenReturn(Optional.empty());
+        when(cartService.selectCoupon(any())).thenThrow(new NotFoundException("Купон не найден"));
 
         HttpResponse<String> response = put("/cart/coupon", Map.of("code", "NOPE"), tokenFor(CURRENT_USER_ID));
 
         assertThat(response.statusCode()).isEqualTo(404);
     }
 
-    protected void stubCartMutationRead(CartSnapshot before, CartSnapshot after) {
-        if (locksCartOnMutations()) {
-            when(cartRepository.lockByUserId(CURRENT_USER_ID)).thenReturn(Optional.of(before));
-            when(cartRepository.findByUserId(CURRENT_USER_ID)).thenReturn(Optional.of(after));
-        } else {
-            when(cartRepository.findByUserId(CURRENT_USER_ID)).thenReturn(Optional.of(before), Optional.of(after));
-        }
-    }
-
-    protected String tokenFor(long userId) {
+    private String tokenFor(long userId) {
         return jwtService.issue(userId);
     }
 
-    protected HttpResponse<String> get(String path, String token) throws Exception {
+    private HttpResponse<String> get(String path, String token) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + BASE_PATH + path))
                 .timeout(Duration.ofSeconds(5))
                 .header("X-Request-Id", UUID.randomUUID().toString())
@@ -213,7 +218,7 @@ public abstract class CartEndpointTest {
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    protected HttpResponse<String> put(String path, Object body, String token) throws Exception {
+    private HttpResponse<String> put(String path, Object body, String token) throws Exception {
         String json = jsonMapper.writeValueAsString(body);
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + BASE_PATH + path))
                 .timeout(Duration.ofSeconds(5))
@@ -226,32 +231,7 @@ public abstract class CartEndpointTest {
         return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    protected JsonNode json(HttpResponse<String> response) {
+    private JsonNode json(HttpResponse<String> response) {
         return jsonMapper.readTree(response.body());
-    }
-
-    @TestConfiguration(proxyBeanMethods = false)
-    static class NoOpTransactionManagerConfig {
-        @Bean
-        PlatformTransactionManager transactionManager() {
-            return new AbstractPlatformTransactionManager() {
-                @Override
-                protected Object doGetTransaction() {
-                    return new Object();
-                }
-
-                @Override
-                protected void doBegin(Object transaction, TransactionDefinition definition) {
-                }
-
-                @Override
-                protected void doCommit(DefaultTransactionStatus status) {
-                }
-
-                @Override
-                protected void doRollback(DefaultTransactionStatus status) {
-                }
-            };
-        }
     }
 }

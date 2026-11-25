@@ -1,4 +1,4 @@
-package lab.shop.secured.service;
+package lab.shop.application.service;
 
 import lab.contracts.shop.model.LoginRequest;
 import lab.contracts.shop.model.LoginResult;
@@ -9,6 +9,7 @@ import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.UnauthorizedException;
 import lab.shop.api.security.JwtProperties;
 import lab.shop.api.security.JwtService;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.model.UserCredentials;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.UserRepository;
@@ -29,11 +30,11 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class ProtectedAuthServiceTest {
+class AuthServiceTest {
 
     private static final String DUMMY_HASH = "dummy-hash-value";
     private static final String VALID_PASSWORD = "password123";
@@ -47,7 +48,7 @@ public class ProtectedAuthServiceTest {
     @Mock
     private JwtService jwtService;
 
-    private ProtectedAuthService service;
+    private AuthService service;
 
     @BeforeEach
     void setUp() {
@@ -55,8 +56,8 @@ public class ProtectedAuthServiceTest {
                 "test-secret-at-least-32-bytes-long-0123456789",
                 "urn:lab:shop:test", "shop-test", Duration.ofMinutes(10));
         when(passwordEncoder.encode("dummy-password")).thenReturn(DUMMY_HASH);
-        service = new ProtectedAuthService(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties,
-                Clock.systemUTC());
+        service = new AuthService(userRepository, cartRepository, passwordEncoder, jwtService, jwtProperties,
+                new BusinessClock(Clock.systemUTC()));
     }
 
     @Test

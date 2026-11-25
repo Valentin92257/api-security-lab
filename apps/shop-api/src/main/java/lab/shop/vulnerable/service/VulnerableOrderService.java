@@ -4,25 +4,24 @@ import lab.contracts.shop.model.CheckoutRequest;
 import lab.contracts.shop.model.LineItem;
 import lab.contracts.shop.model.Order;
 import lab.contracts.shop.model.OrderCoupon;
-import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.security.AuthUtils;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.model.*;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.CouponRepository;
 import lab.shop.application.repository.OrderRepository;
 import lab.shop.application.service.CheckoutCrypto;
+import lab.shop.application.service.CheckoutSupport;
+import lab.shop.application.service.CheckoutSupport.Pricing;
 import lab.shop.application.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.json.JsonMapper;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,13 +44,13 @@ public class VulnerableOrderService implements OrderService {
     private final CartRepository cartRepository;
     private final CouponRepository couponRepository;
     private final CheckoutCrypto checkoutCrypto;
-    private final JsonMapper jsonMapper;
-    private final Clock clock;
+    private final CheckoutSupport checkoutSupport;
+    private final BusinessClock businessClock;
 
     @Override
     @Transactional
     public CheckoutResult checkout(String idempotencyKey, CheckoutRequest request) {
-        validateRequest(idempotencyKey, request);
+        checkoutSupport.validateRequest(idempotencyKey, request);
 
         long userId = AuthUtils.getUserId();
         byte[] keyHash = checkoutCrypto.idempotencyKeyHash(idempotencyKey);
@@ -59,10 +58,11 @@ public class VulnerableOrderService implements OrderService {
 
         // Намеренные слабости: пропускаем advisory lock, lookup по Idempotency-Key, FOR UPDATE и проверку revision.
         CartSnapshot cart = loadNonEmptyCart(userId);
-        Instant now = clock.instant();
+        Instant now = businessClock.now();
         Pricing pricing = calculatePricingUnchecked(cart, request.getQuotedTotal(), now);
 
-        Order order = persistOrder(userId, cart, request.getCartRevision(), pricing, keyHash, fingerprint, now);
+        Order order = checkoutSupport.persist(
+                userId, cart, request.getCartRevision(), pricing, keyHash, fingerprint, now);
 
         // Намеренная слабость: не очищаем корзину и не повышаем revision после checkout.
         return new CheckoutResult(order, false);
@@ -73,20 +73,7 @@ public class VulnerableOrderService implements OrderService {
         // Намеренная слабость: владелец заказа не проверяется.
         OrderResponse stored = orderRepository.findResponse(orderId)
                 .orElseThrow(() -> new NotFoundException("Заказ не найден"));
-        return jsonMapper.readValue(stored.responseBody(), Order.class);
-    }
-
-    private void validateRequest(String idempotencyKey, CheckoutRequest request) {
-        if (idempotencyKey == null || !IDEMPOTENCY_KEY_PATTERN.matcher(idempotencyKey).matches()) {
-            throw new BadRequestException("Некорректный Idempotency-Key");
-        }
-        if (request.getCartRevision() == null || request.getQuotedTotal() == null) {
-            throw new BadRequestException("cartRevision и quotedTotal обязательны");
-        }
-        // Схемные границы общие для режимов.
-        if (request.getCartRevision() < 0 || request.getQuotedTotal() < 0) {
-            throw new BadRequestException("cartRevision и quotedTotal должны быть неотрицательными");
-        }
+        return checkoutSupport.deserializeOrder(stored.responseBody());
     }
 
     private CartSnapshot loadNonEmptyCart(long userId) {
@@ -122,54 +109,5 @@ public class VulnerableOrderService implements OrderService {
 
         // Намеренная слабость: доверяем клиентскому quotedTotal как итоговой сумме.
         return new Pricing(lineItems, orderItems, subtotal, discount, quotedTotal, orderCoupon);
-    }
-
-    private Order persistOrder(long userId,
-                               CartSnapshot cart,
-                               long cartRevision,
-                               Pricing pricing,
-                               byte[] keyHash,
-                               byte[] fingerprint,
-                               Instant now) {
-        long orderId = orderRepository.nextId();
-        Order order = new Order(
-                orderId,
-                userId,
-                cart.id(),
-                cartRevision,
-                pricing.lineItems(),
-                pricing.coupon(),
-                pricing.subtotal(),
-                pricing.discount(),
-                pricing.total(),
-                Order.CurrencyEnum.RUB,
-                now.atOffset(ZoneOffset.UTC));
-
-        String responseBody = jsonMapper.writeValueAsString(order);
-        orderRepository.insert(new NewOrder(
-                orderId,
-                userId,
-                cart.id(),
-                cartRevision,
-                pricing.subtotal(),
-                pricing.discount(),
-                pricing.total(),
-                cart.coupon() == null ? null : cart.coupon().id(),
-                now,
-                keyHash,
-                fingerprint,
-                responseBody,
-                pricing.orderItems()));
-        return order;
-    }
-
-    private record Pricing(
-            List<LineItem> lineItems,
-            List<OrderItem> orderItems,
-            long subtotal,
-            long discount,
-            long total,
-            OrderCoupon coupon
-    ) {
     }
 }

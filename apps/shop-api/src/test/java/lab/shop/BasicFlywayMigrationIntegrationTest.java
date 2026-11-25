@@ -42,4 +42,17 @@ public abstract class BasicFlywayMigrationIntegrationTest extends PostgreSQLInte
                 .as("Не должно быть неуспешных миграций")
                 .isZero();
     }
+
+    @Test
+    @DisplayName("Функция check_business_invariants установлена и возвращает 0 нарушений на пустой БД")
+    void invariantsFunctionWorksOnEmptyDatabase() {
+        Integer violations = jdbcClient.sql("""
+                        SELECT count(*)
+                        FROM check_business_invariants('{"catalog":[],"coupons":[],"couponCounters":[],"orderIds":[]}'::jsonb)
+                        """)
+                .query(Integer.class)
+                .single();
+
+        assertThat(violations).isZero();
+    }
 }

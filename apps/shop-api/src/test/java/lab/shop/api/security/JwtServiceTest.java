@@ -113,6 +113,24 @@ class JwtServiceTest {
     }
 
     @Test
+    @DisplayName("Допуск по времени 5 секунд действует для exp и nbf")
+    void clockSkewToleranceAppliesToExpAndNbf() {
+        Instant issuedAt = Instant.parse("2026-01-01T12:00:00Z");
+        JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(JwtSupport.key(SECRET)));
+        JwtService fixedService = new JwtService(encoder, PROPS, Clock.fixed(issuedAt, ZoneOffset.UTC));
+        String token = fixedService.issue(1L);
+
+        // nbf: за 4с до выпуска — допустимо, за 6с — отклоняется
+        assertThat(decoderAt(issuedAt.minusSeconds(4)).decode(token).getSubject()).isEqualTo("1");
+        assertThatThrownBy(() -> decoderAt(issuedAt.minusSeconds(6)).decode(token)).isInstanceOf(JwtException.class);
+
+        // exp: через 4с после истечения — допустимо, через 6с — отклоняется
+        Instant exp = issuedAt.plus(TTL);
+        assertThat(decoderAt(exp.plusSeconds(4)).decode(token).getSubject()).isEqualTo("1");
+        assertThatThrownBy(() -> decoderAt(exp.plusSeconds(6)).decode(token)).isInstanceOf(JwtException.class);
+    }
+
+    @Test
     @DisplayName("Токен без exp отклоняется даже при валидной подписи")
     void tokenWithoutExpIsRejected() {
         JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(JwtSupport.key(SECRET)));

@@ -3,6 +3,7 @@ package lab.shop.secured.service;
 import lab.contracts.shop.model.*;
 import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.NotFoundException;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.model.CartItemSnapshot;
 import lab.shop.application.model.CartSnapshot;
 import lab.shop.application.model.Coupon;
@@ -31,9 +32,7 @@ import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,7 +54,7 @@ class ProtectedCartServiceTest {
     @BeforeEach
     void setUp() {
         service = new ProtectedCartService(cartRepository, productRepository, couponRepository,
-                Clock.fixed(T0, ZoneOffset.UTC));
+                new BusinessClock(Clock.fixed(T0, ZoneOffset.UTC)));
         authenticate(USER_ID);
     }
 
@@ -266,6 +265,29 @@ class ProtectedCartServiceTest {
         assertThat(result.getCoupon()).isEqualTo(new CartCoupon("USED20", 20, CartCoupon.EligibilityEnum.EXHAUSTED));
         assertThat(result.getDiscount()).isZero();
         assertThat(result.getTotal()).isEqualTo(1000L);
+    }
+
+    @Test
+    @DisplayName("Скидка в корзине округляется вниз, а 100% купон обнуляет total")
+    void getCartAppliesFloorDiscountAndFullPercentCoupon() {
+        Coupon tenPercent = new Coupon(10L, "TEN", 10, T0.plusSeconds(3600), 5, 0);
+        CartSnapshot withFloor = new CartSnapshot(CART_ID, USER_ID, 1L, T0,
+                List.of(new CartItemSnapshot(1L, "Товар", 1, 999, true)), tenPercent);
+        when(cartRepository.findByUserId(USER_ID)).thenReturn(Optional.of(withFloor));
+
+        Cart floored = service.getCart();
+        assertThat(floored.getSubtotal()).isEqualTo(999L);
+        assertThat(floored.getDiscount()).isEqualTo(99L);
+        assertThat(floored.getTotal()).isEqualTo(900L);
+
+        Coupon fullDiscount = new Coupon(11L, "FREE100", 100, T0.plusSeconds(3600), 5, 0);
+        CartSnapshot withFull = new CartSnapshot(CART_ID, USER_ID, 2L, T0,
+                List.of(new CartItemSnapshot(1L, "Товар", 1, 999, true)), fullDiscount);
+        when(cartRepository.findByUserId(USER_ID)).thenReturn(Optional.of(withFull));
+
+        Cart free = service.getCart();
+        assertThat(free.getDiscount()).isEqualTo(999L);
+        assertThat(free.getTotal()).isZero();
     }
 
     @Test

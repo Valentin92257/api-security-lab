@@ -46,6 +46,8 @@ public abstract class AuthFlowIntegrationTest extends PostgreSQLIntegrationTest 
 
     private HttpClient client;
 
+    protected abstract boolean isProtected();
+
     @BeforeEach
     void setUpClient() {
         client = HttpClient.newHttpClient();
@@ -115,6 +117,29 @@ public abstract class AuthFlowIntegrationTest extends PostgreSQLIntegrationTest 
         HttpResponse<String> again = register(login, email);
 
         assertThat(again.statusCode()).isEqualTo(409);
+    }
+
+    @Test
+    @DisplayName("Чужой профиль возвращает 404 в protected и 200 с данными жертвы в vulnerable")
+    void foreignProfileAccess() throws Exception {
+        Account victim = registerAndLogin();
+        Account attacker = registerAndLogin();
+
+        HttpResponse<String> stolen = getProfile(victim.id(), attacker.token());
+
+        if (isProtected()) {
+            HttpResponse<String> missing = getProfile(victim.id() + 999_999L, attacker.token());
+            assertThat(stolen.statusCode()).isEqualTo(404);
+            assertThat(missing.statusCode()).isEqualTo(404);
+            assertThat(json(stolen).get("code").asString()).isEqualTo("NOT_FOUND");
+            assertThat(stolen.body()).doesNotContain(victim.login());
+        } else {
+            assertThat(stolen.statusCode()).isEqualTo(200);
+            JsonNode body = json(stolen);
+            assertThat(body.get("id").asLong()).isEqualTo(victim.id());
+            assertThat(body.get("login").asString()).isEqualTo(victim.login());
+            assertThat(body.get("email").asString()).isEqualTo(victim.login() + "@example.com");
+        }
     }
 
     @Test
