@@ -1,16 +1,18 @@
 package lab.shop.secured.service;
 
 import lab.contracts.shop.model.*;
-import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.ConflictException;
 import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.security.AuthUtils;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.CheckoutProperties;
 import lab.shop.application.model.*;
 import lab.shop.application.repository.CartRepository;
 import lab.shop.application.repository.CouponRepository;
 import lab.shop.application.repository.OrderRepository;
 import lab.shop.application.service.CheckoutCrypto;
+import lab.shop.application.service.CheckoutSupport;
+import lab.shop.application.service.CheckoutSupport.Pricing;
 import lab.shop.application.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
@@ -18,16 +20,12 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.security.MessageDigest;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Pattern;
 
 @Service
 @Profile("protected")
@@ -37,20 +35,19 @@ public class ProtectedOrderService implements OrderService {
     private static final int MIN_QUANTITY = 1;
     private static final int MAX_QUANTITY = 99;
     private static final int MAX_DISTINCT_ITEMS = 100;
-    private static final Pattern IDEMPOTENCY_KEY_PATTERN = Pattern.compile("[A-Za-z0-9._-]{16,128}");
 
     private final OrderRepository orderRepository;
     private final CartRepository cartRepository;
     private final CouponRepository couponRepository;
     private final CheckoutCrypto checkoutCrypto;
     private final CheckoutProperties checkoutProperties;
-    private final JsonMapper jsonMapper;
-    private final Clock clock;
+    private final CheckoutSupport checkoutSupport;
+    private final BusinessClock businessClock;
 
     @Override
     @Transactional
     public CheckoutResult checkout(String idempotencyKey, CheckoutRequest request) {
-        validateRequest(idempotencyKey, request);
+        checkoutSupport.validateRequest(idempotencyKey, request);
 
         long userId = AuthUtils.getUserId();
         byte[] keyHash = checkoutCrypto.idempotencyKeyHash(idempotencyKey);
@@ -63,7 +60,7 @@ public class ProtectedOrderService implements OrderService {
         }
 
         CartSnapshot cart = lockAndValidateCart(userId, request.getCartRevision());
-        Instant now = clock.instant();
+        Instant now = businessClock.now();
         Pricing pricing = calculatePricing(cart, request.getQuotedTotal(), now);
         consumeCoupon(cart.coupon(), now);
 
@@ -80,19 +77,7 @@ public class ProtectedOrderService implements OrderService {
         if (stored.userId() != userId) {
             throw new NotFoundException("Заказ не найден");
         }
-        return deserializeOrder(stored.responseBody());
-    }
-
-    private void validateRequest(String idempotencyKey, CheckoutRequest request) {
-        if (idempotencyKey == null || !IDEMPOTENCY_KEY_PATTERN.matcher(idempotencyKey).matches()) {
-            throw new BadRequestException("Некорректный Idempotency-Key");
-        }
-        if (request.getCartRevision() == null || request.getQuotedTotal() == null) {
-            throw new BadRequestException("cartRevision и quotedTotal обязательны");
-        }
-        if (request.getCartRevision() < 0 || request.getQuotedTotal() < 0) {
-            throw new BadRequestException("cartRevision и quotedTotal должны быть неотрицательными");
-        }
+        return checkoutSupport.deserializeOrder(stored.responseBody());
     }
 
     private void lockIdempotencyScope(long userId, byte[] keyHash) {
@@ -112,7 +97,7 @@ public class ProtectedOrderService implements OrderService {
         if (!MessageDigest.isEqual(existing.get().requestFingerprint(), fingerprint)) {
             throw new ConflictException("Idempotency-Key уже использован с другим телом запроса");
         }
-        return Optional.of(deserializeOrder(existing.get().responseBody()));
+        return Optional.of(checkoutSupport.deserializeOrder(existing.get().responseBody()));
     }
 
     private CartSnapshot lockAndValidateCart(long userId, long requestedRevision) {
@@ -175,55 +160,10 @@ public class ProtectedOrderService implements OrderService {
                                byte[] keyHash,
                                byte[] fingerprint,
                                Instant now) {
-        long orderId = orderRepository.nextId();
-        Order order = new Order(
-                orderId,
-                userId,
-                cart.id(),
-                cart.revision(),
-                pricing.lineItems(),
-                pricing.coupon(),
-                pricing.subtotal(),
-                pricing.discount(),
-                pricing.total(),
-                Order.CurrencyEnum.RUB,
-                now.atOffset(ZoneOffset.UTC));
-
-        String responseBody = jsonMapper.writeValueAsString(order);
-        NewOrder newOrder = new NewOrder(
-                orderId,
-                userId,
-                cart.id(),
-                cart.revision(),
-                pricing.subtotal(),
-                pricing.discount(),
-                pricing.total(),
-                cart.coupon() == null ? null : cart.coupon().id(),
-                now,
-                keyHash,
-                fingerprint,
-                responseBody,
-                pricing.orderItems());
-
         try {
-            orderRepository.insert(newOrder);
+            return checkoutSupport.persist(userId, cart, cart.revision(), pricing, keyHash, fingerprint, now);
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException("Конфликт при сохранении заказа", e);
         }
-        return order;
-    }
-
-    private Order deserializeOrder(String responseBody) {
-        return jsonMapper.readValue(responseBody, Order.class);
-    }
-
-    private record Pricing(
-            List<LineItem> lineItems,
-            List<OrderItem> orderItems,
-            long subtotal,
-            long discount,
-            long total,
-            OrderCoupon coupon
-    ) {
     }
 }
