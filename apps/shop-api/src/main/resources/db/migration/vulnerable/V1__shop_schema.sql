@@ -64,7 +64,7 @@ CREATE TABLE orders
     discount             bigint                                  NOT NULL,
     total                bigint                                  NOT NULL,
     coupon_id            bigint,
-    created_at           timestamptz                             NOT NULL DEFAULT current_timestamp,
+    created_at           timestamptz                             NOT NULL,
     idempotency_key_hash bytea                                   NOT NULL,
     request_fingerprint  bytea                                   NOT NULL,
     response_body        jsonb                                   NOT NULL,

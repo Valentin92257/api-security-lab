@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("vulnerable")
 class VulnerableFlywayMigrationIntegrationTest extends BasicFlywayMigrationIntegrationTest {
 
-    @ParameterizedTest(name = "Констрейнт {0}")
+    @ParameterizedTest(name = "Ограничение {0}")
     @ValueSource(strings = {
             "cart_items_protected_1",
             "order_items_protected_1",
@@ -24,7 +24,7 @@ class VulnerableFlywayMigrationIntegrationTest extends BasicFlywayMigrationInteg
             "orders_cart_revision_once",
             "orders_idempotency_scope_once"
     })
-    @DisplayName("В уязвимом профиле отсутствуют защитные констрейнты")
+    @DisplayName("В уязвимом профиле отсутствуют защитные ограничения")
     void shouldNotContainProtectedConstraints(String constraintName) {
         Integer count = jdbcClient.sql(
                         "SELECT count(*) FROM information_schema.table_constraints " +
