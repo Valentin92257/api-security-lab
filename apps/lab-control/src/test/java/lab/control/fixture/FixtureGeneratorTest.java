@@ -208,4 +208,33 @@ class FixtureGeneratorTest {
         assertThat(manifest.usersByRole(FixtureUserRole.EMPTY_CART_USER)).hasSize(1);
         assertThat(manifest.credentialStuffing().attempts()).hasSize(200);
     }
+
+    @Test
+    void supportsConfigurableUserCountAttemptsAndValidAccounts() {
+        var customGenerator = new FixtureGenerator(codec, 30, 50, 5);
+        FixtureManifest manifest = customGenerator.generate(42, BASE_TIME);
+
+        assertThat(manifest.users()).hasSize(30);
+        assertThat(manifest.carts()).hasSize(30);
+        assertThat(manifest.credentialStuffing().victims()).hasSize(5);
+        assertThat(manifest.credentialStuffing().attempts()).hasSize(50);
+        assertThat(manifest.credentialStuffing().attempts().stream().filter(CredentialPair::valid)).hasSize(5);
+
+        Schema userSchema = schemas.getSchema(SchemaLocation.of("classpath:contracts/schemas/shop.yaml#/$defs/User"));
+        for (FixtureUser user : manifest.users()) {
+            JsonNode node = codec.jsonMapper().createObjectNode()
+                    .put("id", user.id())
+                    .put("login", user.login())
+                    .put("name", user.name())
+                    .put("email", user.email());
+            assertThat(userSchema.validate(node)).isEmpty();
+        }
+
+        assertThatThrownBy(() -> new FixtureGenerator(codec, 23, 200, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new FixtureGenerator(codec, 24, 2, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new FixtureGenerator(codec, 24, 50, 25))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

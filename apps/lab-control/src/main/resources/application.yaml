@@ -31,3 +31,6 @@ lab:
     password: ${LAB_FIXTURE_DB_PASSWORD:}
     vulnerable-url: ${LAB_FIXTURE_VULNERABLE_DB_URL:jdbc:postgresql://db:5432/vulnerable}
     protected-url: ${LAB_FIXTURE_PROTECTED_DB_URL:jdbc:postgresql://db:5432/protected}
+    user-count: ${LAB_FIXTURE_USER_COUNT:24}
+    cs-attempts: ${LAB_FIXTURE_CS_ATTEMPTS:200}
+    cs-valid-accounts: ${LAB_FIXTURE_CS_VALID_ACCOUNTS:3}

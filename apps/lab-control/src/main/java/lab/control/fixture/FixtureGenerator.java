@@ -2,6 +2,7 @@ package lab.control.fixture;
 
 import lab.contracts.json.ContractJsonCodec;
 import lab.control.fixture.model.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -29,9 +30,26 @@ public class FixtureGenerator {
     private static final long CS_SEED_SALT = 0x517CC1B727220A95L;
 
     private final JsonMapper json;
+    private final int userCount;
+    private final int csAttempts;
+    private final int csValidAccounts;
+
+    @Autowired
+    public FixtureGenerator(ContractJsonCodec codec, ShopFixtureProperties properties) {
+        this.json = codec.jsonMapper();
+        this.userCount = properties.userCount();
+        this.csAttempts = properties.csAttempts();
+        this.csValidAccounts = properties.csValidAccounts();
+    }
 
     public FixtureGenerator(ContractJsonCodec codec) {
-        this.json = codec.jsonMapper();
+        this(codec, ShopFixtureProperties.DEFAULT_USER_COUNT,
+                ShopFixtureProperties.DEFAULT_CS_ATTEMPTS,
+                ShopFixtureProperties.DEFAULT_CS_VALID_ACCOUNTS);
+    }
+
+    public FixtureGenerator(ContractJsonCodec codec, int userCount, int csAttempts, int csValidAccounts) {
+        this(codec, new ShopFixtureProperties("", "", "", "", userCount, csAttempts, csValidAccounts));
     }
 
     public FixtureManifest generate(int seed, Instant businessTimeBase) {
@@ -57,14 +75,22 @@ public class FixtureGenerator {
     }
 
     private List<FixtureUser> generateUsers(int seed, Random rnd) {
-        return FixtureCatalog.USERS.stream().map(spec -> {
-            String password = "fx" + seed + "_u" + spec.id() + "_" + Long.toUnsignedString(rnd.nextLong(), 36);
-            if (password.length() > 48) {
-                password = password.substring(0, 48);
-            }
-            return new FixtureUser(spec.id(), spec.login(), spec.name(),
-                    spec.login() + "@example.com", password, spec.role());
-        }).toList();
+        List<FixtureUser> users = new ArrayList<>(userCount);
+        for (FixtureCatalog.UserSpec spec : FixtureCatalog.USERS) {
+            users.add(new FixtureUser(spec.id(), spec.login(), spec.name(),
+                    spec.login() + "@example.com", generatePassword(seed, spec.id(), rnd), spec.role()));
+        }
+        for (long id = FixtureCatalog.USERS.size() + 1L; id <= userCount; ++id) {
+            String login = "extra_user_" + id;
+            users.add(new FixtureUser(id, login, "Extra User " + id,
+                    login + "@example.com", generatePassword(seed, id, rnd), FixtureUserRole.CS_BENIGN));
+        }
+        return users;
+    }
+
+    private static String generatePassword(int seed, long userId, Random rnd) {
+        String password = "fx" + seed + "_u" + userId + "_" + Long.toUnsignedString(rnd.nextLong(), 36);
+        return password.length() > 48 ? password.substring(0, 48) : password;
     }
 
     private List<FixtureProduct> generateProducts(int seed, Random rnd) {
@@ -206,12 +232,19 @@ public class FixtureGenerator {
     }
 
     private CredentialStuffingFixture generateCredentialStuffing(int seed, List<FixtureUser> users) {
-        List<FixtureUser> victims = users.stream().filter(u -> u.role() == FixtureUserRole.CS_VICTIM).toList();
+        List<FixtureUser> victims = new ArrayList<>(csValidAccounts);
+        users.stream().filter(u -> u.role() == FixtureUserRole.CS_VICTIM).limit(csValidAccounts).forEach(victims::add);
+        if (victims.size() < csValidAccounts) {
+            users.stream()
+                    .filter(u -> u.role() != FixtureUserRole.CS_VICTIM)
+                    .limit(csValidAccounts - victims.size())
+                    .forEach(victims::add);
+        }
         Random csrnd = new Random(Integer.toUnsignedLong(seed) ^ CS_SEED_SALT);
 
-        List<CredentialPair> attempts = new ArrayList<>(CredentialStuffingFixture.EXPECTED_ATTEMPTS);
+        List<CredentialPair> attempts = new ArrayList<>(csAttempts);
         victims.forEach(v -> attempts.add(new CredentialPair(v.id(), v.login(), v.password(), true)));
-        while (attempts.size() < CredentialStuffingFixture.EXPECTED_ATTEMPTS) {
+        while (attempts.size() < csAttempts) {
             FixtureUser target = victims.get(csrnd.nextInt(victims.size()));
             String invalidPassword = "invalid_" + Long.toUnsignedString(csrnd.nextLong(), 36);
             if (invalidPassword.equals(target.password())) {
