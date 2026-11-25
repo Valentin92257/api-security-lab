@@ -3,6 +3,7 @@ package lab.shop.api;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
+import ch.qos.logback.core.FileAppender;
 import lab.contracts.runtime.model.RunSetup;
 import lab.contracts.runtime.model.RuntimeStatus;
 import org.junit.jupiter.api.AfterEach;
@@ -27,14 +28,11 @@ import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-import ch.qos.logback.core.FileAppender;
-import tools.jackson.databind.json.JsonMapper;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -153,6 +151,19 @@ class RequestLoggingTest {
         assertLog(id, "/api/v1/invalid-contract", 500);
     }
 
+    @Test
+    void returns406ForUnsupportedAcceptHeader() throws Exception {
+        String id = UUID.randomUUID().toString();
+        var response = client.send(request("/api/v1/auth/login")
+                .header("X-Request-Id", id)
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/plain")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"login\":\"buyer\",\"password\":\"password123\"}"))
+                .build(), HttpResponse.BodyHandlers.ofString());
+        assertProblem(response, id, 406, "INVALID_REQUEST");
+        assertLog(id, "/api/v1/auth/login", 406);
+    }
+
     private void assertProblem(HttpResponse<String> response, String id, int status, String code) {
         assertThat(response.statusCode()).isEqualTo(status);
         assertThat(response.headers().firstValue("Content-Type").orElseThrow())
@@ -196,22 +207,22 @@ class RequestLoggingTest {
         assertThat(fileAppender).isNotNull();
         var json = new JsonMapper();
         var decisions = Files.readAllLines(Path.of(fileAppender.getFile())).stream()
-                .map(json::readTree).filter(entry -> id.equals(entry.get("requestId").asText())).toList();
+                .map(json::readTree).filter(entry -> id.equals(entry.get("requestId").asString())).toList();
         assertThat(decisions).isNotEmpty();
         assertThat(decisions).allSatisfy(entry -> {
-            assertThat(entry.get("trace_id").asText()).isEqualTo(id);
-            assertThat(entry.get("kind").asText()).isEqualTo("TECHNICAL");
+            assertThat(entry.get("trace_id").asString()).isEqualTo(id);
+            assertThat(entry.get("kind").asString()).isEqualTo("TECHNICAL");
             assertThat(entry.toString()).doesNotContain("query-secret", "token-secret", "body-secret", "password-secret");
         });
         var requestDecision = decisions.stream()
-                .filter(entry -> entry.get("policyId").asText().equals("http.request-id")).toList();
+                .filter(entry -> entry.get("policyId").asString().equals("http.request-id")).toList();
         assertThat(requestDecision).hasSize(1);
-        assertThat(requestDecision.getFirst().get("decision").asText()).isEqualTo(validId ? "ALLOW" : "BLOCK");
-        assertThat(requestDecision.getFirst().get("reason").asText())
+        assertThat(requestDecision.getFirst().get("decision").asString()).isEqualTo(validId ? "ALLOW" : "BLOCK");
+        assertThat(requestDecision.getFirst().get("reason").asString())
                 .isEqualTo(validId ? "VALID_REQUEST_ID" : "INVALID_REQUEST_ID");
         if (status >= 500) {
             assertThat(decisions).allSatisfy(entry ->
-                    assertThat(entry.get("decision").asText()).isEqualTo("ALLOW"));
+                    assertThat(entry.get("decision").asString()).isEqualTo("ALLOW"));
         }
     }
 
