@@ -20,6 +20,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -37,6 +39,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -284,6 +287,77 @@ class ProtectedOrderServiceTest {
         assertThatThrownBy(() -> service.checkout(IDEMPOTENCY_KEY, new CheckoutRequest(1L, 1000L)))
                 .isInstanceOf(ConflictException.class);
         verify(cartRepository, never()).clear(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("Скидка при checkout округляется вниз, а 100% купон допускает total = 0")
+    void checkoutAppliesFloorDiscountAnd100PercentCoupon() {
+        Coupon tenPercent = new Coupon(10L, "TEN", 10, T0.plusSeconds(3600), 5, 0);
+        CartSnapshot cartFloor = new CartSnapshot(CART_ID, USER_ID, 1L, T0,
+                List.of(new CartItemSnapshot(1L, "Товар", 1, 999, true)), tenPercent);
+        when(orderRepository.findByIdempotencyKey(eq(USER_ID), any())).thenReturn(Optional.empty());
+        when(cartRepository.lockByUserId(USER_ID)).thenReturn(Optional.of(cartFloor));
+        when(orderRepository.existsForRevision(CART_ID, 1L)).thenReturn(false);
+        when(couponRepository.tryConsume(10L, T0)).thenReturn(1);
+        when(orderRepository.nextId()).thenReturn(ORDER_ID);
+
+        CheckoutResult floored = service.checkout(IDEMPOTENCY_KEY, new CheckoutRequest(1L, 900L));
+        assertThat(floored.order().getSubtotal()).isEqualTo(999L);
+        assertThat(floored.order().getDiscount()).isEqualTo(99L);
+        assertThat(floored.order().getTotal()).isEqualTo(900L);
+
+        Coupon full = new Coupon(11L, "FREE100", 100, T0.plusSeconds(3600), 5, 0);
+        CartSnapshot cartFree = new CartSnapshot(CART_ID, USER_ID, 2L, T0,
+                List.of(new CartItemSnapshot(1L, "Товар", 1, 999, true)), full);
+        when(cartRepository.lockByUserId(USER_ID)).thenReturn(Optional.of(cartFree));
+        when(orderRepository.existsForRevision(CART_ID, 2L)).thenReturn(false);
+        when(couponRepository.tryConsume(11L, T0)).thenReturn(1);
+        when(orderRepository.nextId()).thenReturn(ORDER_ID + 1);
+
+        CheckoutResult free = service.checkout("idem-key-free-1234567890", new CheckoutRequest(2L, 0L));
+        assertThat(free.order().getDiscount()).isEqualTo(999L);
+        assertThat(free.order().getTotal()).isZero();
+    }
+
+    @Test
+    @DisplayName("Неопубликованный товар или >100 позиций в корзине отклоняются на checkout с 409 CONFLICT")
+    void checkoutRejectsUnpublishedProductAndOver100Items() {
+        CartSnapshot withDraft = new CartSnapshot(CART_ID, USER_ID, 1L, T0,
+                List.of(new CartItemSnapshot(1L, "Draft", 1, 1000, false)), null);
+        when(orderRepository.findByIdempotencyKey(eq(USER_ID), any())).thenReturn(Optional.empty());
+        when(cartRepository.lockByUserId(USER_ID)).thenReturn(Optional.of(withDraft));
+        when(orderRepository.existsForRevision(CART_ID, 1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.checkout(IDEMPOTENCY_KEY, new CheckoutRequest(1L, 1000L)))
+                .isInstanceOf(ConflictException.class);
+
+        List<CartItemSnapshot> tooMany = LongStream.rangeClosed(1, 101)
+                .mapToObj(id -> new CartItemSnapshot(id, "Item " + id, 1, 10, true))
+                .toList();
+        CartSnapshot hugeCart = new CartSnapshot(CART_ID, USER_ID, 2L, T0, tooMany, null);
+        when(cartRepository.lockByUserId(USER_ID)).thenReturn(Optional.of(hugeCart));
+        when(orderRepository.existsForRevision(CART_ID, 2L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.checkout(IDEMPOTENCY_KEY, new CheckoutRequest(2L, 1010L)))
+                .isInstanceOf(ConflictException.class);
+        verifyNoInteractions(couponRepository);
+        verify(orderRepository, never()).insert(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1, 100})
+    @DisplayName("Позиция с quantity вне 1..99 в корзине отклоняется на checkout с 409 CONFLICT")
+    void checkoutRejectsInvalidItemQuantity(int quantity) {
+        CartSnapshot invalidCart = new CartSnapshot(CART_ID, USER_ID, 1L, T0,
+                List.of(new CartItemSnapshot(1L, "Лампа", quantity, 1000, true)), null);
+        when(orderRepository.findByIdempotencyKey(eq(USER_ID), any())).thenReturn(Optional.empty());
+        when(cartRepository.lockByUserId(USER_ID)).thenReturn(Optional.of(invalidCart));
+        when(orderRepository.existsForRevision(CART_ID, 1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.checkout(IDEMPOTENCY_KEY, new CheckoutRequest(1L, Math.max(0L, (long) quantity * 1000))))
+                .isInstanceOf(ConflictException.class);
+        verifyNoInteractions(couponRepository);
+        verify(orderRepository, never()).insert(any());
     }
 
     @Test
