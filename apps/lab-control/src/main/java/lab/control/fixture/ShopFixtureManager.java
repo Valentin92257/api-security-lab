@@ -92,7 +92,7 @@ public class ShopFixtureManager {
     }
 
     private void truncateAll(JdbcClient jdbc) {
-        jdbc.sql("TRUNCATE TABLE order_items, orders, cart_items, carts, coupons, products, users RESTART IDENTITY CASCADE")
+        jdbc.sql("TRUNCATE TABLE order_items, orders, cart_items, carts, coupons, products, users CASCADE")
                 .update();
     }
 

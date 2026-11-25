@@ -6,7 +6,6 @@ import lab.control.fixture.model.FixtureManifest;
 import lab.control.fixture.model.FixtureUser;
 import lab.control.fixture.model.InvariantViolation;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.transaction.TransactionStatus;
@@ -64,7 +63,7 @@ class ShopFixtureManagerTest {
         when(statement.update()).thenReturn(1);
         when(statement.query(Long.class)).thenReturn(longQuery);
         when(longQuery.single()).thenReturn(1L);
-        when(statement.query(any(RowMapper.class))).thenReturn(violationQuery);
+        when(statement.query(InvariantViolation.class)).thenReturn(violationQuery);
         InvariantViolation violation = new InvariantViolation("INV-COUPON-COUNT", "coupons", "1", "{\"expected\":1,\"actual\":0}");
         when(violationQuery.list()).thenReturn(List.of(violation));
         doAnswer(call -> {
