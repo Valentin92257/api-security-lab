@@ -6,6 +6,7 @@ import lab.contracts.shop.model.SetQuantityRequest;
 import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.security.AuthUtils;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.model.CartSnapshot;
 import lab.shop.application.model.Coupon;
 import lab.shop.application.repository.CartRepository;
@@ -17,7 +18,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.Locale;
 
@@ -34,14 +34,14 @@ public class VulnerableCartService implements CartService {
     private final CartRepository cartRepository;
     private final ProductRepository productRepository;
     private final CouponRepository couponRepository;
-    private final Clock clock;
+    private final BusinessClock businessClock;
 
     @Override
     public Cart getCart() {
         long userId = AuthUtils.getUserId();
         CartSnapshot cart = cartRepository.findByUserId(userId)
                 .orElseThrow(() -> new NotFoundException("Корзина не найдена"));
-        return cart.toDto(clock.instant());
+        return cart.toDto(businessClock.now());
     }
 
     @Override
@@ -60,7 +60,7 @@ public class VulnerableCartService implements CartService {
                 .orElseThrow(() -> new NotFoundException("Корзина не найдена"));
 
         // Намеренная слабость (BL-02): границы quantity (1..99) и лимит 100 позиций не проверяются.
-        Instant now = clock.instant();
+        Instant now = businessClock.now();
         if (cartRepository.setItemQuantity(cart.id(), productId, request.getQuantity())) {
             cartRepository.bumpRevision(cart.id(), now);
             cart = cartRepository.findByUserId(userId)
@@ -81,7 +81,7 @@ public class VulnerableCartService implements CartService {
         CartSnapshot cart = cartRepository.findByUserId(userId)
                 .orElseThrow(() -> new NotFoundException("Корзина не найдена"));
 
-        Instant now = clock.instant();
+        Instant now = businessClock.now();
         if (cart.coupon() != null && cart.coupon().id() == coupon.id()) {
             return cart.toDto(now);
         }

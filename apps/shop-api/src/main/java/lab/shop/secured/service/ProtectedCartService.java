@@ -6,6 +6,7 @@ import lab.contracts.shop.model.SetQuantityRequest;
 import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.NotFoundException;
 import lab.shop.api.security.AuthUtils;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.model.CartSnapshot;
 import lab.shop.application.model.Coupon;
 import lab.shop.application.repository.CartRepository;
@@ -18,7 +19,6 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -36,14 +36,14 @@ public class ProtectedCartService implements CartService {
     private final CartRepository cartRepository;
     private final ProductRepository productRepository;
     private final CouponRepository couponRepository;
-    private final Clock clock;
+    private final BusinessClock businessClock;
 
     @Override
     public Cart getCart() {
         long userId = AuthUtils.getUserId();
         CartSnapshot cart = cartRepository.findByUserId(userId)
                 .orElseThrow(() -> new NotFoundException("Корзина не найдена"));
-        return cart.toDto(clock.instant());
+        return cart.toDto(businessClock.now());
     }
 
     @Override
@@ -67,7 +67,7 @@ public class ProtectedCartService implements CartService {
             throw new BadRequestException("В корзине не может быть больше 100 различных товаров");
         }
 
-        Instant now = clock.instant();
+        Instant now = businessClock.now();
         try {
             if (cartRepository.setItemQuantity(cart.id(), productId, quantity)) {
                 cartRepository.bumpRevision(cart.id(), now);
@@ -91,7 +91,7 @@ public class ProtectedCartService implements CartService {
         CartSnapshot cart = cartRepository.lockByUserId(userId)
                 .orElseThrow(() -> new NotFoundException("Корзина не найдена"));
 
-        Instant now = clock.instant();
+        Instant now = businessClock.now();
         if (cart.coupon() != null && cart.coupon().id() == coupon.id()) {
             return cart.toDto(now);
         }

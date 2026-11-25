@@ -3,6 +3,7 @@ package lab.shop.vulnerable.service;
 import lab.contracts.shop.model.*;
 import lab.shop.api.exception.BadRequestException;
 import lab.shop.api.exception.NotFoundException;
+import lab.shop.application.BusinessClock;
 import lab.shop.application.model.CartItemSnapshot;
 import lab.shop.application.model.CartSnapshot;
 import lab.shop.application.model.Coupon;
@@ -54,7 +55,7 @@ class VulnerableCartServiceTest {
     @BeforeEach
     void setUp() {
         service = new VulnerableCartService(cartRepository, productRepository, couponRepository,
-                Clock.fixed(T0, ZoneOffset.UTC));
+                new BusinessClock(Clock.fixed(T0, ZoneOffset.UTC)));
         authenticate(USER_ID);
     }
 
