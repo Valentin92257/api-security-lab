@@ -11,13 +11,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ActiveProfiles("protected")
 public class ProtectedCartRepositoryIntegrationTest extends PostgreSQLIntegrationTest {
@@ -32,6 +40,12 @@ public class ProtectedCartRepositoryIntegrationTest extends PostgreSQLIntegratio
 
     @Autowired
     protected JdbcClient jdbc;
+
+    @Autowired
+    protected DataSource dataSource;
+
+    @Autowired
+    protected TransactionTemplate transactionTemplate;
 
     protected long userId;
     protected long cartId;
@@ -170,13 +184,36 @@ public class ProtectedCartRepositoryIntegrationTest extends PostgreSQLIntegratio
     }
 
     @Test
-    @DisplayName("lockByUserId возвращает то же состояние, что и findByUserId")
-    void lockByUserIdReturnsSameSnapshot() {
-        cartRepository.setItemQuantity(cartId, lampId, 1);
-        cartRepository.bumpRevision(cartId, T0.plusSeconds(1));
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    @DisplayName("lockByUserId реально удерживает строчную блокировку FOR UPDATE на carts")
+    void lockByUserIdHoldsRowLockUntilCommit() {
+        try {
+            transactionTemplate.executeWithoutResult(_ -> {
+                CartSnapshot locked = cartRepository.lockByUserId(userId).orElseThrow();
+                assertThat(locked.id()).isEqualTo(cartId);
 
-        assertThat(cartRepository.lockByUserId(userId))
-                .isEqualTo(cartRepository.findByUserId(userId));
+                assertThatThrownBy(() -> {
+                    try (Connection second = dataSource.getConnection()) {
+                        second.setAutoCommit(false);
+                        try (PreparedStatement ps = second.prepareStatement(
+                                "SELECT 1 FROM carts WHERE id = ? FOR UPDATE NOWAIT")) {
+                            ps.setLong(1, cartId);
+                            ps.executeQuery();
+                        } finally {
+                            second.rollback();
+                        }
+                    }
+                }).isInstanceOf(SQLException.class)
+                        .satisfies(e -> assertThat(((SQLException) e).getSQLState()).isEqualTo("55P03"));
+            });
+        } finally {
+            jdbc.sql("DELETE FROM carts WHERE id = :id").param("id", cartId).update();
+            jdbc.sql("DELETE FROM users WHERE id = :id").param("id", userId).update();
+            jdbc.sql("DELETE FROM products WHERE id IN (:lampId, :notebookId)")
+                    .param("lampId", lampId)
+                    .param("notebookId", notebookId)
+                    .update();
+        }
     }
 
     @Test
