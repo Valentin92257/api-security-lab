@@ -1,53 +1,51 @@
 package lab.control.runner;
 
+import lab.contracts.json.ContractJsonCodec;
+import lab.contracts.json.ContractValidationException;
+import lab.control.fixture.FixtureGenerator;
+import lab.control.fixture.model.FixtureManifest;
+import lab.control.fixture.model.FixtureUser;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.invocation.InvocationOnMock;
+import tools.jackson.databind.JsonNode;
+
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
-import lab.contracts.json.ContractJsonCodec;
-import lab.contracts.json.ContractValidationException;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
-import org.mockito.invocation.InvocationOnMock;
-import tools.jackson.databind.JsonNode;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 class CredentialStuffingScenarioTest {
-    private static final List<CredentialStuffingScenario.Actor> ACTORS = List.of(
-            new CredentialStuffingScenario.Actor(3, "victim_c", "password-c"),
-            new CredentialStuffingScenario.Actor(1, "victim_a", "password-a"),
-            new CredentialStuffingScenario.Actor(2, "victim_b", "password-b"));
+    private static final Instant BASE_TIME = Instant.parse("2026-10-25T12:00:00Z");
 
     private final StepExecutor steps = mock(StepExecutor.class);
     private final ShopContractValidator validator = mock(ShopContractValidator.class);
     private final ContractJsonCodec json = new ContractJsonCodec();
+    private final FixtureGenerator fixtures = new FixtureGenerator(json);
     private final CredentialStuffingScenario scenario = new CredentialStuffingScenario(steps, validator, json);
     private final UUID trialId = UUID.randomUUID();
     private final UUID runId = UUID.randomUUID();
 
     @Test
-    void generatesTwoHundredLoginsWithExactlyThreeValidPairs() {
+    void executesTwoHundredPreparedAttemptsWithExactlyThreeValidPairs() {
         rejectLogins();
+        FixtureManifest manifest = fixtures.generate(42, BASE_TIME);
+        List<CredentialStuffingScenario.LoginAttempt> attempts = toAttempts(manifest);
 
-        var results = run(runId, GatewayTarget.VULNERABLE, 42, ACTORS);
+        var results = run(runId, GatewayTarget.VULNERABLE, attempts);
 
         var requests = requests(200);
         assertThat(results).hasSize(200);
@@ -58,22 +56,25 @@ class CredentialStuffingScenarioTest {
             assertThat(request.headers()).containsEntry("Content-Type", "application/json")
                     .containsEntry("X-Forwarded-For", "192.0.2.1");
         });
+        List<FixtureUser> victims = manifest.credentialStuffing().victims();
         long valid = requests.stream().map(request -> json.jsonMapper().readTree(request.body()))
-                .filter(body -> ACTORS.stream().anyMatch(actor -> actor.login().equals(body.get("login").asString())
-                        && actor.password().equals(body.get("password").asString())))
+                .filter(body -> victims.stream().anyMatch(victim -> victim.login().equals(body.get("login").asString())
+                        && victim.password().equals(body.get("password").asString())))
                 .count();
         assertThat(valid).isEqualTo(3);
         verify(validator, times(200)).validateLoginRequest(anyString());
     }
 
     @Test
-    void repeatsTheSameLogicalStepsRegardlessOfActorOrderAndPreviousRuns() {
+    void repeatsTheSameLogicalStepsForTheSameSeedAndDiffersForAnotherSeed() {
         rejectLogins();
+        List<CredentialStuffingScenario.LoginAttempt> seed42First = toAttempts(fixtures.generate(42, BASE_TIME));
+        List<CredentialStuffingScenario.LoginAttempt> seed42Second = toAttempts(fixtures.generate(42, BASE_TIME));
+        List<CredentialStuffingScenario.LoginAttempt> seed43 = toAttempts(fixtures.generate(43, BASE_TIME));
 
-        var first = run(runId, GatewayTarget.PROTECTED, 42, ACTORS);
-        var second = run(UUID.randomUUID(), GatewayTarget.PROTECTED, 42,
-                List.of(ACTORS.get(2), ACTORS.get(1), ACTORS.get(0)));
-        run(UUID.randomUUID(), GatewayTarget.PROTECTED, 43, ACTORS);
+        var first = run(runId, GatewayTarget.PROTECTED, seed42First);
+        var second = run(UUID.randomUUID(), GatewayTarget.PROTECTED, seed42Second);
+        run(UUID.randomUUID(), GatewayTarget.PROTECTED, seed43);
 
         var requests = requests(600);
         assertThat(requests.subList(0, 200)).isEqualTo(requests.subList(200, 400));
@@ -84,35 +85,37 @@ class CredentialStuffingScenarioTest {
 
     @Test
     void confirmsEachSuccessfulLoginWithItsActorsProfile() {
+        FixtureManifest manifest = fixtures.generate(42, BASE_TIME);
+        List<FixtureUser> victims = manifest.credentialStuffing().victims();
         when(steps.execute(any(), any())).thenAnswer(call -> {
             StepRequest request = call.getArgument(1);
             if (request.method().equals("GET")) {
                 return response(call, 200, StepOutcome.RESPONSE, null);
             }
             JsonNode body = json.jsonMapper().readTree(request.body());
-            var actor = ACTORS.stream().filter(candidate -> candidate.login().equals(body.get("login").asString()))
+            var victim = victims.stream().filter(candidate -> candidate.login().equals(body.get("login").asString()))
                     .findFirst().orElseThrow();
-            if (!actor.password().equals(body.get("password").asString())) {
+            if (!victim.password().equals(body.get("password").asString())) {
                 return response(call, 401, StepOutcome.RESPONSE, null);
             }
-            var token = json.jsonMapper().createObjectNode().put("accessToken", "synthetic-token-" + actor.userId())
+            var token = json.jsonMapper().createObjectNode().put("accessToken", "synthetic-token-" + victim.id())
                     .put("tokenType", "Bearer").put("expiresIn", 900);
             return response(call, 200, StepOutcome.RESPONSE, token);
         });
 
-        var results = run(runId, GatewayTarget.PROTECTED, 42, ACTORS);
+        var results = run(runId, GatewayTarget.PROTECTED, toAttempts(manifest));
 
         var requests = requests(203);
         assertThat(results).hasSize(203);
         assertThat(requests.stream().filter(request -> request.method().equals("POST"))).hasSize(200);
         var profiles = requests.stream().filter(request -> request.method().equals("GET")).toList();
         assertThat(profiles).hasSize(3);
-        for (var actor : ACTORS) {
+        for (FixtureUser victim : victims) {
             assertThat(profiles).contains(new StepRequest(GatewayTarget.PROTECTED, "GET",
-                    "/api/v1/users/" + actor.userId(),
-                    Map.of("Authorization", "Bearer synthetic-token-" + actor.userId(),
+                    "/api/v1/users/" + victim.id(),
+                    Map.of("Authorization", "Bearer synthetic-token-" + victim.id(),
                             "X-Forwarded-For", "192.0.2.1"), null));
-            assertThat(results.toString()).doesNotContain(actor.password(), "synthetic-token-");
+            assertThat(results.toString()).doesNotContain(victim.password(), "synthetic-token-");
         }
     }
 
@@ -120,7 +123,7 @@ class CredentialStuffingScenarioTest {
     void doesNotConfirmAResponseWithoutAValidatedBody() {
         when(steps.execute(any(), any())).thenAnswer(call -> response(call, 200, StepOutcome.RESPONSE, null));
 
-        assertThat(run(runId, GatewayTarget.VULNERABLE, 42, ACTORS)).hasSize(200);
+        assertThat(run(runId, GatewayTarget.VULNERABLE, toAttempts(fixtures.generate(42, BASE_TIME)))).hasSize(200);
 
         assertThat(requests(200)).allSatisfy(request -> assertThat(request.method()).isEqualTo("POST"));
     }
@@ -130,25 +133,16 @@ class CredentialStuffingScenarioTest {
         doThrow(new ContractValidationException("Request rejected"))
                 .when(validator).validateLoginRequest(anyString());
 
-        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, 42, ACTORS))
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, toAttempts(fixtures.generate(42, BASE_TIME))))
                 .isInstanceOf(ContractValidationException.class);
 
         verifyNoInteractions(steps);
     }
 
     @ParameterizedTest
-    @ValueSource(longs = {-1, 2147483648L})
-    void rejectsSeedsOutsideTheControlRangeBeforeSending(long seed) {
-        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, seed, ACTORS))
-                .isInstanceOf(IllegalArgumentException.class);
-
-        verifyNoInteractions(steps, validator);
-    }
-
-    @ParameterizedTest
-    @MethodSource("invalidActors")
-    void rejectsIncompleteOrAmbiguousFixturesBeforeSending(List<CredentialStuffingScenario.Actor> actors) {
-        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, 42, actors))
+    @MethodSource("invalidAttemptLists")
+    void rejectsIncompleteOrAmbiguousAttemptsBeforeSending(List<CredentialStuffingScenario.LoginAttempt> attempts) {
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, attempts))
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(steps, validator);
@@ -159,7 +153,7 @@ class CredentialStuffingScenarioTest {
         when(steps.execute(any(), any()))
                 .thenAnswer(call -> response(call, null, StepOutcome.INTERRUPTED, null));
 
-        var results = run(runId, GatewayTarget.PROTECTED, 42, ACTORS);
+        var results = run(runId, GatewayTarget.PROTECTED, toAttempts(fixtures.generate(42, BASE_TIME)));
 
         assertThat(results).hasSize(1);
         assertThat(results.getFirst().outcome()).isEqualTo(StepOutcome.INTERRUPTED);
@@ -171,7 +165,7 @@ class CredentialStuffingScenarioTest {
         try {
             Thread.currentThread().interrupt();
 
-            assertThat(run(runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
+            assertThat(run(runId, GatewayTarget.PROTECTED, toAttempts(fixtures.generate(42, BASE_TIME)))).isEmpty();
 
             verifyNoInteractions(steps, validator);
         } finally {
@@ -187,7 +181,7 @@ class CredentialStuffingScenarioTest {
         }).when(validator).validateLoginRequest(anyString());
 
         try {
-            assertThat(run(runId, GatewayTarget.PROTECTED, 42, ACTORS)).isEmpty();
+            assertThat(run(runId, GatewayTarget.PROTECTED, toAttempts(fixtures.generate(42, BASE_TIME)))).isEmpty();
 
             verifyNoInteractions(steps);
         } finally {
@@ -200,7 +194,7 @@ class CredentialStuffingScenarioTest {
         var failure = new IllegalStateException("Result storage unavailable");
         when(steps.execute(any(), any())).thenThrow(failure);
 
-        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, 42, ACTORS))
+        assertThatThrownBy(() -> run(runId, GatewayTarget.PROTECTED, toAttempts(fixtures.generate(42, BASE_TIME))))
                 .isSameAs(failure);
 
         requests(1);
@@ -208,23 +202,43 @@ class CredentialStuffingScenarioTest {
 
     @Test
     void hidesFixturePasswordsFromTextRepresentations() {
-        for (var actor : ACTORS) {
-            assertThat(actor.toString()).doesNotContain(actor.password());
+        var attempts = toAttempts(fixtures.generate(42, BASE_TIME));
+        for (var attempt : attempts) {
+            assertThat(attempt.toString()).doesNotContain(attempt.password());
         }
     }
 
-    private List<StepResult> run(UUID id, GatewayTarget target, long seed, List<CredentialStuffingScenario.Actor> actors) {
+    private List<StepResult> run(UUID id, GatewayTarget target, List<CredentialStuffingScenario.LoginAttempt> attempts) {
         var run = new RunContext(trialId, id, Duration.ofMinutes(1));
-        scenario.run(run, target, seed, actors);
+        scenario.run(run, target, attempts);
         return run.finish().steps();
     }
 
-    private static Stream<List<CredentialStuffingScenario.Actor>> invalidActors() {
+    private static List<CredentialStuffingScenario.LoginAttempt> toAttempts(FixtureManifest manifest) {
+        return manifest.credentialStuffing().attempts().stream()
+                .map(pair -> new CredentialStuffingScenario.LoginAttempt(pair.userId(), pair.login(), pair.password()))
+                .toList();
+    }
+
+    private static Stream<List<CredentialStuffingScenario.LoginAttempt>> invalidAttemptLists() {
+        var valid = toAttempts(new FixtureGenerator(new ContractJsonCodec()).generate(42, BASE_TIME));
+        List<CredentialStuffingScenario.LoginAttempt> withNull = new ArrayList<>(valid);
+        withNull.set(10, null);
+        List<CredentialStuffingScenario.LoginAttempt> conflictingLogin = new ArrayList<>(valid);
+        conflictingLogin.set(0, new CredentialStuffingScenario.LoginAttempt(1, "other_login", "password123"));
+        List<CredentialStuffingScenario.LoginAttempt> twoAccountsOnly = new ArrayList<>(200);
+        for (int i = 0; i < 200; i++) {
+            twoAccountsOnly.add(i % 2 == 0
+                    ? new CredentialStuffingScenario.LoginAttempt(1, "victim_a", "password123")
+                    : new CredentialStuffingScenario.LoginAttempt(2, "victim_b", "password123"));
+        }
         return Stream.of(
-                ACTORS.subList(0, 2),
-                List.of(ACTORS.get(0), ACTORS.get(1), ACTORS.get(2), ACTORS.get(0)),
-                List.of(ACTORS.get(0), ACTORS.get(1), new CredentialStuffingScenario.Actor(1, "other", "password")),
-                List.of(ACTORS.get(0), ACTORS.get(1), new CredentialStuffingScenario.Actor(4, "victim_a", "password")));
+                null,
+                valid.subList(0, 199),
+                withNull,
+                conflictingLogin,
+                twoAccountsOnly
+        );
     }
 
     private void rejectLogins() {
