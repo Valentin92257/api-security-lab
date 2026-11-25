@@ -1,11 +1,12 @@
 package lab.control.fixture;
 
-import java.time.Duration;
-import java.util.List;
-
 import lab.control.fixture.model.FixtureUserRole;
 
-/** Статические шаблоны Fixture v1: 24 пользователя, 12 товаров и 6 исторических заказов. */
+import java.util.List;
+
+/**
+ * Статические шаблоны Fixture v1: 24 пользователя, 12 товаров и 6 планов исторических заказов.
+ */
 final class FixtureCatalog {
     static final List<UserSpec> USERS = List.of(
             new UserSpec(1, "cs_victim_01", "James Hetfield", FixtureUserRole.CS_VICTIM),
@@ -50,12 +51,12 @@ final class FixtureCatalog {
     );
 
     static final List<OrderPlan> HISTORICAL_ORDERS = List.of(
-            new OrderPlan(1L, 5L, 0L, null, Duration.ofHours(6), List.of(1L, 4L)),
-            new OrderPlan(2L, 6L, 0L, 1L, Duration.ofHours(5), List.of(2L, 7L)),
-            new OrderPlan(3L, 6L, 1L, 2L, Duration.ofHours(3), List.of(3L)),
-            new OrderPlan(4L, 7L, 0L, 3L, Duration.ofHours(4), List.of(5L, 8L)),
-            new OrderPlan(5L, 8L, 0L, 3L, Duration.ofHours(4), List.of(6L, 10L)),
-            new OrderPlan(6L, 9L, 0L, 4L, Duration.ofHours(2), List.of(9L, 11L))
+            new OrderPlan(1L, 5L, 0L, null),
+            new OrderPlan(2L, 6L, 0L, 1L),
+            new OrderPlan(3L, 6L, 1L, 2L),
+            new OrderPlan(4L, 7L, 0L, 3L),
+            new OrderPlan(5L, 8L, 0L, 3L),
+            new OrderPlan(6L, 9L, 0L, 4L)
     );
 
     private FixtureCatalog() {
@@ -67,7 +68,6 @@ final class FixtureCatalog {
     record ProductSpec(String name, String description, long basePrice) {
     }
 
-    record OrderPlan(long orderId, long userId, long cartRevision, Long couponId,
-                     Duration ageBeforeBase, List<Long> productIds) {
+    record OrderPlan(long orderId, long userId, long cartRevision, Long couponId) {
     }
 }
