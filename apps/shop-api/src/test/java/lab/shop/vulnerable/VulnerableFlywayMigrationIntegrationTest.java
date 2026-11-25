@@ -35,7 +35,7 @@ class VulnerableFlywayMigrationIntegrationTest extends BasicFlywayMigrationInteg
                 .single();
 
         assertThat(count)
-                .as("Защитный констрейнт '%s' должен отсутствовать в уязвимом профиле", constraintName)
+                .as("Защитное ограничение '%s' должно отсутствовать в уязвимом профиле", constraintName)
                 .isZero();
     }
 }

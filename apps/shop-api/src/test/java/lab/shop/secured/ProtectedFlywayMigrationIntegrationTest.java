@@ -11,7 +11,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("protected")
 class ProtectedFlywayMigrationIntegrationTest extends BasicFlywayMigrationIntegrationTest {
 
-
     @ParameterizedTest(name = "Ограничение {0}")
     @ValueSource(strings = {
             "cart_items_protected_1",
@@ -36,7 +35,7 @@ class ProtectedFlywayMigrationIntegrationTest extends BasicFlywayMigrationIntegr
                 .single();
 
         assertThat(count)
-                .as("Защитный констрейнт '%s' должен отсутствовать в уязвимом профиле", constraintName)
+                .as("Защитное ограничение '%s' должно присутствовать в защищенном профиле", constraintName)
                 .isOne();
     }
 }
