@@ -10,7 +10,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 public final class RunContext {
-    private static final int MAX_STEPS = 400;
+    static final int MAX_STEPS = 400;
 
     private final UUID trialId;
     private final UUID runId;

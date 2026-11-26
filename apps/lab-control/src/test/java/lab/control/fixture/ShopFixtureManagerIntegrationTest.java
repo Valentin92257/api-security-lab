@@ -10,6 +10,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -109,20 +111,42 @@ class ShopFixtureManagerIntegrationTest {
     }
 
     @Test
-    void resetsDatabaseCleanlyAndSynchronizesIdentitySequences() {
+    void resetsDatabaseCleanlyAndKeepsIdentitySequencesMonotonic() {
         manager.load(ShopTarget.PROTECTED, manager.generate(42, BASE_TIME));
+        JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
+        long previousUserId = insertUser(jdbc, "before_reset");
         FixtureManifest next = manager.generate(99, BASE_TIME);
         manager.load(ShopTarget.PROTECTED, next);
 
         assertThat(manager.verifyInvariants(ShopTarget.PROTECTED, next.oracleBaseline())).isEmpty();
 
-        JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
-        long generatedUserId = jdbc.sql("""
-                INSERT INTO users (login, name, email, password_hash)
-                VALUES ('new_registered_user', 'New User', 'new_registered_user@example.com', 'dummy-hash')
-                RETURNING id
-                """).query(Long.class).single();
-        assertThat(generatedUserId).isEqualTo(25L);
+        assertThat(count(jdbc, "users")).isEqualTo(24);
+        assertThat(insertUser(jdbc, "after_reset")).isEqualTo(previousUserId + 1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ShopTarget.class)
+    void failedFixtureLoadPreservesExistingUsersAndDoesNotReuseTheirIds(ShopTarget target) {
+        FixtureManifest manifest = manager.generate(42, BASE_TIME);
+        PreparedFixture prepared = manager.prepare(manifest);
+        manager.load(target, prepared);
+        JdbcClient jdbc = connections.forTarget(target).jdbc();
+        long previousUserId = insertUser(jdbc, "before_failed_reset");
+        OracleBaseline baseline = manifest.oracleBaseline();
+        var invalidBaseline = new OracleBaseline(List.of(), baseline.coupons(),
+                baseline.couponCounters(), baseline.orderIds());
+        var invalidManifest = new FixtureManifest(manifest.version(), manifest.seed(), manifest.businessTimeBase(),
+                manifest.manifestHash(), manifest.users(), manifest.products(), manifest.coupons(), manifest.carts(),
+                manifest.orders(), manifest.bola(), manifest.credentialStuffing(), manifest.draftCanary(), invalidBaseline);
+
+        assertThatThrownBy(() -> manager.load(target,
+                new PreparedFixture(invalidManifest, prepared.passwordHashesByUserId())))
+                .isInstanceOf(FixtureVerificationException.class);
+
+        assertThat(count(jdbc, "users")).isEqualTo(25);
+        assertThat(jdbc.sql("SELECT login FROM users WHERE id = :id").param("id", previousUserId)
+                .query(String.class).single()).isEqualTo("before_failed_reset");
+        assertThat(insertUser(jdbc, "after_failed_reset")).isEqualTo(previousUserId + 1);
     }
 
     @Test
@@ -193,6 +217,15 @@ class ShopFixtureManagerIntegrationTest {
 
     private static long count(JdbcClient jdbc, String table) {
         return jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single();
+    }
+
+    private static long insertUser(JdbcClient jdbc, String login) {
+        return jdbc.sql("""
+                INSERT INTO users (login, name, email, password_hash)
+                VALUES (:login, 'New User', :email, 'dummy-hash')
+                RETURNING id
+                """).param("login", login).param("email", login + "@example.com")
+                .query(Long.class).single();
     }
 
     private static String databaseUrl(String databaseName) {

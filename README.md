@@ -25,7 +25,9 @@ CompletionStage<RunResult> completion = handle.completion();
 
 По умолчанию один запуск делает 200 login: 3 с верными парами и 197 с неверными паролями
 (размер выборки настраивается параметрами `lab.fixture.user-count`, `lab.fixture.cs-attempts`
-и `lab.fixture.cs-valid-accounts`). Seed определяет пользователей, каталог, заказы, пары и порядок попыток.
+и `lab.fixture.cs-valid-accounts`). Допускается до 200 попыток: бюджет учитывает login и чтение
+профиля после каждого успешного входа, даже если все пароли приняты. Seed определяет пользователей,
+каталог, заказы, пары и порядок попыток.
 После каждого успешного login идёт GET своего профиля с полученным JWT. RequestId, время и JWT могут отличаться.
 
 Runner проверяет login-запросы сценария и ответы Shop по существующим OpenAPI/JSON Schema.
@@ -123,7 +125,7 @@ curl --fail http://127.0.0.1:8080/health
 | `LAB_CONTROL_DB_PASSWORD`         | да          | -                            | Пароль рабочей роли `control_app`                                         |
 | `LAB_FIXTURE_DB_PASSWORD`         | да          | -                            | Пароль роли `fixture_admin` для загрузки фикстур в БД Shop                |
 | `LAB_FIXTURE_USER_COUNT`          | нет         | `24`                         | Число пользователей в фикстуре магазина (минимум 24)                      |
-| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                        | Число попыток входа в сценарии Credential Stuffing                        |
+| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                        | Число попыток входа в Credential Stuffing: от числа валидных аккаунтов до 200 |
 | `LAB_FIXTURE_CS_VALID_ACCOUNTS`   | нет         | `3`                          | Число валидных аккаунтов-жертв в сценарии Credential Stuffing             |
 | `LAB_DETECTOR_CONTROL_TOKEN`      | да          | -                            | Управление и чтение Detector из Control                                   |
 | `LAB_DETECTOR_GATEWAY_TOKEN`      | да          | -                            | Запись логов только producer GATEWAY                                      |
@@ -200,6 +202,7 @@ docker compose up -d --build shop-vulnerable shop-protected lab-control
 ```
 
 Миграция `V4__fixture_admin_grants.sql` выдаёт права на существующие объекты `vulnerable` и `protected` при старте Shop.
+При загрузке фикстур счетчики ID только увеличиваются. Откат данных может оставить пропуски ID.
 
 ## Detector
 
