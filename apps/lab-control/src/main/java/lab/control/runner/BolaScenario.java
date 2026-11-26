@@ -100,6 +100,9 @@ public class BolaScenario {
             if (victimOrderIds == null || victimOrderIds.isEmpty()) {
                 throw new IllegalArgumentException("BOLA plan requires victim orders");
             }
+            if (victimOrderIds.size() > RunContext.MAX_STEPS - 3) {
+                throw new IllegalArgumentException("BOLA plan exceeds the run step budget");
+            }
             victimOrderIds = List.copyOf(victimOrderIds);
             int passwordBytes = password.getBytes(StandardCharsets.UTF_8).length;
             if (attackerUserId < 1 || attackerUserId > MAX_ID || !LOGIN.matcher(login).matches()

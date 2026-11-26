@@ -14,6 +14,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,7 +37,11 @@ class ShopFixtureManagerIntegrationTest {
             .withDatabaseName("lab_control")
             .withUsername("lab_admin")
             .withPassword("postgres-test")
+            .withEnv("LAB_CONTROL_DB_PASSWORD", "control-test")
             .withEnv("LAB_FIXTURE_DB_PASSWORD", FIXTURE_PASSWORD)
+            .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("db/control/role.sql"),
+                    "/docker-entrypoint-initdb.d/10-control.sql")
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("db/shop-init/bootstrap.sql"),
                     "/docker-entrypoint-initdb.d/20-databases.sql")
@@ -169,12 +174,12 @@ class ShopFixtureManagerIntegrationTest {
         manager.load(ShopTarget.PROTECTED, valid);
 
         JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
-        long user25 = jdbc.sql("""
+        long previousUserId = jdbc.sql("""
                 INSERT INTO users (login, name, email, password_hash)
                 VALUES ('user_before_failed_load', 'User 25', 'user_before_failed_load@example.com', 'dummy-hash')
                 RETURNING id
                 """).query(Long.class).single();
-        assertThat(user25).isEqualTo(25L);
+        assertThat(previousUserId).isGreaterThan(24L);
 
         FixtureManifest broken = new FixtureManifest(
                 valid.version(), valid.seed(), valid.businessTimeBase(), valid.manifestHash(),
@@ -187,12 +192,12 @@ class ShopFixtureManagerIntegrationTest {
                 .isInstanceOf(FixtureVerificationException.class);
 
         assertThat(count(jdbc, "users")).isEqualTo(25L);
-        long user26 = jdbc.sql("""
+        long nextUserId = jdbc.sql("""
                 INSERT INTO users (login, name, email, password_hash)
                 VALUES ('user_after_failed_load', 'User 26', 'user_after_failed_load@example.com', 'dummy-hash')
                 RETURNING id
                 """).query(Long.class).single();
-        assertThat(user26).isEqualTo(26L);
+        assertThat(nextUserId).isEqualTo(previousUserId + 1);
     }
 
     @Test
@@ -213,6 +218,43 @@ class ShopFixtureManagerIntegrationTest {
                 .isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.sql("TRUNCATE TABLE flyway_schema_history").update())
                 .isInstanceOf(DataAccessException.class);
+        assertControlDatabaseAccessIsRestricted();
+    }
+
+    @Test
+    void revokesPublicControlDatabaseAccessOnExistingInstallations() {
+        assertControlDatabaseAccessIsRestricted();
+        Flyway.configure()
+                .dataSource(databaseUrl("lab_control"), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .defaultSchema("control").locations("classpath:db/control/migrations").target("5")
+                .load().migrate();
+        var admin = JdbcClient.create(new DriverManagerDataSource(
+                databaseUrl("lab_control"), POSTGRES.getUsername(), POSTGRES.getPassword()));
+        admin.sql("GRANT CONNECT, TEMP ON DATABASE lab_control TO PUBLIC").update();
+
+        Flyway.configure()
+                .dataSource(databaseUrl("lab_control"), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .defaultSchema("control").locations("classpath:db/control/migrations")
+                .load().migrate();
+
+        assertThat(admin.sql("SELECT has_database_privilege('fixture_admin', 'lab_control', 'CONNECT')")
+                .query(Boolean.class).single()).isFalse();
+        assertThat(admin.sql("SELECT has_database_privilege('fixture_admin', 'lab_control', 'TEMP')")
+                .query(Boolean.class).single()).isFalse();
+        assertThat(admin.sql("SELECT has_database_privilege('control_app', 'lab_control', 'CONNECT')")
+                .query(Boolean.class).single()).isTrue();
+        assertControlDatabaseAccessIsRestricted();
+    }
+
+    private static void assertControlDatabaseAccessIsRestricted() {
+        var control = JdbcClient.create(new DriverManagerDataSource(
+                databaseUrl("lab_control"), "fixture_admin", FIXTURE_PASSWORD));
+        assertThatThrownBy(() -> control.sql("SELECT 1").query(Integer.class).single())
+                .isInstanceOf(DataAccessException.class)
+                .hasStackTraceContaining("permission denied for database");
+        var application = JdbcClient.create(new DriverManagerDataSource(
+                databaseUrl("lab_control"), "control_app", "control-test"));
+        assertThat(application.sql("SELECT 1").query(Integer.class).single()).isEqualTo(1);
     }
 
     private static long count(JdbcClient jdbc, String table) {

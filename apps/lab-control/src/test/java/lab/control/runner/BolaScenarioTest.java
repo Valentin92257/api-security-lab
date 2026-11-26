@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.LongStream;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -119,6 +120,25 @@ class BolaScenarioTest {
                 () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L, List.of(0L)),
                 () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L, List.of(2L, 2L))
         );
+    }
+
+    @Test
+    void completesTheLargestPlanWithinTheStepBudget() {
+        serveOrdersStrictly();
+        var plan = new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L,
+                LongStream.rangeClosed(2, 398).boxed().toList());
+
+        assertThat(run(runId, GatewayTarget.PROTECTED, plan)).hasSize(400);
+        requests(400);
+    }
+
+    @Test
+    void rejectsPlansExceedingTheStepBudgetBeforeSending() {
+        assertThatThrownBy(() -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L,
+                LongStream.rangeClosed(2, 399).boxed().toList()))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(steps, validator);
     }
 
     @Test
