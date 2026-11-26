@@ -208,6 +208,19 @@ class CredentialStuffingScenarioTest {
         }
     }
 
+    @Test
+    void executesCustomConfiguredAttemptAndAccountCounts() {
+        rejectLogins();
+        var customScenario = new CredentialStuffingScenario(steps, validator, json, 50, 5);
+        var manifest = new FixtureGenerator(json, 30, 50, 5).generate(42, BASE_TIME);
+        var run = new RunContext(trialId, runId, Duration.ofMinutes(1));
+
+        customScenario.run(run, GatewayTarget.PROTECTED, toAttempts(manifest));
+
+        assertThat(run.finish().steps()).hasSize(50);
+        requests(50);
+    }
+
     private List<StepResult> run(UUID id, GatewayTarget target, List<CredentialStuffingScenario.LoginAttempt> attempts) {
         var run = new RunContext(trialId, id, Duration.ofMinutes(1));
         scenario.run(run, target, attempts);

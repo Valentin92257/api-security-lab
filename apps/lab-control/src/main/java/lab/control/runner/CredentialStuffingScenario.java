@@ -1,6 +1,8 @@
 package lab.control.runner;
 
 import lab.contracts.json.ContractJsonCodec;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -9,18 +11,36 @@ import java.util.regex.Pattern;
 
 @Component
 public class CredentialStuffingScenario {
-    public static final int LOGIN_ATTEMPTS = 200;
-    private static final int DISTINCT_ACCOUNTS = 3;
+    public static final int DEFAULT_LOGIN_ATTEMPTS = 200;
+    public static final int DEFAULT_DISTINCT_ACCOUNTS = 3;
     private static final String CLIENT_IP = "192.0.2.1";
 
     private final StepExecutor steps;
     private final ShopContractValidator validator;
     private final ContractJsonCodec json;
+    private final int expectedAttempts;
+    private final int expectedAccounts;
 
-    public CredentialStuffingScenario(StepExecutor steps, ShopContractValidator validator, ContractJsonCodec json) {
+    @Autowired
+    public CredentialStuffingScenario(
+            StepExecutor steps,
+            ShopContractValidator validator,
+            ContractJsonCodec json,
+            @Value("${lab.fixture.cs-attempts:" + DEFAULT_LOGIN_ATTEMPTS + "}") int expectedAttempts,
+            @Value("${lab.fixture.cs-valid-accounts:" + DEFAULT_DISTINCT_ACCOUNTS + "}") int expectedAccounts
+    ) {
+        if (expectedAccounts < 1 || expectedAttempts < expectedAccounts) {
+            throw new IllegalArgumentException("Invalid credential stuffing workload configuration");
+        }
         this.steps = steps;
         this.validator = validator;
         this.json = json;
+        this.expectedAttempts = expectedAttempts;
+        this.expectedAccounts = expectedAccounts;
+    }
+
+    public CredentialStuffingScenario(StepExecutor steps, ShopContractValidator validator, ContractJsonCodec json) {
+        this(steps, validator, json, DEFAULT_LOGIN_ATTEMPTS, DEFAULT_DISTINCT_ACCOUNTS);
     }
 
     public void run(RunContext run, GatewayTarget target, List<LoginAttempt> loginAttempts) {
@@ -63,8 +83,8 @@ public class CredentialStuffingScenario {
     }
 
     private List<LoginAttempt> validateAttempts(List<LoginAttempt> attempts) {
-        if (attempts == null || attempts.size() != LOGIN_ATTEMPTS) {
-            throw new IllegalArgumentException("Expected exactly " + LOGIN_ATTEMPTS + " login attempts");
+        if (attempts == null || attempts.size() != expectedAttempts) {
+            throw new IllegalArgumentException("Expected exactly " + expectedAttempts + " login attempts");
         }
         Map<Long, String> loginByUserId = new HashMap<>();
         Set<String> logins = new HashSet<>();
@@ -78,8 +98,8 @@ public class CredentialStuffingScenario {
             }
             logins.add(attempt.login());
         }
-        if (loginByUserId.size() != DISTINCT_ACCOUNTS || logins.size() != DISTINCT_ACCOUNTS) {
-            throw new IllegalArgumentException("Expected attempts targeting three distinct accounts");
+        if (loginByUserId.size() != expectedAccounts || logins.size() != expectedAccounts) {
+            throw new IllegalArgumentException("Expected attempts targeting " + expectedAccounts + " distinct accounts");
         }
         return List.copyOf(attempts);
     }
