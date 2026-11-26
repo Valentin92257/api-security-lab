@@ -8,6 +8,7 @@ import lab.control.fixture.model.FixtureUser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.InvocationOnMock;
 import tools.jackson.databind.JsonNode;
@@ -221,6 +222,29 @@ class CredentialStuffingScenarioTest {
         requests(50);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {201, 400, Integer.MAX_VALUE})
+    void rejectsWorkloadsThatCannotFitTheRunStepBudget(int attempts) {
+        assertThatThrownBy(() -> new CredentialStuffingScenario(steps, validator, json, attempts, 3))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(steps, validator);
+    }
+
+    @Test
+    void fitsTheRunStepBudgetEvenWhenEveryLoginSucceeds() {
+        var token = json.jsonMapper().createObjectNode().put("accessToken", "synthetic-token");
+        when(steps.execute(any(), any())).thenAnswer(call -> response(call, 200, StepOutcome.RESPONSE, token));
+        var run = new RunContext(trialId, runId, Duration.ofMinutes(1));
+
+        scenario.run(run, GatewayTarget.VULNERABLE, toAttempts(fixtures.generate(42, BASE_TIME)));
+
+        var result = run.finish();
+        assertThat(result.outcome()).isEqualTo(RunOutcome.COMPLETED);
+        assertThat(result.steps()).hasSize(400);
+        requests(400);
+    }
+
     private List<StepResult> run(UUID id, GatewayTarget target, List<CredentialStuffingScenario.LoginAttempt> attempts) {
         var run = new RunContext(trialId, id, Duration.ofMinutes(1));
         scenario.run(run, target, attempts);
@@ -263,7 +287,7 @@ class CredentialStuffingScenarioTest {
         StepRequest request = call.getArgument(1);
         RunContext run = call.getArgument(0);
         var result = new StepResult(run.trialId(), run.runId(), UUID.randomUUID(), request.target(),
-                request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0);
+                request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0, null);
         var pending = run.dispatch(() -> CompletableFuture.completedFuture(null));
         run.record(result);
         run.release(pending);

@@ -211,8 +211,11 @@ public class ShopFixtureManager {
 
     private void syncSequences(JdbcClient jdbc) {
         for (String table : IDENTITY_TABLES) {
-            jdbc.sql("SELECT setval(pg_get_serial_sequence('" + table + "', 'id'), COALESCE((SELECT max(id) FROM "
-                            + table + "), 1), true)")
+            jdbc.sql("""
+                            SELECT setval(sequence_id,
+                                GREATEST(pg_sequence_last_value(sequence_id), (SELECT max(id) FROM %s), 1), true)
+                            FROM (SELECT pg_get_serial_sequence('%s', 'id')::regclass AS sequence_id) identity_sequence
+                            """.formatted(table, table))
                     .query(Long.class)
                     .single();
         }

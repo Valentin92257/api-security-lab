@@ -29,7 +29,8 @@ public class CredentialStuffingScenario {
             @Value("${lab.fixture.cs-attempts:" + DEFAULT_LOGIN_ATTEMPTS + "}") int expectedAttempts,
             @Value("${lab.fixture.cs-valid-accounts:" + DEFAULT_DISTINCT_ACCOUNTS + "}") int expectedAccounts
     ) {
-        if (expectedAccounts < 1 || expectedAttempts < expectedAccounts) {
+        if (expectedAccounts < 1 || expectedAttempts < expectedAccounts
+                || (long) expectedAttempts * 2 > RunContext.MAX_STEPS) {
             throw new IllegalArgumentException("Invalid credential stuffing workload configuration");
         }
         this.steps = steps;

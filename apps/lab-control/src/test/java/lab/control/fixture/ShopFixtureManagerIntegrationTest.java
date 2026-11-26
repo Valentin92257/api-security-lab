@@ -10,8 +10,11 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -34,7 +37,11 @@ class ShopFixtureManagerIntegrationTest {
             .withDatabaseName("lab_control")
             .withUsername("lab_admin")
             .withPassword("postgres-test")
+            .withEnv("LAB_CONTROL_DB_PASSWORD", "control-test")
             .withEnv("LAB_FIXTURE_DB_PASSWORD", FIXTURE_PASSWORD)
+            .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("db/control/role.sql"),
+                    "/docker-entrypoint-initdb.d/10-control.sql")
             .withCopyFileToContainer(
                     MountableFile.forClasspathResource("db/shop-init/bootstrap.sql"),
                     "/docker-entrypoint-initdb.d/20-databases.sql")
@@ -109,20 +116,42 @@ class ShopFixtureManagerIntegrationTest {
     }
 
     @Test
-    void resetsDatabaseCleanlyAndSynchronizesIdentitySequences() {
+    void resetsDatabaseCleanlyAndKeepsIdentitySequencesMonotonic() {
         manager.load(ShopTarget.PROTECTED, manager.generate(42, BASE_TIME));
+        JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
+        long previousUserId = insertUser(jdbc, "before_reset");
         FixtureManifest next = manager.generate(99, BASE_TIME);
         manager.load(ShopTarget.PROTECTED, next);
 
         assertThat(manager.verifyInvariants(ShopTarget.PROTECTED, next.oracleBaseline())).isEmpty();
 
-        JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
-        long generatedUserId = jdbc.sql("""
-                INSERT INTO users (login, name, email, password_hash)
-                VALUES ('new_registered_user', 'New User', 'new_registered_user@example.com', 'dummy-hash')
-                RETURNING id
-                """).query(Long.class).single();
-        assertThat(generatedUserId).isEqualTo(25L);
+        assertThat(count(jdbc, "users")).isEqualTo(24);
+        assertThat(insertUser(jdbc, "after_reset")).isEqualTo(previousUserId + 1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ShopTarget.class)
+    void failedFixtureLoadPreservesExistingUsersAndDoesNotReuseTheirIds(ShopTarget target) {
+        FixtureManifest manifest = manager.generate(42, BASE_TIME);
+        PreparedFixture prepared = manager.prepare(manifest);
+        manager.load(target, prepared);
+        JdbcClient jdbc = connections.forTarget(target).jdbc();
+        long previousUserId = insertUser(jdbc, "before_failed_reset");
+        OracleBaseline baseline = manifest.oracleBaseline();
+        var invalidBaseline = new OracleBaseline(List.of(), baseline.coupons(),
+                baseline.couponCounters(), baseline.orderIds());
+        var invalidManifest = new FixtureManifest(manifest.version(), manifest.seed(), manifest.businessTimeBase(),
+                manifest.manifestHash(), manifest.users(), manifest.products(), manifest.coupons(), manifest.carts(),
+                manifest.orders(), manifest.bola(), manifest.credentialStuffing(), manifest.draftCanary(), invalidBaseline);
+
+        assertThatThrownBy(() -> manager.load(target,
+                new PreparedFixture(invalidManifest, prepared.passwordHashesByUserId())))
+                .isInstanceOf(FixtureVerificationException.class);
+
+        assertThat(count(jdbc, "users")).isEqualTo(25);
+        assertThat(jdbc.sql("SELECT login FROM users WHERE id = :id").param("id", previousUserId)
+                .query(String.class).single()).isEqualTo("before_failed_reset");
+        assertThat(insertUser(jdbc, "after_failed_reset")).isEqualTo(previousUserId + 1);
     }
 
     @Test
@@ -145,12 +174,12 @@ class ShopFixtureManagerIntegrationTest {
         manager.load(ShopTarget.PROTECTED, valid);
 
         JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
-        long user25 = jdbc.sql("""
+        long previousUserId = jdbc.sql("""
                 INSERT INTO users (login, name, email, password_hash)
                 VALUES ('user_before_failed_load', 'User 25', 'user_before_failed_load@example.com', 'dummy-hash')
                 RETURNING id
                 """).query(Long.class).single();
-        assertThat(user25).isEqualTo(25L);
+        assertThat(previousUserId).isGreaterThan(24L);
 
         FixtureManifest broken = new FixtureManifest(
                 valid.version(), valid.seed(), valid.businessTimeBase(), valid.manifestHash(),
@@ -163,12 +192,12 @@ class ShopFixtureManagerIntegrationTest {
                 .isInstanceOf(FixtureVerificationException.class);
 
         assertThat(count(jdbc, "users")).isEqualTo(25L);
-        long user26 = jdbc.sql("""
+        long nextUserId = jdbc.sql("""
                 INSERT INTO users (login, name, email, password_hash)
                 VALUES ('user_after_failed_load', 'User 26', 'user_after_failed_load@example.com', 'dummy-hash')
                 RETURNING id
                 """).query(Long.class).single();
-        assertThat(user26).isEqualTo(26L);
+        assertThat(nextUserId).isEqualTo(previousUserId + 1);
     }
 
     @Test
@@ -189,10 +218,56 @@ class ShopFixtureManagerIntegrationTest {
                 .isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.sql("TRUNCATE TABLE flyway_schema_history").update())
                 .isInstanceOf(DataAccessException.class);
+        assertControlDatabaseAccessIsRestricted();
+    }
+
+    @Test
+    void revokesPublicControlDatabaseAccessOnExistingInstallations() {
+        assertControlDatabaseAccessIsRestricted();
+        Flyway.configure()
+                .dataSource(databaseUrl("lab_control"), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .defaultSchema("control").locations("classpath:db/control/migrations").target("5")
+                .load().migrate();
+        var admin = JdbcClient.create(new DriverManagerDataSource(
+                databaseUrl("lab_control"), POSTGRES.getUsername(), POSTGRES.getPassword()));
+        admin.sql("GRANT CONNECT, TEMP ON DATABASE lab_control TO PUBLIC").update();
+
+        Flyway.configure()
+                .dataSource(databaseUrl("lab_control"), POSTGRES.getUsername(), POSTGRES.getPassword())
+                .defaultSchema("control").locations("classpath:db/control/migrations")
+                .load().migrate();
+
+        assertThat(admin.sql("SELECT has_database_privilege('fixture_admin', 'lab_control', 'CONNECT')")
+                .query(Boolean.class).single()).isFalse();
+        assertThat(admin.sql("SELECT has_database_privilege('fixture_admin', 'lab_control', 'TEMP')")
+                .query(Boolean.class).single()).isFalse();
+        assertThat(admin.sql("SELECT has_database_privilege('control_app', 'lab_control', 'CONNECT')")
+                .query(Boolean.class).single()).isTrue();
+        assertControlDatabaseAccessIsRestricted();
+    }
+
+    private static void assertControlDatabaseAccessIsRestricted() {
+        var control = JdbcClient.create(new DriverManagerDataSource(
+                databaseUrl("lab_control"), "fixture_admin", FIXTURE_PASSWORD));
+        assertThatThrownBy(() -> control.sql("SELECT 1").query(Integer.class).single())
+                .isInstanceOf(DataAccessException.class)
+                .hasStackTraceContaining("permission denied for database");
+        var application = JdbcClient.create(new DriverManagerDataSource(
+                databaseUrl("lab_control"), "control_app", "control-test"));
+        assertThat(application.sql("SELECT 1").query(Integer.class).single()).isEqualTo(1);
     }
 
     private static long count(JdbcClient jdbc, String table) {
         return jdbc.sql("SELECT count(*) FROM " + table).query(Long.class).single();
+    }
+
+    private static long insertUser(JdbcClient jdbc, String login) {
+        return jdbc.sql("""
+                INSERT INTO users (login, name, email, password_hash)
+                VALUES (:login, 'New User', :email, 'dummy-hash')
+                RETURNING id
+                """).param("login", login).param("email", login + "@example.com")
+                .query(Long.class).single();
     }
 
     private static String databaseUrl(String databaseName) {

@@ -3,6 +3,9 @@ SELECT format('CREATE ROLE fixture_admin LOGIN NOINHERIT PASSWORD %L', :'fixture
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'fixture_admin')
 \gexec
 
+REVOKE ALL ON DATABASE lab_control FROM PUBLIC;
+GRANT CONNECT ON DATABASE lab_control TO control_app;
+
 \connect vulnerable
 REVOKE ALL ON DATABASE vulnerable FROM PUBLIC;
 GRANT CONNECT ON DATABASE vulnerable TO fixture_admin;

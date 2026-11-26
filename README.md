@@ -25,14 +25,16 @@ CompletionStage<RunResult> completion = handle.completion();
 
 По умолчанию один запуск делает 200 login: 3 с верными парами и 197 с неверными паролями
 (размер выборки настраивается параметрами `lab.fixture.user-count`, `lab.fixture.cs-attempts`
-и `lab.fixture.cs-valid-accounts`). Seed определяет пользователей, каталог, заказы, пары и порядок попыток.
+и `lab.fixture.cs-valid-accounts`). Допускается до 200 попыток: бюджет учитывает login и чтение
+профиля после каждого успешного входа, даже если все пароли приняты. Seed определяет пользователей,
+каталог, заказы, пары и порядок попыток.
 После каждого успешного login идёт GET своего профиля с полученным JWT. RequestId, время и JWT могут отличаться.
 
 Runner проверяет login-запросы сценария и ответы Shop по существующим OpenAPI/JSON Schema.
 Некорректный ответ сохраняется как `CONTRACT_VIOLATION` с HTTP-статусом, без тела и деталей ошибки.
 Общей проверки схемы исходящих запросов нет: другим атакам нужны намеренно некорректные данные.
 Ответ ограничен 2 MiB, получение HTTP-ответа - 5 секундами; редиректы запрещены.
-В `control.step_results` сохраняются только метаданные. Пароли и JWT используются в памяти.
+В `control.step_results` сохраняются метаданные и разрешенные поля ответа на чтение заказа. Пароли и JWT используются в памяти.
 
 Каждый запуск создает свое состояние сценария. Login и чтение профиля не меняют бизнес-данные.
 Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
@@ -52,6 +54,45 @@ Runner принимает один активный прогон; повторн
 Сценарии передаются только доверенным Java-кодом Control, без пользовательского кода и HTTP endpoints.
 Продолжение orchestration после `completion()` выполняется на собственном executor Control.
 Отмена HTTP не подтверждает завершение SQL в Shop; это проверяется отдельно через Runtime.
+
+## BOLA / IDOR
+
+`BolaScenario` проверяет объектный доступ к заказам (BO-01, THR-3). Атакующий входит
+и своим токеном читает известные заказы жертв. Контрольные запросы читают собственный
+и отсутствующий заказ тем же токеном. План содержит учетные данные и ID заказов без эталонов.
+Каждая отправка проходит через `StepExecutor` и сохраняется в `control.step_results` (EXP-2).
+Для корректного ответа 200 на чтение заказа сохраняется `order_evidence`: id, userId,
+cartId, cartRevision, subtotal, discount, total, currency и число позиций. Полные тела,
+пароли и JWT не сохраняются.
+
+```java
+var bola = manifest.bola();
+var plan = new BolaScenario.BolaPlan(
+        bola.attacker().id(), bola.attacker().login(), bola.attacker().password(),
+        bola.attackerOwnOrder().id(), bola.missingOrderId(),
+        bola.victimOrders().stream().map(FixtureOrder::id).toList());
+RunHandle handle = runner.start(trialId, runId,
+        run -> scenario.run(run, GatewayTarget.PROTECTED, plan));
+RunResult completed = handle.completion().toCompletableFuture().join();
+List<BolaAssessment> assessments = evaluator.evaluate(
+        completed.trialId(), completed.runId(), GatewayTarget.PROTECTED, bola);
+```
+
+`BolaEvaluator` читает сохраненные шаги выбранного trial/run/target и отдельно сравнивает
+их с приватным эталоном. Результаты, ожидаемые поля и связь по requestId сохраняются
+в `control.bola_assessments` одной транзакцией. Ошибка записи откатывает всю оценку.
+Повторная оценка того же run не перезаписывает сохраненные результаты.
+
+Совпадение контрольных полей чужого заказа дает `EFFECT_OBSERVED`, строгий 404 -
+`EFFECT_NOT_OBSERVED`. Таймаут, нарушение контракта, отсутствие доказательства,
+расхождение с эталоном или другой статус дают `INCONCLUSIVE`.
+Для собственного заказа одного 200 недостаточно: поля также должны совпасть с его эталоном.
+Блокировка собственного заказа и не-404 ответ на отсутствующий дают `EFFECT_OBSERVED`.
+Подмена сегмента пути запрещена каталогом `ShopRoute`. Пароль скрыт в `toString` плана.
+План допускает до 397 чужих заказов: еще три шага нужны для входа и контрольных запросов.
+
+Подключение к `POST /trials`, Runtime API и ожидание барьера финализации остаются
+отдельной задачей Control. Оценка вызывается после завершения шагов и финализации опыта.
 
 ## Запуск
 
@@ -85,7 +126,7 @@ curl --fail http://127.0.0.1:8080/health
 | `LAB_CONTROL_DB_PASSWORD`         | да          | -                            | Пароль рабочей роли `control_app`                                         |
 | `LAB_FIXTURE_DB_PASSWORD`         | да          | -                            | Пароль роли `fixture_admin` для загрузки фикстур в БД Shop                |
 | `LAB_FIXTURE_USER_COUNT`          | нет         | `24`                         | Число пользователей в фикстуре магазина (минимум 24)                      |
-| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                        | Число попыток входа в сценарии Credential Stuffing                        |
+| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                        | Число попыток входа в Credential Stuffing: от числа валидных аккаунтов до 200 |
 | `LAB_FIXTURE_CS_VALID_ACCOUNTS`   | нет         | `3`                          | Число валидных аккаунтов-жертв в сценарии Credential Stuffing             |
 | `LAB_DETECTOR_CONTROL_TOKEN`      | да          | -                            | Управление и чтение Detector из Control                                   |
 | `LAB_DETECTOR_GATEWAY_TOKEN`      | да          | -                            | Запись логов только producer GATEWAY                                      |
@@ -162,6 +203,8 @@ docker compose up -d --build shop-vulnerable shop-protected lab-control
 ```
 
 Миграция `V4__fixture_admin_grants.sql` выдаёт права на существующие объекты `vulnerable` и `protected` при старте Shop.
+Init-скрипт роли и миграция Control `V6__restrict_database_access.sql` закрывают доступ `PUBLIC` к `lab_control`.
+При загрузке фикстур счетчики ID только увеличиваются. Откат данных может оставить пропуски ID.
 
 ## Detector
 
