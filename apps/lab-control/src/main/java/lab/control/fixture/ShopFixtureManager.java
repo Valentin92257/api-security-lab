@@ -76,12 +76,12 @@ public class ShopFixtureManager {
             insertCoupons(jdbc, manifest.coupons());
             insertCarts(jdbc, manifest.carts());
             insertOrders(jdbc, manifest.orders());
-            syncSequences(jdbc);
 
             List<InvariantViolation> violations = queryInvariants(jdbc, baselineJson);
             if (!violations.isEmpty()) {
                 throw new FixtureVerificationException(target, violations);
             }
+            syncSequences(jdbc);
         });
     }
 

@@ -5,6 +5,7 @@ import lab.control.fixture.model.CredentialPair;
 import lab.control.fixture.model.FixtureManifest;
 import lab.control.fixture.model.FixtureUser;
 import lab.control.fixture.model.InvariantViolation;
+import lab.control.fixture.model.OracleBaseline;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -139,6 +140,38 @@ class ShopFixtureManagerIntegrationTest {
     }
 
     @Test
+    void doesNotRewindSequencesWhenInvariantVerificationFails() {
+        FixtureManifest valid = manager.generate(42, BASE_TIME);
+        manager.load(ShopTarget.PROTECTED, valid);
+
+        JdbcClient jdbc = connections.forTarget(ShopTarget.PROTECTED).jdbc();
+        long user25 = jdbc.sql("""
+                INSERT INTO users (login, name, email, password_hash)
+                VALUES ('user_before_failed_load', 'User 25', 'user_before_failed_load@example.com', 'dummy-hash')
+                RETURNING id
+                """).query(Long.class).single();
+        assertThat(user25).isEqualTo(25L);
+
+        FixtureManifest broken = new FixtureManifest(
+                valid.version(), valid.seed(), valid.businessTimeBase(), valid.manifestHash(),
+                valid.users(), valid.products(), valid.coupons(), valid.carts(), valid.orders(),
+                valid.bola(), valid.credentialStuffing(), valid.draftCanary(),
+                new OracleBaseline(List.of(), List.of(), List.of(), List.of())
+        );
+
+        assertThatThrownBy(() -> manager.load(ShopTarget.PROTECTED, broken))
+                .isInstanceOf(FixtureVerificationException.class);
+
+        assertThat(count(jdbc, "users")).isEqualTo(25L);
+        long user26 = jdbc.sql("""
+                INSERT INTO users (login, name, email, password_hash)
+                VALUES ('user_after_failed_load', 'User 26', 'user_after_failed_load@example.com', 'dummy-hash')
+                RETURNING id
+                """).query(Long.class).single();
+        assertThat(user26).isEqualTo(26L);
+    }
+
+    @Test
     void restrictsFixtureAdminRoleFromDdlAndOtherDatabases() {
         JdbcClient jdbc = connections.forTarget(ShopTarget.VULNERABLE).jdbc();
 
@@ -146,6 +179,15 @@ class ShopFixtureManagerIntegrationTest {
         assertThat(jdbc.sql("SELECT has_schema_privilege('fixture_admin', 'public', 'CREATE')")
                 .query(Boolean.class).single()).isFalse();
         assertThatThrownBy(() -> jdbc.sql("CREATE TABLE forbidden_ddl_test (id bigint)").update())
+                .isInstanceOf(DataAccessException.class);
+        for (String privilege : List.of("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE")) {
+            assertThat(jdbc.sql("SELECT has_table_privilege('fixture_admin', 'public.flyway_schema_history', :priv)")
+                    .param("priv", privilege)
+                    .query(Boolean.class).single()).isFalse();
+        }
+        assertThatThrownBy(() -> jdbc.sql("SELECT count(*) FROM flyway_schema_history").query(Long.class).single())
+                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.sql("TRUNCATE TABLE flyway_schema_history").update())
                 .isInstanceOf(DataAccessException.class);
     }
 

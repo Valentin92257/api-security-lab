@@ -53,7 +53,6 @@ class ShopFixtureManagerTest {
     void throwsFixtureVerificationExceptionWhenInvariantsReportViolations() {
         JdbcClient jdbc = mock(JdbcClient.class);
         JdbcClient.StatementSpec statement = mock(JdbcClient.StatementSpec.class);
-        JdbcClient.MappedQuerySpec<Long> longQuery = mock(JdbcClient.MappedQuerySpec.class);
         JdbcClient.MappedQuerySpec<InvariantViolation> violationQuery = mock(JdbcClient.MappedQuerySpec.class);
         TransactionTemplate transactions = mock(TransactionTemplate.class);
 
@@ -61,8 +60,6 @@ class ShopFixtureManagerTest {
         when(statement.param(anyString(), any())).thenReturn(statement);
         when(statement.param(anyString(), any(), anyInt())).thenReturn(statement);
         when(statement.update()).thenReturn(1);
-        when(statement.query(Long.class)).thenReturn(longQuery);
-        when(longQuery.single()).thenReturn(1L);
         when(statement.query(InvariantViolation.class)).thenReturn(violationQuery);
         InvariantViolation violation = new InvariantViolation("INV-COUPON-COUNT", "coupons", "1", "{\"expected\":1,\"actual\":0}");
         when(violationQuery.list()).thenReturn(List.of(violation));
@@ -83,6 +80,7 @@ class ShopFixtureManagerTest {
                     assertThat(verificationError.target()).isEqualTo(ShopTarget.PROTECTED);
                     assertThat(verificationError.violations()).containsExactly(violation);
                 });
+        verify(jdbc, never()).sql(contains("setval"));
     }
 
     @Test
