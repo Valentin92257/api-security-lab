@@ -53,6 +53,37 @@ Runner принимает один активный прогон; повторн
 Продолжение orchestration после `completion()` выполняется на собственном executor Control.
 Отмена HTTP не подтверждает завершение SQL в Shop; это проверяется отдельно через Runtime.
 
+## BOLA / IDOR
+
+`BolaScenario` проверяет объектный доступ к заказам (BO-01, THR-3). Actor BOLA_ATTACKER
+выполняет подготовительный login и своим токеном читает заказы пользователей BOLA_VICTIM,
+взяв известные orderId из приватного `manifest.bola().victimOrders()`. Benign-контроли -
+собственный заказ атакующего и отсутствующий заказ `missingOrderId`, читаются тем же токеном.
+Каждая отправка проходит через `StepExecutor`: результат сохраняется в `control.step_results`
+как метаданные шага (EXP-2), тела и JWT остаются в памяти.
+
+```java
+var bola = manifest.bola();
+var plan = new BolaScenario.BolaPlan(
+        bola.attacker().id(), bola.attacker().login(), bola.attacker().password(),
+        bola.attackerOwnOrder().id(), bola.missingOrderId(),
+        bola.victimOrders().stream()
+                .map(order -> new BolaScenario.BolaPlan.VictimOrder(order.id(), order.responseBody()))
+                .toList());
+List<StepResponse> evidence = scenario.run(run, GatewayTarget.PROTECTED, plan);
+List<BolaScenario.BolaAssessment> assessments = scenario.evaluate(plan, evidence);
+```
+
+Критерий оценки зафиксирован: фактический ответ каждого `GET /api/v1/orders/{orderId}`
+сопоставляется с приватным эталоном фикстуры по контрольным полям заказа
+(id, userId, cartId, cartRevision, subtotal, discount, total, currency, items.size).
+`EFFECT_OBSERVED` - поля чужого заказа раскрыты; строгий 404 - `EFFECT_NOT_OBSERVED`;
+таймаут, contract violation, другой статус или расхождение с эталоном - `INCONCLUSIVE`.
+Для контролей: доступ к собственному заказу и 404 на отсутствующий - `EFFECT_NOT_OBSERVED`,
+блокировка собственного или не-404 ответ на отсутствующий - `EFFECT_OBSERVED`.
+Подмена сегмента пути (/;/, %-кодирование) не допускается каталогом маршрутов `ShopRoute`.
+Пароль атакующего и ожидаемые тела заказов скрываются в `toString` плана.
+
 ## Запуск
 
 Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).
