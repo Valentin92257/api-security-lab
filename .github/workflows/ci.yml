@@ -46,11 +46,14 @@ jobs:
       - name: Prepare local credentials
         run: |
           umask 077
-          for secret_name in LAB_OPERATOR_TOKEN POSTGRES_PASSWORD LAB_CONTROL_DB_PASSWORD \
-            LAB_DETECTOR_CONTROL_TOKEN LAB_DETECTOR_GATEWAY_TOKEN LAB_DETECTOR_SHOP_TOKEN \
-            LAB_DETECTOR_DB_PASSWORD LAB_DETECTOR_MIGRATION_PASSWORD JWT_SECRET_PROTECTED JWT_SECRET_VULNERABLE IDEMPOTENCY_SECRET; do
-            printf '%s=%s\n' "$secret_name" "$(openssl rand -hex 32)"
-          done > .env
+          while IFS= read -r line || [ -n "$line" ]; do
+            line=${line%$'\r'}
+            case "$line" in
+              *=replace-with-*) printf '%s=%s\n' "${line%%=*}" "$(openssl rand -hex 32)" ;;
+              *) printf '%s\n' "$line" ;;
+            esac
+          done < .env.example > .env
+          ! grep -q 'replace-with-' .env
       - name: Build images
         run: docker compose build
       - name: Start stack

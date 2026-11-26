@@ -7,23 +7,26 @@ Shop запускается в двух контейнерах с профиля
 
 ## Credential stuffing
 
-`ScenarioRunner` запускает сценарий в отдельном потоке внутри Control. Нужны существующий trial,
-runId, режим Gateway, seed и три подготовленных пользователя выбранного режима:
+`ScenarioRunner` запускает сценарий в отдельном потоке внутри Control. Фикстуры магазина (пользователи,
+каталог с draft canary, купоны, корзины, исторические заказы, baseline для Oracle и пары попыток входа)
+детерминированно генерируются по `seed` в `lab.control.fixture` (`FixtureGenerator` / `ShopFixtureManager`)
+и загружаются в выбранную БД (`vulnerable` или `protected`) под ролью `fixture_admin`:
 
 ```java
-var actors = List.of(
-        new CredentialStuffingScenario.Actor(1, "alice", "fixture-alice"),
-        new CredentialStuffingScenario.Actor(2, "bob", "fixture-bob"),
-        new CredentialStuffingScenario.Actor(3, "carol", "fixture-carol"));
+FixtureManifest manifest = fixtureManager.generate(42, Instant.now());
+fixtureManager.load(ShopTarget.PROTECTED, manifest);
+var attempts = manifest.credentialStuffing().attempts().stream()
+        .map(p -> new CredentialStuffingScenario.LoginAttempt(p.userId(), p.login(), p.password()))
+        .toList();
 RunHandle handle = runner.start(trialId, runId,
-        run -> scenario.run(run, GatewayTarget.PROTECTED, 42, actors));
+        run -> scenario.run(run, GatewayTarget.PROTECTED, attempts));
 CompletionStage<RunResult> completion = handle.completion();
 ```
 
-Один запуск делает 200 login: три с верными парами и 197 с неверными паролями.
-Seed определяет пары и порядок попыток. Одинаковые seed и пользователи дают одинаковые
-login-запросы независимо от порядка пользователей во входном списке. После каждого
-успешного login идет GET своего профиля с полученным JWT. RequestId, время и JWT могут отличаться.
+По умолчанию один запуск делает 200 login: 3 с верными парами и 197 с неверными паролями
+(размер выборки настраивается параметрами `lab.fixture.user-count`, `lab.fixture.cs-attempts`
+и `lab.fixture.cs-valid-accounts`). Seed определяет пользователей, каталог, заказы, пары и порядок попыток.
+После каждого успешного login идёт GET своего профиля с полученным JWT. RequestId, время и JWT могут отличаться.
 
 Runner проверяет login-запросы сценария и ответы Shop по существующим OpenAPI/JSON Schema.
 Некорректный ответ сохраняется как `CONTRACT_VIOLATION` с HTTP-статусом, без тела и деталей ошибки.
@@ -32,7 +35,7 @@ Runner проверяет login-запросы сценария и ответы 
 В `control.step_results` сохраняются только метаданные. Пароли и JWT используются в памяти.
 
 Каждый запуск создает свое состояние сценария. Login и чтение профиля не меняют бизнес-данные.
-Fixture/Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
+Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
 
 Runner принимает один активный прогон; повторный запуск до завершения дает `RejectedExecutionException`.
 На прогон разрешено до 400 отправок, результаты хранятся в ограниченном списке метаданных.
@@ -75,25 +78,29 @@ curl --fail http://127.0.0.1:8080/health
 
 Настройки задаются в `.env` (образец - `.env.example`), файл `.env` не коммитится.
 
-| Переменная                 | Обязательна | По умолчанию                 | Назначение                                                                |
-|----------------------------|-------------|------------------------------|---------------------------------------------------------------------------|
-| `LAB_OPERATOR_TOKEN`       | да          | -                            | Bearer-токен оператора Control                                            |
-| `POSTGRES_PASSWORD`        | да          | -                            | Пароль администратора БД                                                  |
-| `LAB_CONTROL_DB_PASSWORD`  | да          | -                            | Пароль рабочей роли `control_app`                                         |
-| `LAB_DETECTOR_CONTROL_TOKEN` | да | - | Управление и чтение Detector из Control |
-| `LAB_DETECTOR_GATEWAY_TOKEN` | да | - | Запись логов только producer GATEWAY |
-| `LAB_DETECTOR_SHOP_TOKEN` | да | - | Запись логов только producer SHOP |
-| `LAB_DETECTOR_DB_PASSWORD` | да | - | Пароль рабочей роли `detector_app` |
-| `LAB_DETECTOR_MIGRATION_PASSWORD` | да | - | Пароль роли миграций `detector_migrator` |
-| `POSTGRES_USER`            | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
-| `LAB_CONTROL_PORT`         | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
-| `SHOP_PROTECTED_URL`       | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
-| `GATEWAY_CONNECT_TIMEOUT`  | нет         | `2s`                         | Таймаут соединения Gateway                                                |
-| `GATEWAY_UPSTREAM_TIMEOUT` | нет         | `5s`                         | Таймаут ответа магазина                                                   |
-| `GATEWAY_MAX_BODY_BYTES`   | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
-| `JWT_SECRET_PROTECTED`     | да          | -                            | JWT секрет защищенной версии API: подпись в Shop и проверка в Gateway    |
-| `JWT_SECRET_VULNERABLE`    | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
-| `IDEMPOTENCY_SECRET`       | да          | -                            | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
+| Переменная                        | Обязательна | По умолчанию                 | Назначение                                                                |
+|-----------------------------------|-------------|------------------------------|---------------------------------------------------------------------------|
+| `LAB_OPERATOR_TOKEN`              | да          | -                            | Bearer-токен оператора Control                                            |
+| `POSTGRES_PASSWORD`               | да          | -                            | Пароль администратора БД                                                  |
+| `LAB_CONTROL_DB_PASSWORD`         | да          | -                            | Пароль рабочей роли `control_app`                                         |
+| `LAB_FIXTURE_DB_PASSWORD`         | да          | -                            | Пароль роли `fixture_admin` для загрузки фикстур в БД Shop                |
+| `LAB_FIXTURE_USER_COUNT`          | нет         | `24`                         | Число пользователей в фикстуре магазина (минимум 24)                      |
+| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                        | Число попыток входа в сценарии Credential Stuffing                        |
+| `LAB_FIXTURE_CS_VALID_ACCOUNTS`   | нет         | `3`                          | Число валидных аккаунтов-жертв в сценарии Credential Stuffing             |
+| `LAB_DETECTOR_CONTROL_TOKEN`      | да          | -                            | Управление и чтение Detector из Control                                   |
+| `LAB_DETECTOR_GATEWAY_TOKEN`      | да          | -                            | Запись логов только producer GATEWAY                                      |
+| `LAB_DETECTOR_SHOP_TOKEN`         | да          | -                            | Запись логов только producer SHOP                                         |
+| `LAB_DETECTOR_DB_PASSWORD`        | да          | -                            | Пароль рабочей роли `detector_app`                                        |
+| `LAB_DETECTOR_MIGRATION_PASSWORD` | да          | -                            | Пароль роли миграций `detector_migrator`                                  |
+| `POSTGRES_USER`                   | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
+| `LAB_CONTROL_PORT`                | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
+| `SHOP_PROTECTED_URL`              | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
+| `GATEWAY_CONNECT_TIMEOUT`         | нет         | `2s`                         | Таймаут соединения Gateway                                                |
+| `GATEWAY_UPSTREAM_TIMEOUT`        | нет         | `5s`                         | Таймаут ответа магазина                                                   |
+| `GATEWAY_MAX_BODY_BYTES`          | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
+| `JWT_SECRET_PROTECTED`            | да          | -                            | JWT секрет защищенной версии API: подпись в Shop и проверка в Gateway     |
+| `JWT_SECRET_VULNERABLE`           | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
+| `IDEMPOTENCY_SECRET`              | да          | -                            | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
 
 Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
 
@@ -141,6 +148,20 @@ docker compose up -d --build lab-detector
 
 Повтор bootstrap сохраняет существующие роли/пароли и данные. Новая БД и миграции
 создаются автоматически на пустом volume.
+
+Для загрузки фикстур и запуска `check_business_invariants(jsonb)` из Control используется отдельная
+роль `fixture_admin` (`db/shop/fixture-roles.sql`), у которой есть DML/`TRUNCATE`, обновление sequence
+и `EXECUTE` на функцию инвариантов только в `vulnerable` и `protected` (без DDL и без доступа к
+`lab_control` и `lab_detector`). Для существующего volume добавь `LAB_FIXTURE_DB_PASSWORD` из `.env.example`
+и примени init-скрипт роли перед перезапуском Shop и Control:
+
+```sh
+docker compose up -d db
+docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -f /docker-entrypoint-initdb.d/25-shop-fixture-roles.sql'
+docker compose up -d --build shop-vulnerable shop-protected lab-control
+```
+
+Миграция `V4__fixture_admin_grants.sql` выдаёт права на существующие объекты `vulnerable` и `protected` при старте Shop.
 
 ## Detector
 

@@ -13,6 +13,10 @@ services:
       SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       LAB_OPERATOR_TOKEN: ${LAB_OPERATOR_TOKEN:?Set LAB_OPERATOR_TOKEN in .env}
       LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
+      LAB_FIXTURE_DB_PASSWORD: ${LAB_FIXTURE_DB_PASSWORD:?Set LAB_FIXTURE_DB_PASSWORD in .env}
+      LAB_FIXTURE_USER_COUNT: "${LAB_FIXTURE_USER_COUNT:-24}"
+      LAB_FIXTURE_CS_ATTEMPTS: "${LAB_FIXTURE_CS_ATTEMPTS:-200}"
+      LAB_FIXTURE_CS_VALID_ACCOUNTS: "${LAB_FIXTURE_CS_VALID_ACCOUNTS:-3}"
       LAB_DETECTOR_CONTROL_TOKEN: ${LAB_DETECTOR_CONTROL_TOKEN:?Set LAB_DETECTOR_CONTROL_TOKEN in .env}
     depends_on:
       db:
@@ -28,11 +32,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       LAB_CONTROL_DB_PASSWORD: ${LAB_CONTROL_DB_PASSWORD:?Set LAB_CONTROL_DB_PASSWORD in .env}
+      LAB_FIXTURE_DB_PASSWORD: ${LAB_FIXTURE_DB_PASSWORD:?Set LAB_FIXTURE_DB_PASSWORD in .env}
       LAB_DETECTOR_DB_PASSWORD: ${LAB_DETECTOR_DB_PASSWORD:?Set LAB_DETECTOR_DB_PASSWORD in .env}
       LAB_DETECTOR_MIGRATION_PASSWORD: ${LAB_DETECTOR_MIGRATION_PASSWORD:?Set LAB_DETECTOR_MIGRATION_PASSWORD in .env}
     volumes:
       - control-data:/var/lib/postgresql/data
       - ./db/init/bootstrap.sql:/docker-entrypoint-initdb.d/20-databases.sql:ro
+      - ./db/shop/fixture-roles.sql:/docker-entrypoint-initdb.d/25-shop-fixture-roles.sql:ro
       - ./db/control/role.sql:/docker-entrypoint-initdb.d/10-control.sql:ro
       - ./db/detector/bootstrap.sql:/docker-entrypoint-initdb.d/15-detector.sql:ro
     healthcheck:

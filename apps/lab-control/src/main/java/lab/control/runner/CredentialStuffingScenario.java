@@ -1,40 +1,52 @@
 package lab.control.runner;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Random;
-import java.util.regex.Pattern;
-
 import lab.contracts.json.ContractJsonCodec;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.regex.Pattern;
 
 @Component
 public class CredentialStuffingScenario {
-    private static final int LOGIN_ATTEMPTS = 200;
+    public static final int DEFAULT_LOGIN_ATTEMPTS = 200;
+    public static final int DEFAULT_DISTINCT_ACCOUNTS = 3;
     private static final String CLIENT_IP = "192.0.2.1";
 
     private final StepExecutor steps;
     private final ShopContractValidator validator;
     private final ContractJsonCodec json;
+    private final int expectedAttempts;
+    private final int expectedAccounts;
 
-    public CredentialStuffingScenario(StepExecutor steps, ShopContractValidator validator, ContractJsonCodec json) {
+    @Autowired
+    public CredentialStuffingScenario(
+            StepExecutor steps,
+            ShopContractValidator validator,
+            ContractJsonCodec json,
+            @Value("${lab.fixture.cs-attempts:" + DEFAULT_LOGIN_ATTEMPTS + "}") int expectedAttempts,
+            @Value("${lab.fixture.cs-valid-accounts:" + DEFAULT_DISTINCT_ACCOUNTS + "}") int expectedAccounts
+    ) {
+        if (expectedAccounts < 1 || expectedAttempts < expectedAccounts) {
+            throw new IllegalArgumentException("Invalid credential stuffing workload configuration");
+        }
         this.steps = steps;
         this.validator = validator;
         this.json = json;
+        this.expectedAttempts = expectedAttempts;
+        this.expectedAccounts = expectedAccounts;
     }
 
-    public void run(RunContext run, GatewayTarget target, long seed, List<Actor> actors) {
+    public CredentialStuffingScenario(StepExecutor steps, ShopContractValidator validator, ContractJsonCodec json) {
+        this(steps, validator, json, DEFAULT_LOGIN_ATTEMPTS, DEFAULT_DISTINCT_ACCOUNTS);
+    }
+
+    public void run(RunContext run, GatewayTarget target, List<LoginAttempt> loginAttempts) {
         Objects.requireNonNull(run);
         Objects.requireNonNull(target);
-        if (seed < 0 || seed > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException("Seed must be between 0 and 2147483647");
-        }
-        List<LoginAttempt> attempts = prepare(seed, actors);
+        List<LoginAttempt> attempts = validateAttempts(loginAttempts);
         for (LoginAttempt attempt : attempts) {
             if (run.isStopped()) {
                 break;
@@ -56,45 +68,46 @@ public class CredentialStuffingScenario {
                 break;
             }
             steps.execute(run, new StepRequest(target, "GET",
-                    "/api/v1/users/" + attempt.actor().userId(),
+                    "/api/v1/users/" + attempt.userId(),
                     Map.of("Authorization", "Bearer " + token, "X-Forwarded-For", CLIENT_IP), null));
         }
     }
 
     private StepRequest loginRequest(GatewayTarget target, LoginAttempt attempt) {
         var body = json.jsonMapper().createObjectNode()
-                .put("login", attempt.actor().login()).put("password", attempt.password());
+                .put("login", attempt.login()).put("password", attempt.password());
         String payload = json.jsonMapper().writeValueAsString(body);
         validator.validateLoginRequest(payload);
         return new StepRequest(target, "POST", "/api/v1/auth/login",
                 Map.of("Content-Type", "application/json", "X-Forwarded-For", CLIENT_IP), payload);
     }
 
-    private List<LoginAttempt> prepare(long seed, List<Actor> actors) {
-        List<Actor> ordered = actors.stream().sorted(Comparator.comparingLong(Actor::userId)).toList();
-        if (ordered.size() != 3 || ordered.stream().map(Actor::userId).distinct().count() != 3
-                || ordered.stream().map(Actor::login).distinct().count() != 3) {
-            throw new IllegalArgumentException("Expected three distinct fixture actors");
+    private List<LoginAttempt> validateAttempts(List<LoginAttempt> attempts) {
+        if (attempts == null || attempts.size() != expectedAttempts) {
+            throw new IllegalArgumentException("Expected exactly " + expectedAttempts + " login attempts");
         }
-        Random random = new Random(seed);
-        List<LoginAttempt> attempts = new ArrayList<>(LOGIN_ATTEMPTS);
-        ordered.forEach(actor -> attempts.add(new LoginAttempt(actor, actor.password())));
-        while (attempts.size() < LOGIN_ATTEMPTS) {
-            Actor actor = ordered.get(random.nextInt(ordered.size()));
-            String password = "invalid_" + Long.toUnsignedString(random.nextLong(), 36);
-            if (password.equals(actor.password())) {
-                password += "_wrong";
+        Map<Long, String> loginByUserId = new HashMap<>();
+        Set<String> logins = new HashSet<>();
+        for (LoginAttempt attempt : attempts) {
+            if (attempt == null) {
+                throw new IllegalArgumentException("Login attempt must not be null");
             }
-            attempts.add(new LoginAttempt(actor, password));
+            String previous = loginByUserId.putIfAbsent(attempt.userId(), attempt.login());
+            if (previous != null && !previous.equals(attempt.login())) {
+                throw new IllegalArgumentException("Conflicting login for userId=" + attempt.userId());
+            }
+            logins.add(attempt.login());
         }
-        Collections.shuffle(attempts, random);
-        return attempts;
+        if (loginByUserId.size() != expectedAccounts || logins.size() != expectedAccounts) {
+            throw new IllegalArgumentException("Expected attempts targeting " + expectedAccounts + " distinct accounts");
+        }
+        return List.copyOf(attempts);
     }
 
-    public record Actor(long userId, String login, String password) {
+    public record LoginAttempt(long userId, String login, String password) {
         private static final Pattern LOGIN = Pattern.compile("[a-z0-9_]{3,32}");
 
-        public Actor {
+        public LoginAttempt {
             Objects.requireNonNull(login);
             Objects.requireNonNull(password);
             int bytes = password.getBytes(StandardCharsets.UTF_8).length;
@@ -106,14 +119,7 @@ public class CredentialStuffingScenario {
 
         @Override
         public String toString() {
-            return "Actor[userId=" + userId + ", login=" + login + "]";
-        }
-    }
-
-    private record LoginAttempt(Actor actor, String password) {
-        @Override
-        public String toString() {
-            return "LoginAttempt[userId=" + actor.userId() + "]";
+            return "LoginAttempt[userId=" + userId + ", login=" + login + "]";
         }
     }
 }
