@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import lab.control.evaluation.BolaEvaluator;
+import lab.control.result.BolaAssessmentRepository;
 import lab.control.result.StepResultRepository;
 import lab.control.trial.TrialRepository;
 import lab.control.trial.TrialSnapshot;
@@ -36,6 +38,12 @@ class ControlJsonErrorsTest {
 
     @MockitoBean
     private StepResultRepository stepResults;
+
+    @MockitoBean
+    private BolaAssessmentRepository bolaAssessments;
+
+    @MockitoBean
+    private BolaEvaluator bolaEvaluator;
 
     @LocalServerPort
     private int port;

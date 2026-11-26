@@ -110,7 +110,9 @@ public class StepExecutor {
             }
             var result = new StepResult(run.trialId(), run.runId(), requestId, step.target(), step.method(),
                     route.getRawPath(), status, outcome, startedAt,
-                    Duration.ofNanos(System.nanoTime() - started).toMillis());
+                    Duration.ofNanos(System.nanoTime() - started).toMillis(),
+                    operation == ShopRoute.ORDER && outcome == StepOutcome.RESPONSE && Integer.valueOf(200).equals(status)
+                            ? OrderEvidence.from(responseBody) : null);
             results.save(result);
             run.record(result);
             return new StepResponse(result, responseBody);

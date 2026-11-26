@@ -263,7 +263,7 @@ class CredentialStuffingScenarioTest {
         StepRequest request = call.getArgument(1);
         RunContext run = call.getArgument(0);
         var result = new StepResult(run.trialId(), run.runId(), UUID.randomUUID(), request.target(),
-                request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0);
+                request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0, null);
         var pending = run.dispatch(() -> CompletableFuture.completedFuture(null));
         run.record(result);
         run.release(pending);

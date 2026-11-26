@@ -32,7 +32,7 @@ Runner проверяет login-запросы сценария и ответы 
 Некорректный ответ сохраняется как `CONTRACT_VIOLATION` с HTTP-статусом, без тела и деталей ошибки.
 Общей проверки схемы исходящих запросов нет: другим атакам нужны намеренно некорректные данные.
 Ответ ограничен 2 MiB, получение HTTP-ответа - 5 секундами; редиректы запрещены.
-В `control.step_results` сохраняются только метаданные. Пароли и JWT используются в памяти.
+В `control.step_results` сохраняются метаданные и разрешенные поля ответа на чтение заказа. Пароли и JWT используются в памяти.
 
 Каждый запуск создает свое состояние сценария. Login и чтение профиля не меняют бизнес-данные.
 Runtime API, очистка лимитов и подключение к `POST /trials` выполняются отдельно.
@@ -55,34 +55,41 @@ Runner принимает один активный прогон; повторн
 
 ## BOLA / IDOR
 
-`BolaScenario` проверяет объектный доступ к заказам (BO-01, THR-3). Actor BOLA_ATTACKER
-выполняет подготовительный login и своим токеном читает заказы пользователей BOLA_VICTIM,
-взяв известные orderId из приватного `manifest.bola().victimOrders()`. Benign-контроли -
-собственный заказ атакующего и отсутствующий заказ `missingOrderId`, читаются тем же токеном.
-Каждая отправка проходит через `StepExecutor`: результат сохраняется в `control.step_results`
-как метаданные шага (EXP-2), тела и JWT остаются в памяти.
+`BolaScenario` проверяет объектный доступ к заказам (BO-01, THR-3). Атакующий входит
+и своим токеном читает известные заказы жертв. Контрольные запросы читают собственный
+и отсутствующий заказ тем же токеном. План содержит учетные данные и ID заказов без эталонов.
+Каждая отправка проходит через `StepExecutor` и сохраняется в `control.step_results` (EXP-2).
+Для корректного ответа 200 на чтение заказа сохраняется `order_evidence`: id, userId,
+cartId, cartRevision, subtotal, discount, total, currency и число позиций. Полные тела,
+пароли и JWT не сохраняются.
 
 ```java
 var bola = manifest.bola();
 var plan = new BolaScenario.BolaPlan(
         bola.attacker().id(), bola.attacker().login(), bola.attacker().password(),
         bola.attackerOwnOrder().id(), bola.missingOrderId(),
-        bola.victimOrders().stream()
-                .map(order -> new BolaScenario.BolaPlan.VictimOrder(order.id(), order.responseBody()))
-                .toList());
-List<StepResponse> evidence = scenario.run(run, GatewayTarget.PROTECTED, plan);
-List<BolaScenario.BolaAssessment> assessments = scenario.evaluate(plan, evidence);
+        bola.victimOrders().stream().map(FixtureOrder::id).toList());
+RunHandle handle = runner.start(trialId, runId,
+        run -> scenario.run(run, GatewayTarget.PROTECTED, plan));
+RunResult completed = handle.completion().toCompletableFuture().join();
+List<BolaAssessment> assessments = evaluator.evaluate(
+        completed.trialId(), completed.runId(), GatewayTarget.PROTECTED, bola);
 ```
 
-Критерий оценки зафиксирован: фактический ответ каждого `GET /api/v1/orders/{orderId}`
-сопоставляется с приватным эталоном фикстуры по контрольным полям заказа
-(id, userId, cartId, cartRevision, subtotal, discount, total, currency, items.size).
-`EFFECT_OBSERVED` - поля чужого заказа раскрыты; строгий 404 - `EFFECT_NOT_OBSERVED`;
-таймаут, contract violation, другой статус или расхождение с эталоном - `INCONCLUSIVE`.
-Для контролей: доступ к собственному заказу и 404 на отсутствующий - `EFFECT_NOT_OBSERVED`,
-блокировка собственного или не-404 ответ на отсутствующий - `EFFECT_OBSERVED`.
-Подмена сегмента пути (/;/, %-кодирование) не допускается каталогом маршрутов `ShopRoute`.
-Пароль атакующего и ожидаемые тела заказов скрываются в `toString` плана.
+`BolaEvaluator` читает сохраненные шаги выбранного trial/run/target и отдельно сравнивает
+их с приватным эталоном. Результаты, ожидаемые поля и связь по requestId сохраняются
+в `control.bola_assessments` одной транзакцией. Ошибка записи откатывает всю оценку.
+Повторная оценка того же run не перезаписывает сохраненные результаты.
+
+Совпадение контрольных полей чужого заказа дает `EFFECT_OBSERVED`, строгий 404 -
+`EFFECT_NOT_OBSERVED`. Таймаут, нарушение контракта, отсутствие доказательства,
+расхождение с эталоном или другой статус дают `INCONCLUSIVE`.
+Для собственного заказа одного 200 недостаточно: поля также должны совпасть с его эталоном.
+Блокировка собственного заказа и не-404 ответ на отсутствующий дают `EFFECT_OBSERVED`.
+Подмена сегмента пути запрещена каталогом `ShopRoute`. Пароль скрыт в `toString` плана.
+
+Подключение к `POST /trials`, Runtime API и ожидание барьера финализации остаются
+отдельной задачей Control. Оценка вызывается после завершения шагов и финализации опыта.
 
 ## Запуск
 

@@ -3,17 +3,14 @@ package lab.control.runner;
 import lab.contracts.json.ContractJsonCodec;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Component
@@ -49,11 +46,11 @@ public class BolaScenario {
         if (token == null || run.isStopped()) {
             return evidence;
         }
-        for (BolaPlan.VictimOrder victim : plan.victimOrders()) {
+        for (long orderId : plan.victimOrderIds()) {
             if (run.isStopped()) {
                 break;
             }
-            evidence.add(steps.execute(run, orderRequest(target, token, victim.orderId())));
+            evidence.add(steps.execute(run, orderRequest(target, token, orderId)));
         }
         if (!run.isStopped()) {
             evidence.add(steps.execute(run, orderRequest(target, token, plan.ownOrderId())));
@@ -62,128 +59,6 @@ public class BolaScenario {
             evidence.add(steps.execute(run, orderRequest(target, token, plan.missingOrderId())));
         }
         return evidence;
-    }
-
-    public List<BolaAssessment> evaluate(BolaPlan plan, List<StepResponse> evidence) {
-        Objects.requireNonNull(plan);
-        Map<Long, StepResponse> orderResponses = new HashMap<>();
-        for (StepResponse step : evidence == null ? List.<StepResponse>of() : evidence) {
-            if (step == null || step.result() == null) {
-                continue;
-            }
-            Long orderId = orderIdOf(step.result());
-            if (orderId != null) {
-                orderResponses.putIfAbsent(orderId, step);
-            }
-        }
-        List<BolaAssessment> assessments = new ArrayList<>();
-        for (BolaPlan.VictimOrder victim : plan.victimOrders()) {
-            assessments.add(assessVictimOrder(victim, orderResponses.get(victim.orderId())));
-        }
-        assessments.add(assessOwnOrder(plan, orderResponses.get(plan.ownOrderId())));
-        assessments.add(assessMissingOrder(plan, orderResponses.get(plan.missingOrderId())));
-        return assessments;
-    }
-
-    private BolaAssessment assessVictimOrder(BolaPlan.VictimOrder victim, StepResponse attack) {
-        if (attack == null) {
-            return new BolaAssessment(BolaAssessment.CaseKind.VICTIM_ORDER, victim.orderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, null, "Attack step was not completed");
-        }
-        if (attack.result().outcome() != StepOutcome.RESPONSE) {
-            return new BolaAssessment(BolaAssessment.CaseKind.VICTIM_ORDER, victim.orderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, attack.result().requestId(),
-                    "No usable response evidence: " + attack.result().outcome());
-        }
-        Integer status = attack.result().status();
-        if (Integer.valueOf(200).equals(status)) {
-            if (attack.body() != null && disclosesForeignOrder(attack.body(), victim.expectedBody())) {
-                return new BolaAssessment(BolaAssessment.CaseKind.VICTIM_ORDER, victim.orderId(),
-                        BolaAssessment.Effect.EFFECT_OBSERVED, attack.result().requestId(),
-                        "Foreign order fields match the private baseline");
-            }
-            return new BolaAssessment(BolaAssessment.CaseKind.VICTIM_ORDER, victim.orderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, attack.result().requestId(),
-                    "Response does not match the private baseline");
-        }
-        if (Integer.valueOf(404).equals(status)) {
-            return new BolaAssessment(BolaAssessment.CaseKind.VICTIM_ORDER, victim.orderId(),
-                    BolaAssessment.Effect.EFFECT_NOT_OBSERVED, attack.result().requestId(),
-                    "Owner check returned a strict 404");
-        }
-        return new BolaAssessment(BolaAssessment.CaseKind.VICTIM_ORDER, victim.orderId(),
-                BolaAssessment.Effect.INCONCLUSIVE, attack.result().requestId(),
-                "Status " + status + " proves neither disclosure nor protection");
-    }
-
-    private BolaAssessment assessOwnOrder(BolaPlan plan, StepResponse control) {
-        if (control == null) {
-            return new BolaAssessment(BolaAssessment.CaseKind.OWN_ORDER, plan.ownOrderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, null, "Own order control step was not completed");
-        }
-        if (control.result().outcome() != StepOutcome.RESPONSE) {
-            return new BolaAssessment(BolaAssessment.CaseKind.OWN_ORDER, plan.ownOrderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, control.result().requestId(),
-                    "No usable response evidence: " + control.result().outcome());
-        }
-        if (Integer.valueOf(200).equals(control.result().status())) {
-            return new BolaAssessment(BolaAssessment.CaseKind.OWN_ORDER, plan.ownOrderId(),
-                    BolaAssessment.Effect.EFFECT_NOT_OBSERVED, control.result().requestId(),
-                    "Own order access preserved");
-        }
-        if (Integer.valueOf(404).equals(control.result().status())) {
-            return new BolaAssessment(BolaAssessment.CaseKind.OWN_ORDER, plan.ownOrderId(),
-                    BolaAssessment.Effect.EFFECT_OBSERVED, control.result().requestId(),
-                    "Own order access was blocked");
-        }
-        return new BolaAssessment(BolaAssessment.CaseKind.OWN_ORDER, plan.ownOrderId(),
-                BolaAssessment.Effect.INCONCLUSIVE, control.result().requestId(),
-                "Status " + control.result().status() + " proves neither access nor a block");
-    }
-
-    private BolaAssessment assessMissingOrder(BolaPlan plan, StepResponse control) {
-        if (control == null) {
-            return new BolaAssessment(BolaAssessment.CaseKind.MISSING_ORDER, plan.missingOrderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, null, "Missing order control step was not completed");
-        }
-        if (control.result().outcome() != StepOutcome.RESPONSE) {
-            return new BolaAssessment(BolaAssessment.CaseKind.MISSING_ORDER, plan.missingOrderId(),
-                    BolaAssessment.Effect.INCONCLUSIVE, control.result().requestId(),
-                    "No usable response evidence: " + control.result().outcome());
-        }
-        if (Integer.valueOf(404).equals(control.result().status())) {
-            return new BolaAssessment(BolaAssessment.CaseKind.MISSING_ORDER, plan.missingOrderId(),
-                    BolaAssessment.Effect.EFFECT_NOT_OBSERVED, control.result().requestId(),
-                    "Missing order is reported as a strict 404");
-        }
-        return new BolaAssessment(BolaAssessment.CaseKind.MISSING_ORDER, plan.missingOrderId(),
-                BolaAssessment.Effect.EFFECT_OBSERVED, control.result().requestId(),
-                "Missing order produced a non-404 response");
-    }
-
-    private boolean disclosesForeignOrder(JsonNode actual, String expectedBody) {
-        JsonNode baseline = json.jsonMapper().readTree(expectedBody);
-        return actual.get("id").asLong() == baseline.get("id").asLong()
-                && actual.get("userId").asLong() == baseline.get("userId").asLong()
-                && actual.get("cartId").asLong() == baseline.get("cartId").asLong()
-                && actual.get("cartRevision").asLong() == baseline.get("cartRevision").asLong()
-                && actual.get("subtotal").asLong() == baseline.get("subtotal").asLong()
-                && actual.get("discount").asLong() == baseline.get("discount").asLong()
-                && actual.get("total").asLong() == baseline.get("total").asLong()
-                && actual.get("currency").asString().equals(baseline.get("currency").asString())
-                && actual.get("items").size() == baseline.get("items").size();
-    }
-
-    private Long orderIdOf(StepResult result) {
-        if (!"GET".equals(result.method()) || !result.route().startsWith(ORDER_ROUTE)) {
-            return null;
-        }
-        String id = result.route().substring(ORDER_ROUTE.length());
-        try {
-            return Long.parseLong(id);
-        } catch (NumberFormatException error) {
-            return null;
-        }
     }
 
     private String accessToken(StepResponse login) {
@@ -214,7 +89,7 @@ public class BolaScenario {
             String password,
             long ownOrderId,
             long missingOrderId,
-            List<VictimOrder> victimOrders
+            List<Long> victimOrderIds
     ) {
         private static final Pattern LOGIN = Pattern.compile("[a-z0-9_]{3,32}");
         private static final long MAX_ID = 9007199254740991L;
@@ -222,10 +97,10 @@ public class BolaScenario {
         public BolaPlan {
             Objects.requireNonNull(login);
             Objects.requireNonNull(password);
-            if (victimOrders == null || victimOrders.isEmpty()) {
+            if (victimOrderIds == null || victimOrderIds.isEmpty()) {
                 throw new IllegalArgumentException("BOLA plan requires victim orders");
             }
-            victimOrders = List.copyOf(victimOrders);
+            victimOrderIds = List.copyOf(victimOrderIds);
             int passwordBytes = password.getBytes(StandardCharsets.UTF_8).length;
             if (attackerUserId < 1 || attackerUserId > MAX_ID || !LOGIN.matcher(login).matches()
                     || passwordBytes < 8 || passwordBytes > 72
@@ -235,11 +110,10 @@ public class BolaScenario {
                 throw new IllegalArgumentException("Invalid BOLA plan");
             }
             Set<Long> orderIds = new HashSet<>();
-            for (VictimOrder victim : victimOrders) {
-                if (victim == null || victim.orderId() < 1 || victim.orderId() > MAX_ID
-                        || victim.expectedBody() == null || victim.expectedBody().isBlank()
-                        || victim.orderId() == ownOrderId || victim.orderId() == missingOrderId
-                        || !orderIds.add(victim.orderId())) {
+            for (long orderId : victimOrderIds) {
+                if (orderId < 1 || orderId > MAX_ID
+                        || orderId == ownOrderId || orderId == missingOrderId
+                        || !orderIds.add(orderId)) {
                     throw new IllegalArgumentException("Invalid BOLA victim order");
                 }
             }
@@ -249,34 +123,7 @@ public class BolaScenario {
         public String toString() {
             return "BolaPlan[attackerUserId=" + attackerUserId + ", login=" + login
                     + ", ownOrderId=" + ownOrderId + ", missingOrderId=" + missingOrderId
-                    + ", victimOrders=" + victimOrders.stream().map(VictimOrder::toString).toList() + "]";
-        }
-
-        public record VictimOrder(long orderId, String expectedBody) {
-            @Override
-            public String toString() {
-                return "VictimOrder[orderId=" + orderId + "]";
-            }
-        }
-    }
-
-    public record BolaAssessment(
-            CaseKind kind,
-            long orderId,
-            Effect effect,
-            UUID requestId,
-            String reason
-    ) {
-        public enum CaseKind {
-            VICTIM_ORDER,
-            OWN_ORDER,
-            MISSING_ORDER
-        }
-
-        public enum Effect {
-            EFFECT_OBSERVED,
-            EFFECT_NOT_OBSERVED,
-            INCONCLUSIVE
+                    + ", victimOrderIds=" + victimOrderIds + "]";
         }
     }
 }

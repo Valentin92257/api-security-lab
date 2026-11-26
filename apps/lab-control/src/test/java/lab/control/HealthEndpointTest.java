@@ -6,6 +6,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import lab.control.evaluation.BolaEvaluator;
+import lab.control.result.BolaAssessmentRepository;
 import lab.control.result.StepResultRepository;
 import lab.control.trial.TrialRepository;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,12 @@ class HealthEndpointTest {
 
     @MockitoBean
     private StepResultRepository stepResults;
+
+    @MockitoBean
+    private BolaAssessmentRepository bolaAssessments;
+
+    @MockitoBean
+    private BolaEvaluator bolaEvaluator;
 
     @LocalServerPort
     private int port;

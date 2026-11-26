@@ -5,7 +5,6 @@ import lab.contracts.json.ContractValidationException;
 import lab.control.fixture.FixtureGenerator;
 import lab.control.fixture.model.FixtureManifest;
 import lab.control.fixture.model.FixtureOrder;
-import lab.control.fixture.model.FixtureUser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -89,160 +88,6 @@ class BolaScenarioTest {
     }
 
     @Test
-    void marksForeignOrderDisclosureObservedAgainstThePrivateBaseline() {
-        serveVulnerableOrders(manifest);
-
-        var evidence = run(runId, GatewayTarget.VULNERABLE, toPlan(manifest));
-        var assessments = scenario.evaluate(toPlan(manifest), evidence);
-
-        assertThat(assessments).hasSize(manifest.bola().victimOrders().size() + 2);
-        assertThat(assessments).allSatisfy(assessment ->
-                assertThat(assessment.requestId()).isNotNull());
-        var attacks = assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.VICTIM_ORDER)
-                .toList();
-        assertThat(attacks).hasSize(manifest.bola().victimOrders().size());
-        assertThat(attacks).allSatisfy(assessment -> {
-            assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.EFFECT_OBSERVED);
-            assertThat(assessment.reason()).contains("match the private baseline");
-        });
-        var own = assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.OWN_ORDER)
-                .toList();
-        assertThat(own).singleElement().satisfies(assessment -> {
-            assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.EFFECT_NOT_OBSERVED);
-            assertThat(assessment.orderId()).isEqualTo(manifest.bola().attackerOwnOrder().id());
-        });
-        var missing = assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.MISSING_ORDER)
-                .toList();
-        assertThat(missing).singleElement().satisfies(assessment -> {
-            assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.EFFECT_NOT_OBSERVED);
-            assertThat(assessment.orderId()).isEqualTo(manifest.bola().missingOrderId());
-        });
-    }
-
-    @Test
-    void marksStrictOwnerCheckProtectionWhenEveryForeignOrderRequestReturnsNotFound() {
-        serveOrdersStrictly();
-
-        var evidence = run(runId, GatewayTarget.PROTECTED, toPlan(manifest));
-        var assessments = scenario.evaluate(toPlan(manifest), evidence);
-
-        assertThat(assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.VICTIM_ORDER)
-                .toList())
-                .allSatisfy(assessment -> {
-                    assertThat(assessment.effect())
-                            .isEqualTo(BolaScenario.BolaAssessment.Effect.EFFECT_NOT_OBSERVED);
-                    assertThat(assessment.reason()).contains("strict 404");
-                });
-    }
-
-    @Test
-    void marksOverBlockingAndUnexpectedMissingOrderResponsesAsObserved() {
-        when(steps.execute(any(), any())).thenAnswer(call -> {
-            StepRequest request = call.getArgument(1);
-            if (request.method().equals("POST")) {
-                return response(call, 200, StepOutcome.RESPONSE, token());
-            }
-            if (request.route().endsWith("/" + manifest.bola().attackerOwnOrder().id())) {
-                return response(call, 404, StepOutcome.RESPONSE, null);
-            }
-            return response(call, 200, StepOutcome.RESPONSE, foreignBody(0));
-        });
-
-        var evidence = run(runId, GatewayTarget.PROTECTED, toPlan(manifest));
-        var assessments = scenario.evaluate(toPlan(manifest), evidence);
-
-        assertThat(assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.OWN_ORDER)
-                .toList())
-                .singleElement().satisfies(assessment -> {
-                    assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.EFFECT_OBSERVED);
-                    assertThat(assessment.reason()).contains("blocked");
-                });
-        assertThat(assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.MISSING_ORDER)
-                .toList())
-                .singleElement().satisfies(assessment -> {
-                    assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.EFFECT_OBSERVED);
-                    assertThat(assessment.reason()).contains("non-404 response");
-                });
-    }
-
-    @Test
-    void treatsTransportContractAndBaselineMismatchesAsInconclusive() {
-        when(steps.execute(any(), any())).thenAnswer(call -> {
-            StepRequest request = call.getArgument(1);
-            if (request.method().equals("POST")) {
-                return response(call, 200, StepOutcome.RESPONSE, token());
-            }
-            if (request.route().endsWith("/" + manifest.bola().victimOrders().get(0).id())) {
-                return response(call, null, StepOutcome.TIMEOUT, null);
-            }
-            if (request.route().endsWith("/" + manifest.bola().victimOrders().get(1).id())) {
-                return response(call, 500, StepOutcome.RESPONSE, null);
-            }
-            return response(call, 200, StepOutcome.CONTRACT_VIOLATION, null);
-        });
-
-        var evidence = run(runId, GatewayTarget.VULNERABLE, toPlan(manifest));
-        var assessments = scenario.evaluate(toPlan(manifest), evidence);
-
-        assertThat(assessments).allSatisfy(assessment ->
-                assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.INCONCLUSIVE));
-        assertThat(assessments.getFirst().reason()).contains("TIMEOUT");
-    }
-
-    @Test
-    void marksAllCasesInconclusiveWhenEvidenceIsIncomplete() {
-        when(steps.execute(any(), any()))
-                .thenAnswer(call -> response(call, 401, StepOutcome.RESPONSE, null));
-
-        var evidence = run(runId, GatewayTarget.PROTECTED, toPlan(manifest));
-        var assessments = scenario.evaluate(toPlan(manifest), evidence);
-
-        assertThat(assessments).hasSize(manifest.bola().victimOrders().size() + 2);
-        assertThat(assessments).allSatisfy(assessment -> {
-            assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.INCONCLUSIVE);
-            assertThat(assessment.requestId()).isNull();
-        });
-    }
-
-    @Test
-    void evaluatesOnlyLoginEvidenceAsFullyInconclusive() {
-        var assessments = scenario.evaluate(toPlan(manifest), List.of());
-
-        assertThat(assessments).hasSize(manifest.bola().victimOrders().size() + 2);
-        assertThat(assessments).allSatisfy(assessment ->
-                assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.INCONCLUSIVE));
-    }
-
-    @Test
-    void doesNotMarkAnOrderWithoutBaselineMatchObserved() {
-        when(steps.execute(any(), any())).thenAnswer(call -> {
-            StepRequest request = call.getArgument(1);
-            if (request.method().equals("POST")) {
-                return response(call, 200, StepOutcome.RESPONSE, token());
-            }
-            return response(call, 200, StepOutcome.RESPONSE,
-                    json.jsonMapper().readTree(manifest.bola().attackerOwnOrder().responseBody()));
-        });
-
-        var evidence = run(runId, GatewayTarget.VULNERABLE, toPlan(manifest));
-        var assessments = scenario.evaluate(toPlan(manifest), evidence);
-
-        assertThat(assessments.stream()
-                .filter(assessment -> assessment.kind() == BolaScenario.BolaAssessment.CaseKind.VICTIM_ORDER)
-                .toList())
-                .allSatisfy(assessment -> {
-                    assertThat(assessment.effect()).isEqualTo(BolaScenario.BolaAssessment.Effect.INCONCLUSIVE);
-                    assertThat(assessment.reason()).contains("does not match the private baseline");
-                });
-    }
-
-    @Test
     void validatesTheRequestBeforeSending() {
         doThrow(new ContractValidationException("Request rejected"))
                 .when(validator).validateLoginRequest(anyString());
@@ -265,17 +110,14 @@ class BolaScenarioTest {
     static Stream<org.assertj.core.api.ThrowableAssert.ThrowingCallable> invalidPlans() {
         return Stream.of(
                 () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L, List.of()),
-                () -> new BolaScenario.BolaPlan(0, "attacker", "password123", 1, 999_001L, victimOrders()),
-                () -> new BolaScenario.BolaPlan(1, "AT", "password123", 1, 999_001L, victimOrders()),
-                () -> new BolaScenario.BolaPlan(1, "attacker", "short", 1, 999_001L, victimOrders()),
-                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 0, 999_001L, victimOrders()),
-                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L,
-                        List.of(new BolaScenario.BolaPlan.VictimOrder(1, victimOrders().get(0).expectedBody()))),
-                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 1, victimOrders()),
-                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L,
-                        List.of(new BolaScenario.BolaPlan.VictimOrder(2, " "))),
-                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L,
-                        List.of(victimOrders().get(0), victimOrders().get(0)))
+                () -> new BolaScenario.BolaPlan(0, "attacker", "password123", 1, 999_001L, List.of(2L)),
+                () -> new BolaScenario.BolaPlan(1, "AT", "password123", 1, 999_001L, List.of(2L)),
+                () -> new BolaScenario.BolaPlan(1, "attacker", "short", 1, 999_001L, List.of(2L)),
+                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 0, 999_001L, List.of(2L)),
+                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L, List.of(1L)),
+                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 1, List.of(2L)),
+                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L, List.of(0L)),
+                () -> new BolaScenario.BolaPlan(1, "attacker", "password123", 1, 999_001L, List.of(2L, 2L))
         );
     }
 
@@ -347,9 +189,6 @@ class BolaScenarioTest {
         for (FixtureOrder order : manifest.bola().victimOrders()) {
             assertThat(plan.toString()).doesNotContain(order.responseBody());
         }
-        for (var victim : plan.victimOrders()) {
-            assertThat(victim.toString()).doesNotContain(victim.expectedBody());
-        }
     }
 
     private List<StepResponse> run(UUID id, GatewayTarget target, BolaScenario.BolaPlan plan) {
@@ -367,17 +206,8 @@ class BolaScenarioTest {
                 bola.attacker().password(),
                 bola.attackerOwnOrder().id(),
                 bola.missingOrderId(),
-                bola.victimOrders().stream()
-                        .map(order -> new BolaScenario.BolaPlan.VictimOrder(order.id(), order.responseBody()))
-                        .toList()
+                bola.victimOrders().stream().map(FixtureOrder::id).toList()
         );
-    }
-
-    private static List<BolaScenario.BolaPlan.VictimOrder> victimOrders() {
-        var manifest = new FixtureGenerator(new ContractJsonCodec()).generate(42, BASE_TIME);
-        return manifest.bola().victimOrders().stream()
-                .map(order -> new BolaScenario.BolaPlan.VictimOrder(order.id(), order.responseBody()))
-                .toList();
     }
 
     private void serveOrdersStrictly() {
@@ -390,29 +220,6 @@ class BolaScenarioTest {
         });
     }
 
-    private void serveVulnerableOrders(FixtureManifest manifest) {
-        when(steps.execute(any(), any())).thenAnswer(call -> {
-            StepRequest request = call.getArgument(1);
-            if (request.method().equals("POST")) {
-                return response(call, 200, StepOutcome.RESPONSE, token());
-            }
-            if (request.route().endsWith("/" + manifest.bola().missingOrderId())) {
-                return response(call, 404, StepOutcome.RESPONSE, null);
-            }
-            return response(call, 200, StepOutcome.RESPONSE,
-                    json.jsonMapper().readTree(foreignBodyOf(manifest, request.route())));
-        });
-    }
-
-    private String foreignBodyOf(FixtureManifest manifest, String route) {
-        for (FixtureOrder order : manifest.bola().victimOrders()) {
-            if (route.endsWith("/" + order.id())) {
-                return order.responseBody();
-            }
-        }
-        return manifest.bola().victimOrders().getFirst().responseBody();
-    }
-
     private JsonNode token() {
         return json.jsonMapper().createObjectNode()
                 .put("accessToken", "attacker-token")
@@ -420,16 +227,11 @@ class BolaScenarioTest {
                 .put("expiresIn", 900);
     }
 
-    private JsonNode foreignBody(int index) {
-        return json.jsonMapper().readTree(
-                manifest.bola().victimOrders().get(index).responseBody());
-    }
-
     private StepResponse response(InvocationOnMock call, Integer status, StepOutcome outcome, JsonNode body) {
         StepRequest request = call.getArgument(1);
         RunContext run = call.getArgument(0);
         var result = new StepResult(run.trialId(), run.runId(), UUID.randomUUID(), request.target(),
-                request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0);
+                request.method(), request.route(), status, outcome, OffsetDateTime.now(), 0, null);
         var pending = run.dispatch(() -> CompletableFuture.completedFuture(null));
         run.record(result);
         run.release(pending);

@@ -60,25 +60,31 @@ class StepResultRepositoryIntegrationTest {
                 .defaultSchema("control").locations("classpath:db/control/migrations")
                 .target("3").load().migrate();
         StepResult legacy = new StepResult(trialId, UUID.randomUUID(), UUID.randomUUID(), GatewayTarget.VULNERABLE,
-                "GET", "/api/v1/products", 200, StepOutcome.RESPONSE, OffsetDateTime.now(), 1);
-        new StepResultRepository(runtime).save(legacy);
+                "GET", "/api/v1/products", 200, StepOutcome.RESPONSE, OffsetDateTime.now(), 1, null);
+        runtime.sql("""
+                INSERT INTO control.step_results (
+                    trial_id, run_id, request_id, target, method, route, status, outcome, started_at, duration_millis
+                ) VALUES (:trialId, :runId, :requestId, 'VULNERABLE', 'GET', '/api/v1/products', 200, 'RESPONSE', :startedAt, 1)
+                """)
+                .param("trialId", trialId).param("runId", legacy.runId()).param("requestId", legacy.requestId())
+                .param("startedAt", legacy.startedAt()).update();
 
         ControlTestDatabase.migrate(POSTGRES);
 
         assertThat(runtime.sql("SELECT current_user").query(String.class).single()).isEqualTo("control_app");
         assertThat(runtime.sql("SELECT trial_id FROM control.trials").query(UUID.class).single()).isEqualTo(trialId);
-        StepResultRepository repository = new StepResultRepository(runtime);
+        StepResultRepository repository = new StepResultRepository(runtime, new ContractJsonCodec());
         assertThat(repository.find(legacy.requestId())).isPresent();
         UUID runId = UUID.randomUUID();
         OffsetDateTime startedAt = OffsetDateTime.parse("2026-11-16T10:00:00.123456Z");
         StepResult response = new StepResult(trialId, runId, UUID.randomUUID(), GatewayTarget.VULNERABLE,
-                "GET", "/api/v1/users/7", 200, StepOutcome.RESPONSE, startedAt, 15);
+                "GET", "/api/v1/users/7", 200, StepOutcome.RESPONSE, startedAt, 15, null);
         StepResult redirect = new StepResult(trialId, runId, UUID.randomUUID(), GatewayTarget.PROTECTED,
-                "GET", "/api/v1/users/7", 302, StepOutcome.REDIRECT_REJECTED, startedAt.plusSeconds(1), 3);
+                "GET", "/api/v1/users/7", 302, StepOutcome.REDIRECT_REJECTED, startedAt.plusSeconds(1), 3, null);
         StepResult timeout = new StepResult(trialId, runId, UUID.randomUUID(), GatewayTarget.PROTECTED,
-                "GET", "/api/v1/users/7", null, StepOutcome.TIMEOUT, startedAt.plusSeconds(2), 1000);
+                "GET", "/api/v1/users/7", null, StepOutcome.TIMEOUT, startedAt.plusSeconds(2), 1000, null);
         StepResult violation = new StepResult(trialId, runId, UUID.randomUUID(), GatewayTarget.PROTECTED,
-                "GET", "/api/v1/users/7", 200, StepOutcome.CONTRACT_VIOLATION, startedAt.plusSeconds(3), 2);
+                "GET", "/api/v1/users/7", 200, StepOutcome.CONTRACT_VIOLATION, startedAt.plusSeconds(3), 2, null);
 
         repository.save(response);
         repository.save(redirect);
