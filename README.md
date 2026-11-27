@@ -53,6 +53,46 @@ Runner принимает один активный прогон; повторн
 Продолжение orchestration после `completion()` выполняется на собственном executor Control.
 Отмена HTTP не подтверждает завершение SQL в Shop; это проверяется отдельно через Runtime.
 
+## Легитимный пользователь (Benign)
+
+`BenignUserScenario` моделирует обычный трафик покупателя для оценки ложных срабатываний Detector
+(benign FPR) в обоих режимах магазина (`GatewayTarget.VULNERABLE` и `GatewayTarget.PROTECTED`).
+Базовый маршрут v0 (`BenignSession.shopper(...)`) выполняет последовательно три шага:
+`POST /api/v1/auth/login` → `GET /api/v1/products` (с опциональным обычным `q`) → `PUT /api/v1/cart/items/{productId}`.
+
+```java
+FixtureManifest manifest = fixtureManager.generate(42, Instant.now());
+fixtureManager.load(ShopTarget.PROTECTED, manifest);
+
+List<FixtureProduct> published = manifest.products().stream()
+        .filter(FixtureProduct::published).toList();
+List<FixtureUser> users = manifest.usersByRole(FixtureUserRole.CS_BENIGN);
+List<BenignSession> sessions = IntStream.range(0, users.size())
+        .mapToObj(i -> BenignSession.shopper(
+                "198.51.100." + (10 + i),
+                users.get(i).login(),
+                users.get(i).password(),
+                published.get(i % published.size()).name(),
+                published.get(i % published.size()).id(),
+                1))
+        .toList();
+var evidence = new AtomicReference<List<BenignUserScenario.SessionEvidence>>();
+RunHandle handle = runner.start(trialId, runId,
+        run -> evidence.set(benignScenario.run(run, GatewayTarget.PROTECTED, sessions)));
+RunResult completed = handle.completion().toCompletableFuture().join();
+```
+
+Каждая `BenignSession` задаёт собственный виртуальный IP в `X-Forwarded-For` (например, из RFC 5737 `198.51.100.0/24`,
+отдельно от атакующего `192.0.2.1`) и изолированный JWT.
+Сценарий возвращает `List<BenignUserScenario.SessionEvidence>` (одна сессия – один benign-эпизод), а все шаги
+сохраняются через `StepExecutor` с `runId` и уникальными `requestId` без паролей и JWT.
+Неуспешный шаг прерывает только свою сессию, а остановка/дедлайн `RunContext` – весь прогон; суммарный план ограничен
+бюджетом `400` шагов.
+
+Для расширения новыми легитимными действиями (профиль, заказ, купон, checkout) достаточно добавить `record` в
+`sealed interface BenignAction` и соответствующие ветки `switch` в `BenignUserScenario`.
+Сквозная доставка access-логов и чтение `GET /internal/v1/runs/{runId}/incidents` из Detector подключаются отдельно.
+
 ## Запуск
 
 Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).
