@@ -5,7 +5,12 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Доменные действия плана легитимного пользователя; расширяется добавлением record в permits.
+ * Доменные действия плана легитимного пользователя.
+ * <br>
+ * Новые benign-шаги (профиль, заказ, чтение корзины, выбор купона, checkout и безопасный retry)
+ * добавляются как {@code record} в этот sealed-интерфейс с обработкой в {@code execute}/{@code advance}
+ * класса {@link BenignUserScenario}; состояние между шагами (например, {@code cartRevision}/{@code total})
+ * хранится в приватном {@code SessionState}.
  */
 public sealed interface BenignAction {
     long MAX_ID = 9007199254740991L;

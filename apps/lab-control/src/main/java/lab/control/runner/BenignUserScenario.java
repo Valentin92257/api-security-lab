@@ -58,6 +58,11 @@ public class BenignUserScenario {
         return new SessionEvidence(session, executed);
     }
 
+    /**
+     * Выполняет одно действие из {@link BenignAction}. При добавлении нового {@code record}
+     * в {@link BenignAction} сюда нужно добавить соответствующую ветку отправки HTTP-запроса.
+     * Если перед отправкой выполняется валидация, проверить {@code run.isStopped()} и вернуть {@code null} при остановке.
+     */
     private StepResponse execute(RunContext run, GatewayTarget target, SessionState state, BenignAction action) {
         return switch (action) {
             case BenignAction.Login login -> login(run, target, state, login);
@@ -78,6 +83,11 @@ public class BenignUserScenario {
         return steps.execute(run, request);
     }
 
+    /**
+     * Проверяет результат шага и обновляет {@link SessionState} для последующих действий сессии.
+     * Возвращает {@code false}, если сессию нужно прервать (следующие сессии прогона при этом продолжатся).
+     * При добавлении нового {@link BenignAction} задать здесь ожидаемый статус и извлечение нужных полей ответа.
+     */
     private static boolean advance(BenignAction action, SessionState state, StepResponse response) {
         return switch (action) {
             case BenignAction.Login _ -> {
@@ -117,6 +127,10 @@ public class BenignUserScenario {
         return List.copyOf(sessions);
     }
 
+    /**
+     * Изолированное состояние одной сессии. Промежуточные данные между шагами будущих действий
+     * (например, {@code cartRevision}, {@code quotedTotal}, {@code idempotencyKey}) добавляются сюда.
+     */
     private static final class SessionState {
         private final String clientIp;
         private String token;
