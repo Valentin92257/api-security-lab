@@ -89,7 +89,7 @@ jobs:
       - name: Install stack anonymously via install.sh
         env:
           LAB_REPO: ${{ github.repository }}
-          LAB_REF: ${{ github.sha }}
+          LAB_REF: ${{ github.event.pull_request.head.sha || github.sha }}
           LAB_VERSION: ${{ needs.publish.outputs.sha_tag }}
           LAB_IMAGE_PREFIX: ${{ needs.publish.outputs.registry }}
         run: |

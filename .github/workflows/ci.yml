@@ -84,7 +84,7 @@ jobs:
   publish:
     name: publish
     needs: [ build-and-test, compose-smoke ]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.head_ref == 'docker-images-deploy'
     permissions:
       contents: read
       packages: write
