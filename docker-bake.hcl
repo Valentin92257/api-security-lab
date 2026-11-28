@@ -2,7 +2,7 @@ variable "REGISTRY" {
   default = "ghcr.io/valentin92257/api-security-lab"
 }
 
-variable "TAG" {
+variable "TAGS" {
   default = "dev"
 }
 
@@ -35,11 +35,11 @@ target "java" {
     APP        = app
     SKIP_TESTS = SKIP_TESTS
   }
-  tags = ["${REGISTRY}/${app}:${TAG}"]
+  tags = [for tag in split(",", TAGS) : "${REGISTRY}/${app}:${tag}"]
 }
 
 target "lab-db" {
   inherits = ["_common"]
   target   = "lab-db"
-  tags     = ["${REGISTRY}/lab-db:${TAG}"]
+  tags     = [for tag in split(",", TAGS) : "${REGISTRY}/lab-db:${tag}"]
 }

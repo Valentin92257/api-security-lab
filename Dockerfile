@@ -8,7 +8,7 @@ COPY db/init/bootstrap.sql      /docker-entrypoint-initdb.d/20-databases.sql
 COPY db/shop/fixture-roles.sql  /docker-entrypoint-initdb.d/25-shop-fixture-roles.sql
 
 # --- Сборка всех модулей один раз ---
-FROM --platform=$BUILDPLATFORM maven:3.9.11-eclipse-temurin-25 AS build
+FROM --platform=$BUILDPLATFORM maven:3.10.2-eclipse-temurin-25 AS build
 WORKDIR /workspace
 ARG SKIP_TESTS=false
 COPY pom.xml ./
