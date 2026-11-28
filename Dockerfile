@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+# Multi-arch (linux/amd64, linux/arm64) собирается в CI на одном раннере без QEMU:
+# сборку (в т.ч. фронтенда) выполнять в --platform=$BUILDPLATFORM, в финальных стадиях не добавлять RUN.
 
 # --- БД: init-скрипты внутри образа ---
 FROM postgres:17-alpine AS lab-db
