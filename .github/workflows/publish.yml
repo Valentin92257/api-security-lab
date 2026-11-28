@@ -95,11 +95,6 @@ jobs:
         run: |
           curl -fsSL "https://raw.githubusercontent.com/${LAB_REPO}/${LAB_REF}/scripts/install.sh" | sh
 
-      - name: Hint if GHCR packages are still private
-        if: failure()
-        run: |
-          echo "::warning::Если это первая публикация, новые пакеты в GHCR по умолчанию Private. Откройте 5 пакетов (shop-api, lab-gateway, lab-detector, lab-control, lab-db) в GitHub Packages -> Package settings -> Change visibility -> Public, затем нажмите Re-run failed jobs."
-
       - name: Health check all services
         working-directory: api-security-lab
         run: |
