@@ -55,16 +55,52 @@ Runner принимает один активный прогон; повторн
 
 ## Запуск
 
-Нужны Docker с Compose v2, `openssl` и `curl` (на Windows скрипт запускается из WSL или Git Bash).
-Одна команда из корня репозитория:
+### Быстрый запуск
+
+Нужен только Docker с Compose v2 (на Linux/macOS также `curl`). Команда создаёт каталог `./api-security-lab` с
+`compose.yaml` и `.env`, скачивает образы, запускает стенд и проверяет health Control:
+
+```sh
+# Linux / macOS / WSL / Git Bash
+curl -fsSL https://raw.githubusercontent.com/Valentin92257/api-security-lab/main/scripts/install.sh | sh
+```
+
+```powershell
+# Windows PowerShell (5.1+ / 7+)
+irm https://raw.githubusercontent.com/Valentin92257/api-security-lab/main/scripts/install.ps1 | iex
+```
+
+Параметры можно передать через переменные окружения (`LAB_DIR`, `LAB_VERSION`, `LAB_CONTROL_PORT`, `LAB_REF`,
+`LAB_IMAGE_PREFIX`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Valentin92257/api-security-lab/main/scripts/install.sh | LAB_CONTROL_PORT=8090 LAB_VERSION=latest sh
+```
+
+```powershell
+$env:LAB_CONTROL_PORT='8090'; irm https://raw.githubusercontent.com/Valentin92257/api-security-lab/main/scripts/install.ps1 | iex
+```
+
+Управление из созданного каталога `api-security-lab`:
+
+```sh
+docker compose down                                # остановить (данные БД сохраняются)
+docker compose pull && docker compose up -d --wait # обновить образы и перезапустить
+docker compose down --volumes                      # остановить и удалить БД и журналы
+```
+
+### Запуск из исходников (разработка)
+
+В репозитории рядом с `compose.yaml` лежит `compose.override.yaml` – Docker Compose подхватывает его автоматически и
+собирает локальные образы `api-security-lab/*:dev` из корневого `Dockerfile`. Нужны Docker с Compose v2 и `curl`:
 
 ```sh
 ./scripts/start.sh
 ```
 
-При первом запуске скрипт создаёт `.env` из `.env.example` со случайными секретами, собирает образы,
-запускает все сервисы и проверяет health Control. Первая сборка занимает несколько минут. Остановка: `docker compose down`.
-Если volume с БД уже есть, а `.env` нет, скрипт останавливается: новые пароли не подойдут к созданным ролям.
+При первом запуске скрипт создаёт `.env` из `.env.example` со случайными секретами, собирает образы, запускает все
+сервисы и проверяет health Control. Первая сборка занимает несколько минут. Если volume с БД уже есть, а `.env` нет,
+скрипт останавливается: новые пароли не подойдут к созданным ролям.
 
 То же вручную:
 
@@ -74,33 +110,65 @@ docker compose up -d --build --wait
 curl --fail http://127.0.0.1:8080/health
 ```
 
+Чтобы запустить в репозитории готовые образы из GHCR в обход `compose.override.yaml`:
+
+```sh
+docker compose -f compose.yaml up -d --wait
+```
+
+### Образы и публикация
+
+Все 5 образов собираются из единого корневого [Dockerfile](Dockerfile) (`docker-bake.hcl`) и публикуются в GitHub
+Container Registry для `linux/amd64` и `linux/arm64` после зелёных `build-and-test` и `compose-smoke`
+([ci.yml](.github/workflows/ci.yml), [publish.yml](.github/workflows/publish.yml)):
+
+- `ghcr.io/valentin92257/api-security-lab/shop-api`
+- `ghcr.io/valentin92257/api-security-lab/lab-gateway`
+- `ghcr.io/valentin92257/api-security-lab/lab-detector`
+- `ghcr.io/valentin92257/api-security-lab/lab-control`
+- `ghcr.io/valentin92257/api-security-lab/lab-db`
+
+Правила тегов в GHCR:
+
+- `push` в `main` → `:latest` и `:sha-<7 символов коммита>`;
+- Git-тег `vX.Y.Z` → `:X.Y.Z`, `:X.Y` и `:sha-<7>`;
+- ручной запуск `Publish images` (`workflow_dispatch`) на любой ветке → только `:sha-<7>`.
+
+Локальная сборка всех 5 образов за один проход Maven:
+
+```sh
+docker buildx bake -f docker-bake.hcl --load
+```
+
 ### Переменные окружения
 
 Настройки задаются в `.env` (образец - `.env.example`), файл `.env` не коммитится.
 
-| Переменная                        | Обязательна | По умолчанию                 | Назначение                                                                |
-|-----------------------------------|-------------|------------------------------|---------------------------------------------------------------------------|
-| `LAB_OPERATOR_TOKEN`              | да          | -                            | Bearer-токен оператора Control                                            |
-| `POSTGRES_PASSWORD`               | да          | -                            | Пароль администратора БД                                                  |
-| `LAB_CONTROL_DB_PASSWORD`         | да          | -                            | Пароль рабочей роли `control_app`                                         |
-| `LAB_FIXTURE_DB_PASSWORD`         | да          | -                            | Пароль роли `fixture_admin` для загрузки фикстур в БД Shop                |
-| `LAB_FIXTURE_USER_COUNT`          | нет         | `24`                         | Число пользователей в фикстуре магазина (минимум 24)                      |
-| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                        | Число попыток входа в сценарии Credential Stuffing                        |
-| `LAB_FIXTURE_CS_VALID_ACCOUNTS`   | нет         | `3`                          | Число валидных аккаунтов-жертв в сценарии Credential Stuffing             |
-| `LAB_DETECTOR_CONTROL_TOKEN`      | да          | -                            | Управление и чтение Detector из Control                                   |
-| `LAB_DETECTOR_GATEWAY_TOKEN`      | да          | -                            | Запись логов только producer GATEWAY                                      |
-| `LAB_DETECTOR_SHOP_TOKEN`         | да          | -                            | Запись логов только producer SHOP                                         |
-| `LAB_DETECTOR_DB_PASSWORD`        | да          | -                            | Пароль рабочей роли `detector_app`                                        |
-| `LAB_DETECTOR_MIGRATION_PASSWORD` | да          | -                            | Пароль роли миграций `detector_migrator`                                  |
-| `POSTGRES_USER`                   | нет         | `lab_admin`                  | Администратор БД; должен совпадать с администратором существующего volume |
-| `LAB_CONTROL_PORT`                | нет         | `8080`                       | Порт Control на `127.0.0.1`                                               |
-| `SHOP_PROTECTED_URL`              | нет         | `http://shop-protected:8080` | Адрес protected-магазина для Gateway                                      |
-| `GATEWAY_CONNECT_TIMEOUT`         | нет         | `2s`                         | Таймаут соединения Gateway                                                |
-| `GATEWAY_UPSTREAM_TIMEOUT`        | нет         | `5s`                         | Таймаут ответа магазина                                                   |
-| `GATEWAY_MAX_BODY_BYTES`          | нет         | `8388608`                    | Максимальный размер тела запроса/ответа                                   |
-| `JWT_SECRET_PROTECTED`            | да          | -                            | JWT секрет защищенной версии API: подпись в Shop и проверка в Gateway     |
-| `JWT_SECRET_VULNERABLE`           | да          | -                            | JWT секрет для авторизации уязвимой версии API                            |
-| `IDEMPOTENCY_SECRET`              | да          | -                            | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
+| Переменная                        | Обязательна | По умолчанию                             | Назначение                                                                |
+|-----------------------------------|-------------|------------------------------------------|---------------------------------------------------------------------------|
+| `LAB_VERSION`                     | нет         | `latest`                                 | Тег образов в GHCR (при запуске через `compose.yaml` без override)        |
+| `LAB_IMAGE_PREFIX`                | нет         | `ghcr.io/valentin92257/api-security-lab` | Реестр/префикс образов                |
+| `LAB_OPERATOR_TOKEN`              | да          | -                                        | Bearer-токен оператора Control                                            |
+| `POSTGRES_PASSWORD`               | да          | -                                        | Пароль администратора БД                                                  |
+| `LAB_CONTROL_DB_PASSWORD`         | да          | -                                        | Пароль рабочей роли `control_app`                                         |
+| `LAB_FIXTURE_DB_PASSWORD`         | да          | -                                        | Пароль роли `fixture_admin` для загрузки фикстур в БД Shop                |
+| `LAB_FIXTURE_USER_COUNT`          | нет         | `24`                                     | Число пользователей в фикстуре магазина (минимум 24)                      |
+| `LAB_FIXTURE_CS_ATTEMPTS`         | нет         | `200`                                    | Число попыток входа в сценарии Credential Stuffing                        |
+| `LAB_FIXTURE_CS_VALID_ACCOUNTS`   | нет         | `3`                                      | Число валидных аккаунтов-жертв в сценарии Credential Stuffing             |
+| `LAB_DETECTOR_CONTROL_TOKEN`      | да          | -                                        | Управление и чтение Detector из Control                                   |
+| `LAB_DETECTOR_GATEWAY_TOKEN`      | да          | -                                        | Запись логов только producer GATEWAY                                      |
+| `LAB_DETECTOR_SHOP_TOKEN`         | да          | -                                        | Запись логов только producer SHOP                                         |
+| `LAB_DETECTOR_DB_PASSWORD`        | да          | -                                        | Пароль рабочей роли `detector_app`                                        |
+| `LAB_DETECTOR_MIGRATION_PASSWORD` | да          | -                                        | Пароль роли миграций `detector_migrator`                                  |
+| `POSTGRES_USER`                   | нет         | `lab_admin`                              | Администратор БД; должен совпадать с администратором существующего volume |
+| `LAB_CONTROL_PORT`                | нет         | `8080`                                   | Порт Control на `127.0.0.1`                                               |
+| `SHOP_PROTECTED_URL`              | нет         | `http://shop-protected:8080`             | Адрес protected-магазина для Gateway                                      |
+| `GATEWAY_CONNECT_TIMEOUT`         | нет         | `2s`                                     | Таймаут соединения Gateway                                                |
+| `GATEWAY_UPSTREAM_TIMEOUT`        | нет         | `5s`                                     | Таймаут ответа магазина                                                   |
+| `GATEWAY_MAX_BODY_BYTES`          | нет         | `8388608`                                | Максимальный размер тела запроса/ответа                                   |
+| `JWT_SECRET_PROTECTED`            | да          | -                                        | JWT секрет защищенной версии API: подпись в Shop и проверка в Gateway     |
+| `JWT_SECRET_VULNERABLE`           | да          | -                                        | JWT секрет для авторизации уязвимой версии API                            |
+| `IDEMPOTENCY_SECRET`              | да          | -                                        | HMAC-ключ для хеширования `Idempotency-Key` в checkout                    |
 
 Пароли БД применяются только при создании volume; изменение `.env` позже их не меняет (см. [БД](#бд)).
 
@@ -143,7 +211,7 @@ Control и Shop в Detector не передаются. Последующие и
 ```sh
 docker compose up -d db
 docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -f /docker-entrypoint-initdb.d/15-detector.sql'
-docker compose up -d --build lab-detector
+docker compose up -d --build lab-detector   # без --build, если используются готовые образы
 ```
 
 Повтор bootstrap сохраняет существующие роли/пароли и данные. Новая БД и миграции
@@ -158,7 +226,7 @@ docker compose up -d --build lab-detector
 ```sh
 docker compose up -d db
 docker compose exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -f /docker-entrypoint-initdb.d/25-shop-fixture-roles.sql'
-docker compose up -d --build shop-vulnerable shop-protected lab-control
+docker compose up -d --build shop-vulnerable shop-protected lab-control   # без --build, если используются готовые образы
 ```
 
 Миграция `V4__fixture_admin_grants.sql` выдаёт права на существующие объекты `vulnerable` и `protected` при старте Shop.
@@ -271,19 +339,19 @@ HTTP-тесты наследуются от `AbstractDetectorApiIntegrationTest`
 ## Создание эксперимента
 
 Control предоставляет каталог сценариев, создание и чтение trial по [контракту](contracts/control-api.openapi.yaml).
-Нужен Operator Bearer из `LAB_OPERATOR_TOKEN`. Пример запускается в shell контейнера, где задана эта переменная:
+Нужен Operator Bearer из `LAB_OPERATOR_TOKEN` (лежит в `.env`). Пример запускается с хоста из каталога стенда:
 
 ```sh
-docker compose exec lab-control sh
-trial_key=$(cat /proc/sys/kernel/random/uuid)
-curl --fail-with-body -i http://127.0.0.1:8080/control/v1/trials \
-  -H "Authorization: Bearer $LAB_OPERATOR_TOKEN" \
+token=$(grep '^LAB_OPERATOR_TOKEN=' .env | cut -d= -f2-)
+port=$(grep '^LAB_CONTROL_PORT=' .env | cut -d= -f2-)
+trial_key=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+curl --fail-with-body -i "http://127.0.0.1:${port:-8080}/control/v1/trials" \
+  -H "Authorization: Bearer $token" \
   -H "Idempotency-Key: $trial_key" \
   -H 'Content-Type: application/json' \
   --data '{"families":["BOLA","REPLAY"],"seed":42}'
-curl --fail-with-body http://127.0.0.1:8080/control/v1/trials \
-  -H "Authorization: Bearer $LAB_OPERATOR_TOKEN"
-exit
+curl --fail-with-body "http://127.0.0.1:${port:-8080}/control/v1/trials" \
+  -H "Authorization: Bearer $token"
 ```
 
 Новый trial возвращается с 202, повтор с тем же ключом и параметрами - с 200.
@@ -368,7 +436,7 @@ mvn --batch-mode --no-transfer-progress -pl apps/shop-api -am verify
 
 ```sh
 docker run --rm -v "$PWD:/workspace" -w /workspace \
-  maven:3.9.11-eclipse-temurin-25 \
+  maven:3.10.2-eclipse-temurin-25 \
   mvn --batch-mode --no-transfer-progress clean generate-sources
 ```
 

@@ -1,13 +1,21 @@
 name: api-security-lab
 
+x-java-service: &java-service
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+  restart: "no"
+
 services:
   lab-control:
-    extends:
-      file: compose.common.yaml
-      service: java-service
-    build:
-      context: .
-      dockerfile: apps/lab-control/Dockerfile
+    <<: *java-service
+    image: ${LAB_IMAGE_PREFIX:-ghcr.io/valentin92257/api-security-lab}/lab-control:${LAB_VERSION:-latest}
     environment:
       SPRING_FLYWAY_USER: ${POSTGRES_USER:-lab_admin}
       SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -26,7 +34,7 @@ services:
     networks: [ control-public, lab-traffic, shop-admin, lab-data, lab-observe, lab-ingest ]
 
   db:
-    image: postgres:17-alpine
+    image: ${LAB_IMAGE_PREFIX:-ghcr.io/valentin92257/api-security-lab}/lab-db:${LAB_VERSION:-latest}
     environment:
       POSTGRES_DB: lab_control
       POSTGRES_USER: ${POSTGRES_USER:-lab_admin}
@@ -37,10 +45,6 @@ services:
       LAB_DETECTOR_MIGRATION_PASSWORD: ${LAB_DETECTOR_MIGRATION_PASSWORD:?Set LAB_DETECTOR_MIGRATION_PASSWORD in .env}
     volumes:
       - control-data:/var/lib/postgresql/data
-      - ./db/init/bootstrap.sql:/docker-entrypoint-initdb.d/20-databases.sql:ro
-      - ./db/shop/fixture-roles.sql:/docker-entrypoint-initdb.d/25-shop-fixture-roles.sql:ro
-      - ./db/control/role.sql:/docker-entrypoint-initdb.d/10-control.sql:ro
-      - ./db/detector/bootstrap.sql:/docker-entrypoint-initdb.d/15-detector.sql:ro
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d postgres" ]
       interval: 5s
@@ -49,12 +53,8 @@ services:
     networks: [ lab-data ]
 
   lab-gateway:
-    extends:
-      file: compose.common.yaml
-      service: java-service
-    build:
-      context: .
-      dockerfile: apps/lab-gateway/Dockerfile
+    <<: *java-service
+    image: ${LAB_IMAGE_PREFIX:-ghcr.io/valentin92257/api-security-lab}/lab-gateway:${LAB_VERSION:-latest}
     volumes:
       - lab-gateway-decisions:/app/logs
     environment:
@@ -67,17 +67,12 @@ services:
       GATEWAY_MAX_BODY_BYTES: "${GATEWAY_MAX_BODY_BYTES:-8388608}"
       GATEWAY_JWT_SECRET: ${JWT_SECRET_PROTECTED:?Set JWT_SECRET_PROTECTED in .env}
       LAB_DETECTOR_GATEWAY_TOKEN: ${LAB_DETECTOR_GATEWAY_TOKEN:?Set LAB_DETECTOR_GATEWAY_TOKEN in .env}
-    expose: ["8081", "8082"]
-    networks: [lab-traffic, shop-backend, shop-admin, lab-observe, lab-ingest]
+    expose: [ "8081", "8082" ]
+    networks: [ lab-traffic, shop-backend, shop-admin, lab-observe, lab-ingest ]
 
   shop-vulnerable:
-    extends:
-      file: compose.common.yaml
-      service: java-service
-    image: api-security-lab/shop-api:dev
-    build:
-      context: .
-      dockerfile: apps/shop-api/Dockerfile
+    <<: *java-service
+    image: ${LAB_IMAGE_PREFIX:-ghcr.io/valentin92257/api-security-lab}/shop-api:${LAB_VERSION:-latest}
     volumes:
       - shop-vulnerable-decisions:/app/logs
     environment:
@@ -96,10 +91,8 @@ services:
     networks: [ shop-backend, shop-admin, lab-data, lab-observe, lab-ingest ]
 
   shop-protected:
-    extends:
-      file: compose.common.yaml
-      service: java-service
-    image: api-security-lab/shop-api:dev
+    <<: *java-service
+    image: ${LAB_IMAGE_PREFIX:-ghcr.io/valentin92257/api-security-lab}/shop-api:${LAB_VERSION:-latest}
     volumes:
       - shop-protected-decisions:/app/logs
     environment:
@@ -118,12 +111,8 @@ services:
     networks: [ shop-backend, shop-admin, lab-data, lab-observe, lab-ingest ]
 
   lab-detector:
-    extends:
-      file: compose.common.yaml
-      service: java-service
-    build:
-      context: .
-      dockerfile: apps/lab-detector/Dockerfile
+    <<: *java-service
+    image: ${LAB_IMAGE_PREFIX:-ghcr.io/valentin92257/api-security-lab}/lab-detector:${LAB_VERSION:-latest}
     environment:
       LAB_DETECTOR_CONTROL_TOKEN: ${LAB_DETECTOR_CONTROL_TOKEN:?Set LAB_DETECTOR_CONTROL_TOKEN in .env}
       LAB_DETECTOR_GATEWAY_TOKEN: ${LAB_DETECTOR_GATEWAY_TOKEN:?Set LAB_DETECTOR_GATEWAY_TOKEN in .env}
@@ -137,7 +126,7 @@ services:
 
 networks:
   # Only lab-control joins this network: Docker publishes ports only for containers on a non-internal network.
-  control-public: {}
+  control-public: { }
   lab-traffic:
     internal: true
   shop-backend:

@@ -5,4 +5,9 @@
 **/*.iml
 .env
 .env.*
+.github
 docs
+scripts
+compose*.yaml
+docker-bake.hcl
+README.md

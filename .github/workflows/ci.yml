@@ -3,33 +3,32 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [ main ]
+    tags: [ 'v*' ]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-and-test:
     name: build-and-test
     runs-on: ubuntu-latest
-    container: maven:3.9.11-eclipse-temurin-25
     steps:
       - uses: actions/checkout@v7
-      - name: Cache Maven repository
-        uses: actions/cache@v4
+      - uses: actions/setup-java@v6
         with:
-          path: /root/.m2/repository
-          key: maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: maven-
+          distribution: temurin
+          java-version: "25"
+          cache: maven
       - name: Build and test
         run: mvn --batch-mode --no-transfer-progress verify
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: surefire-reports
           path: |
@@ -43,30 +42,35 @@ jobs:
     needs: build-and-test
     steps:
       - uses: actions/checkout@v7
-      - name: Prepare local credentials
-        run: |
-          umask 077
-          while IFS= read -r line || [ -n "$line" ]; do
-            line=${line%$'\r'}
-            case "$line" in
-              *=replace-with-*) printf '%s=%s\n' "${line%%=*}" "$(openssl rand -hex 32)" ;;
-              *) printf '%s\n' "$line" ;;
-            esac
-          done < .env.example > .env
-          ! grep -q 'replace-with-' .env
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
       - name: Build images
-        run: docker compose build
-      - name: Start stack
-        run: docker compose up -d --wait
+        uses: docker/bake-action@v7
+        with:
+          files: docker-bake.hcl
+          load: true
+          set: |
+            *.cache-from=type=gha,scope=bake
+            *.cache-to=type=gha,mode=max,scope=bake
+        env:
+          REGISTRY: api-security-lab
+          TAGS: dev
+          SKIP_TESTS: "true"
+          REVISION: ${{ github.sha }}
+      - name: Start stack via start.sh
+        run: ./scripts/start.sh
+        env:
+          LAB_SKIP_BUILD: "1"
       - name: Health check
         run: |
           check() {
             echo "== $1:$2"
-            docker compose exec -T "$1" curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:$2/health"
+            docker compose exec -T "$1" wget -q -O - -T 5 "http://127.0.0.1:$2/health"
             echo
           }
           check lab-control 8080
           check lab-gateway 8081
+          check lab-gateway 8082
           check shop-vulnerable 8080
           check shop-protected 8080
           check lab-detector 8080
@@ -76,3 +80,12 @@ jobs:
       - name: Stop stack
         if: always()
         run: docker compose down -v
+
+  publish:
+    name: publish
+    needs: [ build-and-test, compose-smoke ]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish.yml
