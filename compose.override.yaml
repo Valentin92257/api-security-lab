@@ -1,0 +1,50 @@
+x-java-build: &java-build
+  context: .
+  target: java-app
+
+services:
+  lab-control:
+    image: api-security-lab/lab-control:dev
+    build:
+      <<: *java-build
+      args:
+        APP: lab-control
+        SKIP_TESTS: "${SKIP_TESTS:-false}"
+
+  db:
+    image: api-security-lab/lab-db:dev
+    build:
+      context: .
+      target: lab-db
+
+  lab-gateway:
+    image: api-security-lab/lab-gateway:dev
+    build:
+      <<: *java-build
+      args:
+        APP: lab-gateway
+        SKIP_TESTS: "${SKIP_TESTS:-false}"
+
+  shop-vulnerable:
+    image: api-security-lab/shop-api:dev
+    build:
+      <<: *java-build
+      args:
+        APP: shop-api
+        SKIP_TESTS: "${SKIP_TESTS:-false}"
+
+  shop-protected:
+    image: api-security-lab/shop-api:dev
+    build:
+      <<: *java-build
+      args:
+        APP: shop-api
+        SKIP_TESTS: "${SKIP_TESTS:-false}"
+
+  lab-detector:
+    image: api-security-lab/lab-detector:dev
+    build:
+      <<: *java-build
+      args:
+        APP: lab-detector
+        SKIP_TESTS: "${SKIP_TESTS:-false}"
