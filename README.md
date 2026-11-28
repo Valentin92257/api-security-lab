@@ -343,7 +343,7 @@ Control предоставляет каталог сценариев, созда
 
 ```sh
 token=$(grep '^LAB_OPERATOR_TOKEN=' .env | cut -d= -f2-)
-port=$(grep '^LAB_CONTROL_PORT=' .env | cut -d= -f2- || echo 8080)
+port=$(grep '^LAB_CONTROL_PORT=' .env | cut -d= -f2-)
 trial_key=$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)
 curl --fail-with-body -i "http://127.0.0.1:${port:-8080}/control/v1/trials" \
   -H "Authorization: Bearer $token" \

@@ -1,5 +1,5 @@
 variable "REGISTRY" {
-  default = "ghcr.io/valentin92257/api-security-lab"
+  default = "api-security-lab"
 }
 
 variable "TAGS" {

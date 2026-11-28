@@ -123,6 +123,7 @@ main() {
 
   [ -z "$explicit_version" ] || upsert_env_key .env "LAB_VERSION" "$explicit_version"
   [ -z "${LAB_IMAGE_PREFIX:-}" ] || upsert_env_key .env "LAB_IMAGE_PREFIX" "$LAB_IMAGE_PREFIX"
+  [ -z "${LAB_CONTROL_PORT:-}" ] || upsert_env_key .env "LAB_CONTROL_PORT" "$LAB_CONTROL_PORT"
 
   if grep -q 'replace-with-' .env; then
     fail "В .env остались заглушки replace-with-*." \

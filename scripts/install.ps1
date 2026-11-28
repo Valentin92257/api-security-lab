@@ -129,6 +129,7 @@ function Install-ApiSecurityLab {
 
         if ($explicitVersion) { Set-EnvKey $envPath 'LAB_VERSION' $explicitVersion }
         if ($env:LAB_IMAGE_PREFIX) { Set-EnvKey $envPath 'LAB_IMAGE_PREFIX' $env:LAB_IMAGE_PREFIX }
+        if ($env:LAB_CONTROL_PORT) { Set-EnvKey $envPath 'LAB_CONTROL_PORT' $env:LAB_CONTROL_PORT }
 
         if ([System.IO.File]::ReadAllText($envPath, $utf8NoBom) -match 'replace-with-') {
             throw 'В .env остались заглушки replace-with-*. Замени их на случайные значения или удали .env, чтобы скрипт создал его заново.'
